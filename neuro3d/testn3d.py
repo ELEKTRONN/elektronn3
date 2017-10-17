@@ -39,6 +39,7 @@ from torch import optim
 from torch.utils import data
 from tqdm import tqdm
 from time import time
+import traceback
 from socket import gethostname
 import IPython
 from IPython import embed as ie
@@ -124,18 +125,13 @@ def flush():
 
 ### MODEL
 
-def num_flat_features(x):
-    size = x.size()[1:]  # all dimensions except the batch dimension
-    num_features = 1
-    for s in size:
-        num_features *= s
-    return num_features
+n_out_channels = 2  # TODO: Maybe infer from data set?
 
 
 simplenet = torch.nn.Sequential(
     nn.Conv2d(1, 20, 5),
     nn.ReLU(),
-    nn.Conv2d(20, 2, 5),
+    nn.Conv2d(20, n_out_channels, 5),
     nn.ReLU()
 )
 
@@ -155,7 +151,7 @@ neuro2dnet = torch.nn.Sequential(
     nn.Conv2d(200, 200, 4), nn.ReLU(),
     nn.Conv2d(200, 200, 1), nn.ReLU(),
     
-    nn.Conv2d(200, 2, 1), nn.ReLU()
+    nn.Conv2d(200, n_out_channels, 1), nn.ReLU()
 )
 
 # Actual neuro3d model
@@ -174,7 +170,7 @@ neuro3dnet = torch.nn.Sequential(
     nn.Conv3d(150, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,4,4)), nn.ReLU(),
-    nn.Conv3d(200, 2, (1,1,1)), nn.ReLU()
+    nn.Conv3d(200, n_out_channels, (1,1,1)), nn.ReLU()
 )
 
 # model = simplenet
@@ -243,13 +239,37 @@ class NeuroData2D(data.Dataset):
         self.lab_file.close()
 
 
+z_thickness = 23
+class NeuroDataFake3DStack(NeuroData2D):
+    """ Fake 3D data by stacking (repeating) NeuroData2D data along a new z axis.
+
+    Just for testing/debugging. Nothing here makes any sense - please don't try to understand it.
+    """
+    def __getitem__(self, index):
+        # Get z slices
+        x = self.img[None, index, ...]  # Prepending C axis
+        y = self.lab[index, ...]
+
+        # Repeat along new z axis.
+        x = np.repeat(x[:, None, ...], z_thickness, axis=1)
+        y = np.repeat(y[None, ...], z_thickness, axis=0)
+
+          # Ahem... Just for matching lab shape to out shape
+        y = y[10:15, 3:, 3:]
+
+        tx = torch.from_numpy(x)
+        ty = torch.from_numpy(y)
+        return tx, ty
+
+
 # pool = None  # for simplenet
 pool = (1, 4, 4)  # for neuro2dnet
 # img_offset = (0, 96, 96)  # for simplenet
 img_offset = (0, 48, 48)  # for neuro2dnet
 
 
-train_set = NeuroData2D(
+# train_set = NeuroData2D(
+train_set = NeuroDataFake3DStack(
     img_path='~/neuro_data_zxy/raw_0.h5',
     lab_path='~/neuro_data_zxy/barrier_int16_0.h5',
     img_key='raw',
@@ -259,10 +279,11 @@ train_set = NeuroData2D(
 )
 
 train_loader = torch.utils.data.DataLoader(
-    train_set, batch_size=1, shuffle=True, num_workers=2, pin_memory=cuda_enabled
+    train_set, batch_size=1, shuffle=True, num_workers=1, pin_memory=cuda_enabled
 )
 
-test_set = NeuroData2D(
+# test_set = NeuroData2D(
+test_set = NeuroDataFake3DStack(
     img_path='~/neuro_data_zxy/raw_2.h5',
     lab_path='~/neuro_data_zxy/barrier_int16_2.h5',
     img_key='raw',
@@ -272,7 +293,7 @@ test_set = NeuroData2D(
 )
 
 test_loader = torch.utils.data.DataLoader(
-    test_set, batch_size=1, shuffle=True, num_workers=2, pin_memory=cuda_enabled
+    test_set, batch_size=1, shuffle=True, num_workers=1, pin_memory=cuda_enabled
 )
 
 
@@ -324,8 +345,8 @@ for epoch in range(n_epochs):
             img, lab = data
 
             ## Ignore actual data set, construct uninitialized mock tensors of expected shapes
-            img = torch.FloatTensor(*img_shape)
-            lab = torch.LongTensor(*lab_shape).zero_()  # maximum value can't be higher than 1, so just use zeros
+            # img = torch.FloatTensor(*img_shape)
+            # lab = torch.LongTensor(*lab_shape).zero_()  # maximum value can't be higher than 1, so just use zeros
             ##
 
             if cuda_enabled:
@@ -334,13 +355,25 @@ for epoch in range(n_epochs):
 
             # Train
             optimizer.zero_grad()
-            out = model(img)
+            try:
+                out = model(img)
+            except Exception:
+                traceback.print_exc()
+                print('\nEntering IPython after failed forward pass...\n')
+                ie()
 
-            b = out.size(0)
-            out_ = out.permute(1, 0, 2, 3, 4).contiguous().view(-1, 2)
+            n_channels = out.size(1)
+            # TODO: Figure out if last two spatial axes should be flipped (zxy vs zyx)
+            out_ = out.permute(1, 0, 2, 3, 4).contiguous().view(-1, n_out_channels)
             lab_ = lab.view(-1)
 
-            loss = criterion(out_, lab_)
+            try:
+                loss = criterion(out_, lab_)
+            except Exception:
+                traceback.print_exc()
+                print('\nEntering IPython after failed loss calculation...\n')
+                ie()
+
             loss.backward()
             optimizer.step()
 
@@ -363,7 +396,7 @@ for epoch in range(n_epochs):
         )
         if answer == 'y':
             IPython.embed()
-            print('Continuing training...')
+            print('Continuing training...')  # TODO: Don't break out of epoch.
         else:
             break
 
