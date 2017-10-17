@@ -254,8 +254,10 @@ class NeuroDataFake3DStack(NeuroData2D):
         x = np.repeat(x[:, None, ...], z_thickness, axis=1)
         y = np.repeat(y[None, ...], z_thickness, axis=0)
 
-          # Ahem... Just for matching lab shape to out shape
-        y = y[10:15, 3:, 3:]
+        # Ahem... Just for matching lab shape to out shape
+        x = x[:, :23, :185, :185]
+        y = y[:5, :21, :21]
+        y = y[:, 3:, 3:]
 
         tx = torch.from_numpy(x)
         ty = torch.from_numpy(y)
@@ -329,9 +331,17 @@ else:
 
 ## For Neuro3D:
 ## img: torch.FloatTensor of size 1x1x254x254
-img_shape = (1,1,23,185,185)
+# img_shape = (1,1,23,185,185)
 ## lab: torch.LongTensor of size 1x38x38
-lab_shape = (1,5,18,18)
+# lab_shape = (1,5,18,18)
+
+## Original shapes of neuro3d.py:
+## input: (1, 1, 23, 185, 185)
+## fov=[15, 105, 105], offsets=[7, 52, 52], strides=[2 4 4], spatial shape=[5, 21, 21]
+## -->
+# img_shape = (1, 1, 23, 185, 185)
+# lab_shape = (1, 5, 21, 21)
+
 
 
 for epoch in range(n_epochs):
