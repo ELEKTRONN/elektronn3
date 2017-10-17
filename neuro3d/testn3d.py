@@ -23,10 +23,6 @@
 # SOFTWARE.
 
 
-## Currently failing with:
-# RuntimeError: Assertion `THIndexTensor_(size)(target, 0) == batch_size' failed.
-# during loss computation @ `loss = criterion(out_, lab_)`
-
 import os
 import sys
 import numpy as np
