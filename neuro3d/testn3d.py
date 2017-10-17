@@ -310,10 +310,8 @@ else:
 ## img: torch.FloatTensor of size 1x1x254x254
 img_shape = (1,1,23,185,185)
 ## lab: torch.LongTensor of size 1x38x38
-lab_shape = (1,4,30,30)
+lab_shape = (1,5,18,18)
 
-## For testing:
-# img_shape = (1,1,23,40,40)
 
 for epoch in range(n_epochs):
     try:
@@ -338,8 +336,9 @@ for epoch in range(n_epochs):
             optimizer.zero_grad()
             out = model(img)
 
-            out_ = out.view(out.size(0), -1).contiguous()
-            lab_ = lab.view(-1).contiguous()
+            b = out.size(0)
+            out_ = out.permute(1, 0, 2, 3, 4).contiguous().view(-1, 2)
+            lab_ = lab.view(-1)
 
             loss = criterion(out_, lab_)
             loss.backward()
