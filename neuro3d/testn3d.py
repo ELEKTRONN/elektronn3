@@ -88,7 +88,7 @@ def slice2d(x, batch=0, channel=0):
     elif ndim == 2:
         return x
     else:
-        raise ValueError(f'Input x has to be 2D, 3D or 4D. Actual shape is {xnp.shape}.')
+        raise ValueError(f'Input x has to be 2D, 3D or 4D. Actual shape is {x.shape}.')
 
 
 def tplot(x, filename=None, batch=0, channel=0):
