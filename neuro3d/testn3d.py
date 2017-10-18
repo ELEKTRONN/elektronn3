@@ -165,7 +165,7 @@ neuro3dnet = torch.nn.Sequential(
     nn.Conv3d(100, 150, (2,4,4)), nn.ReLU(),
     nn.Conv3d(150, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,4,4)), nn.ReLU(),
-    nn.Conv3d(200, 200, (1,4,4)), nn.ReLU(),
+    nn.Conv3d(200, 200, (1,1,1)), nn.ReLU(),
     nn.Conv3d(200, n_out_channels, (1,1,1)), nn.ReLU()
 )
 
@@ -253,7 +253,6 @@ class NeuroDataFake3DStack(NeuroData2D):
         # Ahem... Just for matching lab shape to out shape
         x = x[:, :23, :185, :185]
         y = y[:5, :21, :21]
-        y = y[:, 3:, 3:]
 
         tx = torch.from_numpy(x)
         ty = torch.from_numpy(y)
