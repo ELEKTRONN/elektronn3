@@ -67,9 +67,10 @@ def ndarray(x):
         raise ValueError(f'Input x has to be of type Variable, Tensor or ndarray. Actual type is {type(x)}.')
 
 
-def slice2d(x, batch=0, channel=0):
-    """ Slice 4D or 3D tensors to 2D using batch and channel args.
+def slice2d(x, batch=0, channel=0, z=0):
+    """ Slice 5D, 4D or 3D tensors to 2D using batch and channel args.
 
+    In the 5D case, the z-th xy slice is returned (assuming zyx axis order).
     2D tensors are returned without modification. 
     """
     try:
@@ -77,14 +78,16 @@ def slice2d(x, batch=0, channel=0):
     except AttributeError:  # autograd Variables don't have a shape attribute
         ndim =  len(x.size())
     
-    if ndim == 4:
+    if ndim == 5:
+        return x[batch, channel, z]
+    elif ndim == 4:
         return x[batch, channel]
     elif ndim == 3:
         return x[channel]
     elif ndim == 2:
         return x
     else:
-        raise ValueError(f'Input x has to be 2D, 3D or 4D. Actual shape is {x.shape}.')
+        raise ValueError(f'Input x is {ndim}D, but it has to be 2D, 3D, 4D or 5D.')
 
 
 def tplot(x, filename=None, batch=0, channel=0):
@@ -306,7 +309,7 @@ preview_prediction_times = [  # (epoch, mini-batch) tuples at which preview pred
     (4000, 0),
     (7999, 0),
 ]
-preview_prediction_times = []
+# preview_prediction_times = []
 assert stat_interval <= len(train_loader)  # If stat_interval is larger, stats will never be printed.
 n_epochs = 8000
 
