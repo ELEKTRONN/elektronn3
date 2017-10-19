@@ -154,7 +154,7 @@ neuro2dnet = torch.nn.Sequential(
 )
 
 # Actual neuro3d model
-neuro3dnet = torch.nn.Sequential(
+neuro3d_seq = torch.nn.Sequential(
     nn.Conv3d(1, 20, (1,6,6)), nn.ReLU(),
     nn.MaxPool3d((1,2,2)),
     nn.Conv3d(20, 30, (1,5,5)), nn.ReLU(),
@@ -172,9 +172,26 @@ neuro3dnet = torch.nn.Sequential(
     nn.Conv3d(200, n_out_channels, (1,1,1)), nn.ReLU()
 )
 
+class Neuro3DNetFlatSoftmax(nn.Module):
+    def __init__(self):
+        super().__init()
+        self.neuro3d_seq = neuro3d_seq
+
+    def forward(self, x):
+        # Apply main convnet
+        x = self.neuro3d_seq(x)
+        # Flip N, C axes for loss compat
+        x = x.permute(1, 0, 2, 3, 4).contiguous()
+        # Flatten to 2D Tensor of dimensions (N, C)
+        x = x.view(-1, n_out_channels)
+        # Compute softmax (just for compat - replace this later by log_softmax)
+        x = F.softmax(x)
+        return x
+
 # model = simplenet
 # model = neuro2dnet
-model = neuro3dnet
+model = neuro3d_seq
+# model = Neuro3DNetFlatSoftmax()  # Needs adjustments in the training loop.
 criterion = nn.CrossEntropyLoss()
 if cuda_enabled:
     model = model.cuda()
