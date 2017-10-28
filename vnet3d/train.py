@@ -33,17 +33,30 @@ from torch import nn
 from torch.nn import functional as F
 from torch import optim
 from torch.utils import data
-from tqdm import tqdm
-from time import time
-import traceback
 from socket import gethostname
-import IPython
-from IPython import embed as ie
 import matplotlib
+from scipy.misc import imsave
 from vnet import VNet
 if gethostname().startswith('synapse'):  # No X server there, so they need the Agg backend
     matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from data.cnndata import BatchCreatorImage
+from data.utils import get_filepaths_from_dir
+from torch.nn.init import xavier_normal
+
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv3d') != -1:
+        size = m.weight.size()
+        fan_out = size[0]  # number of rows
+        fan_in = size[1]  # number of columns
+        variance = np.sqrt(2.0 / (fan_in + fan_out))
+        m.weight.data.normal_(0.0, variance)
+    elif classname.find('BatchNorm') != -1:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
+
 
 ### UTILS
 
@@ -140,137 +153,14 @@ def flush():
     sys.stderr.flush()
 
 
-### MODEL
-
-n_out_channels = 2  # TODO: Maybe infer from data set?
-
-# Actual neuro3d model
-neuro3d_seq = torch.nn.Sequential(
-    nn.Conv3d(1, 20, (1, 3, 3),), nn.ReLU(),
-    nn.MaxPool3d((1, 1, 1)),
-    nn.Conv3d(20, 30, (1, 3, 3),), nn.ReLU(),
-    nn.MaxPool3d((1, 1, 1)),
-    nn.Conv3d(30, 40, (1, 3, 3),), nn.ReLU(),
-    nn.Conv3d(40, 80, (3, 3, 3),), nn.ReLU(),
-    nn.MaxPool3d((1, 1, 1)),
-
-    nn.Conv3d(80, n_out_channels, (1, 1, 1)), nn.ReLU()
-)
-
-
-class Neuro3DNetFlatSoftmax(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.neuro3d_seq = neuro3d_seq
-
-    def forward(self, x):
-        # Apply main convnet
-        x = self.neuro3d_seq(x)
-        # Flip N, C axes for loss compat
-        x_dims = x.size()
-        x = x.permute(1, 0, 2, 3, 4).contiguous()
-        # Flatten to 2D Tensor of dimensions (N, C)
-        x = x.view(-1, n_out_channels)
-        # Compute softmax (just for compat - replace this later by log_softmax)
-        x = F.softmax(x)
-        return x.view(x_dims)
-
-
-class Simple3DNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv3d(1, 10, 3, padding=1), nn.ReLU(),
-            nn.Conv3d(10, 10, 3, padding=1), nn.ReLU(),
-            nn.Conv3d(10, n_out_channels, 1), nn.ReLU()
-        )
-
-    def forward(self, x):
-        x = self.conv(x)
-        # x = x.permute(1, 0, 2, 3, 4).contiguous()
-        # x = x.view(-1, n_out_channels)
-        # x = F.log_softmax(x)
-        return x
-
-
-# model = simplenet
-# model = neuro2dnet
-# model = neuro3d_seq
-# model = Simple3DNet()
-model = VNet(relu=False, nll=True)
-model = nn.parallel.DataParallel(model, device_ids=[0, 1])
-# model = Neuro3DNetFlatSoftmax()  # Needs adjustments in the training loop.
-# model = Neuro3DNetFlatSoftmax()
-criterion = nn.CrossEntropyLoss()
-if cuda_enabled:
-    model = model.cuda()
-    criterion = criterion.cuda()
-
-
-### DATA SET
-z_thickness = 16
-class NeuroData3D(data.Dataset):
-    """ 2D Dataset class for neuro_data_zxy, reading from HDF5 files.
-
-    Delivers 2D image slices from the xy plane.
-    Not scalable, keeps everything in memory.
-
-    See https://elektronn2.readthedocs.io/en/latest/examples.html#data-set
-    Download link: http://elektronn.org/downloads/neuro_data_zxy.zip
-
-    TODO: Images and labels don't seem to overlay correctly (MAJOR PROBLEM).
-    TODO: Support multiple hdf5 files as one dataset.
-    TODO: (nop): Make a 3D version.
-    TODO: (nop) Create new files with the right data types so data can be read
-          directly from the file while iterating over it.
-    """
-
-    def __init__(self, img_path, lab_path, img_key, lab_key, vol_size=None, pool=(1, 1, 1)):
-        super().__init__()
-        self.img_file = h5py.File(os.path.expanduser(img_path), 'r')
-        self.lab_file = h5py.File(os.path.expanduser(lab_path), 'r')
-        self.img = self.img_file[img_key].value.astype(np.float32) / 255
-        self.lab = self.lab_file[lab_key].value.astype(np.int64)
-        self.vol_size = np.array(vol_size, dtype=np.int)
-        self.lab = self.lab[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (Filty, dirty hack TODO)
-
-        # Cut img and lab to same size
-        img_sh = np.array(self.img.shape, dtype=np.int)
-        lab_sh = np.array(self.lab.shape, dtype=np.int)
-        diff = img_sh - lab_sh
-        offset = diff // 2  # offset from image boundaries
-        self.img = self.img[offset[0]: img_sh[0] - offset[0], offset[1]: img_sh[1] - offset[1], offset[2]: img_sh[2] - offset[2],]
-
-        self.close()  # Using file contents from memory -> no need to keep the file open.
-
-    def __getitem__(self, index):
-        # use index just as counter, subvolumes will be chosen randomly
-        sh = np.array(self.img.shape, dtype=np.int)
-        z_ix = np.random.randint(0, sh[0] - self.vol_size[0], 1)[0]
-        x_ix = np.random.randint(0, sh[1] - self.vol_size[1], 1)[0]
-        y_ix = np.random.randint(0, sh[2] - self.vol_size[2], 1)[0]
-
-        x = torch.from_numpy(self.img[None, z_ix:z_ix+self.vol_size[0], x_ix:x_ix+self.vol_size[1], y_ix:y_ix+self.vol_size[2]])  # Prepending C axis
-        y = torch.from_numpy(self.lab[z_ix:z_ix+self.vol_size[0], x_ix:x_ix+self.vol_size[1], y_ix:y_ix+self.vol_size[2]])
-        return x, y
-
-    def __len__(self):
-        return np.prod(np.ceil(np.array(self.lab.shape) / self.vol_size).astype(np.int))
-
-    def close(self):
-        self.img_file.close()
-        self.lab_file.close()
-
-
 def cast_arr_to_shape(arr_a, arr_b):
     sh_a = np.array(arr_a.size())[-3:] # only use last/spatial axes only, e.g. b, ch, [z, x, y]
     sh_b = np.array(arr_b.size())[-3:]
     off = (sh_a - sh_b) // 2
     return arr_a[..., off[0]:-off[0] or None, off[1]:-off[1] or None, off[2]:-off[2] or None].contiguous()
 
-from scipy.misc import imsave
 
-def train_nll(epoch, model, trainLoader, optimizer):
+def train_nll(epoch, model, trainLoader, optimizer, weights=None):
     model.train()
     nProcessed = 0
     nTrain = len(trainLoader.dataset)
@@ -282,7 +172,7 @@ def train_nll(epoch, model, trainLoader, optimizer):
         output = model(data)
         # target = cast_arr_to_shape(target, output)
         target = target.view(target.numel())
-        loss = F.nll_loss(output, target)
+        loss = F.nll_loss(output, target, weight=weights)
         # make_graph.save('/tmp/t.dot', loss.creator); assert(False)
         loss.backward()
         optimizer.step()
@@ -318,47 +208,85 @@ def test_nll(epoch, model, testLoader, optimizer):
     err = 100.*incorrect/numel
     print('\nTest set: Average loss: {:.4f}, Error: {}/{} ({:.3f}%) Dice: {:.6f}\n'.format(
         test_loss, incorrect, numel, err, dice_loss))
-    imsave("~/raw%d.png" % (epoch), np.array(data.data.view(data.size()).tolist())[0, 0, 8])
-    imsave("~/pred%d.png" % (epoch), np.array(pred.view(data.size()).tolist())[0, 0, 8])
+    # print("std:", data.std(), np.array(pred.tolist()).std(), np.array(target.data.tolist()).std())
+    imsave("/u/pschuber/vnet/raw%d.png" % (epoch), np.array(data.data.view(data.size()).tolist())[0, 0, 8])
+    imsave("/u/pschuber/vnet/pred%d.png" % (epoch), np.array(pred.view(data.size()).tolist())[0, 0, 8])
+    imsave("/u/pschuber/vnet/target%d.png" % (epoch), np.array(target.data.view(data.size()).tolist())[0, 0, 8])
     return err
 
-# train_set = NeuroData2D(
-train_set = NeuroData3D(
-    img_path='~/neuro_data_zxy/raw_0.h5',
-    lab_path='~/neuro_data_zxy/barrier_int16_0.h5',
-    img_key='raw',
-    lab_key='lab',
-    vol_size=(16, 128, 128)
-)
-train_loader = torch.utils.data.DataLoader(
-    train_set, batch_size=1, shuffle=True, num_workers=1, pin_memory=cuda_enabled
-)
 
-# test_set = NeuroData2D(
-test_set = NeuroData3D(
-    img_path='~/neuro_data_zxy/raw_2.h5',
-    lab_path='~/neuro_data_zxy/barrier_int16_2.h5',
-    img_key='raw',
-    lab_key='lab',
-    vol_size=(16, 128, 128)
-)
+### MODEL
+torch.manual_seed(0)
+if cuda_enabled:
+    torch.cuda.manual_seed(0)
+model = VNet(relu=False, nll=True)
+model = nn.parallel.DataParallel(model, device_ids=[0, 1])
+if cuda_enabled:
+    model = model.cuda()
+model.apply(weights_init)
+
+
+### DATA
+wd = '/wholebrain/scratch/j0126/'
+h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % wd, ending="rawbarr-zyx.h5")
+data_init_kwargs = {
+    'zxy': True,
+    'd_path' : '%s/barrier_gt_phil/' % wd,
+    'l_path': '%s/barrier_gt_phil/' % wd,
+    'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
+    'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
+    'aniso_factor': 2, "source": "train",
+    'valid_cubes': [2], 'patch_size': (16, 128, 128),
+    'grey_augment_channels': [0], "epoch_size": 40,
+    'warp': 0.5,
+    'warp_args': {
+        'sample_aniso': True,
+        'perspective': True
+    }}
+train_set = BatchCreatorImage(**data_init_kwargs)
+train_loader = torch.utils.data.DataLoader(
+    train_set, batch_size=2, shuffle=True, num_workers=1, pin_memory=cuda_enabled)
+_ = train_set.getbatch()
+test_set = train_set
+test_set.source = "valid"
+test_set.epoch_size = 10
 
 test_loader = torch.utils.data.DataLoader(
     test_set, batch_size=1, shuffle=True, num_workers=1, pin_memory=cuda_enabled
 )
 
 ### TRAINING
-nEpochs = int(1e5)
+nEpochs = int(100)
 best_prec1 = 100.
-optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-
+wd = 0.5e-4
+lr = 0.0003
+opt = "adam"
+lr_dec = 0.98
+# target_mean = train_set.target_mean
+# bg_weight = target_mean / (1. + target_mean)
+# fg_weight = 1. - bg_weight
+# print("\n", bg_weight)
+# class_weights = torch.FloatTensor([bg_weight, fg_weight])
+# if cuda_enabled:
+#     class_weights = class_weights.cuda()
+class_weights = None
+if opt == 'sgd':
+    optimizer = optim.SGD(model.parameters(), lr=lr,
+                          momentum=0.9, weight_decay=wd)
+elif opt == 'adam':
+    optimizer = optim.Adam(model.parameters(), weight_decay=wd, lr=lr)
+elif opt == 'rmsprop':
+    optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
+print("Start with training")
 for epoch in range(1, nEpochs + 1):
-    print(epoch)
-    train_nll(epoch, model, train_loader, optimizer)
+    train_nll(epoch, model, train_loader, optimizer, weights=class_weights)
     err = test_nll(epoch, model, test_loader, optimizer)
     is_best = False
     if err < best_prec1:
         is_best = True
         best_prec1 = err
+    lr *= lr_dec
+    print("Learning rate:", lr)
+    optimizer = optim.Adam(model.parameters(), weight_decay=wd, lr=lr)
 
 inference(test_loader, model)
