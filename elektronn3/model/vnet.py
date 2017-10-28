@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 
 def passthrough(x, **kwargs):
     return x
+
 
 def ELUCons(relu, nchan):
     if relu:
@@ -52,13 +52,11 @@ class InputTransition(nn.Module):
     def __init__(self, outChans, relu):
         super(InputTransition, self).__init__()
         self.conv1 = nn.Conv3d(1, outChans, kernel_size=5, padding=2)
-        self.bn1 = passthrough #ContBatchNorm3d(outChans)
+        self.bn1 = ContBatchNorm3d(outChans)
         self.relu1 = ELUCons(relu, outChans)
 
     def forward(self, x):
-        # do we want a PRELU here as well?
         out = self.bn1(self.conv1(x))
-        # split input in to 16 channels
         out = self.relu1(out)
         return out
 

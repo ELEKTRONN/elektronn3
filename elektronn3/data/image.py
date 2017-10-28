@@ -4,19 +4,11 @@
 # All rights reserved
 from __future__ import absolute_import, division, print_function
 from builtins import filter, hex, input, int, map, next, oct, pow, range, super, zip
-
-
 __all__ = ['downsample_xy', 'ids2barriers', 'smearbarriers',
            'center_cubes', ]
-
-
-import multiprocessing
 from functools import reduce
-
 import numba
-from scipy import ndimage
 import scipy.ndimage.filters as filters
-from skimage.morphology import watershed
 import numpy as np
 from . import utils
 

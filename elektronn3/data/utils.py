@@ -3,6 +3,9 @@ import os
 import time
 from functools import reduce, wraps
 import numpy as np
+import sys
+import pickle as pkl
+import gzip
 
 
 def get_filepaths_from_dir(directory, ending='k.zip', recursively=False):
@@ -111,8 +114,66 @@ def h5load(file_name, keys=None):
         return ret
 
 
-### Decorator Collection ###
+def picklesave(data, file_name):
+    """
+    Writes one or many objects to pickle file
 
+    data:
+      single objects to save or iterable of objects to save.
+      For iterable, all objects are written in this order to the file.
+    file_name: string
+      path/name of destination file
+    """
+    file_name = os.path.expanduser(file_name)
+    with open(file_name, 'wb') as f:
+        pkl.dump(data, f, protocol=2)
+
+
+def pickleload(file_name):
+    """
+    Loads all object that are saved in the pickle file.
+    Multiple objects are returned as list.
+    """
+    file_name = os.path.expanduser(file_name)
+    ret = []
+    try:
+        with open(file_name, 'rb') as f:
+            try:
+                while True:
+                    # Python 3 needs explicit encoding specification,
+                    # which Python 2 lacks:
+                    if sys.version_info.major >= 3:
+                        ret.append(pkl.load(f, encoding='latin1'))
+                    else:
+                        ret.append(pkl.load(f))
+            except EOFError:
+                pass
+
+        if len(ret) == 1:
+            return ret[0]
+        else:
+            return ret
+
+    except pkl.UnpicklingError:
+        with gzip.open(file_name, 'rb') as f:
+            try:
+                while True:
+                    # Python 3 needs explicit encoding specification,
+                    # which Python 2 lacks:
+                    if sys.version_info.major >= 3:
+                        ret.append(pkl.load(f, encoding='latin1'))
+                    else:
+                        ret.append(pkl.load(f))
+            except EOFError:
+                pass
+
+        if len(ret) == 1:
+            return ret[0]
+        else:
+            return ret
+
+
+### Decorator Collection ###
 class DecoratorBase(object):
     """
     If used as

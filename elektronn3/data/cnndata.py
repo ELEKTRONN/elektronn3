@@ -12,6 +12,7 @@ from . import transformations
 from . import utils
 import torch
 from torch.utils import data
+from .. import cuda_enabled
 
 
 ###############################################################################
@@ -22,9 +23,8 @@ class BatchCreatorImage(data.Dataset):
                  target_discrete_ix=None, h5stream=False, zxy=True,
                  source='train', patch_size=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
-                 ignore_thresh=False, force_dense=False,
+                 ignore_thresh=False, force_dense=False, class_weights=False,
                  epoch_size=100):
-
         assert (d_path and l_path and d_files and l_files)
         if len(d_files)!=len(l_files):
             raise ValueError("d_files and l_files must be lists of same length!")
@@ -52,6 +52,7 @@ class BatchCreatorImage(data.Dataset):
         self.target_vec_ix = target_vec_ix
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
+        self._epoch_size = epoch_size
 
         # Infer geometric info from input/target shapes
         # HACK
@@ -90,7 +91,15 @@ class BatchCreatorImage(data.Dataset):
         self.n_failed_warp = 0
 
         self.load_data()
-        self.target_mean = np.mean(self.train_l)
+        if class_weights:
+            target_mean = np.mean(self.train_l)
+            bg_weight = target_mean / (1. + target_mean)
+            fg_weight = 1. - bg_weight
+            self.class_weights = torch.FloatTensor([bg_weight, fg_weight])
+            if cuda_enabled:
+                self.class_weights = self.class_weights.cuda()
+        else:
+            self.class_weights = None
 
     def __getitem__(self, index):
         # use index just as counter, subvolumes will be chosen randomly
@@ -117,6 +126,14 @@ class BatchCreatorImage(data.Dataset):
         s = s.format(self.t_n_f, self.n_f, self._training_count,
                      self._valid_count, self.n_labelled_pixel)
         return s
+
+    def validate(self):
+        self.source = "valid"
+        self.epoch_size = 10
+
+    def train(self):
+        self.source = "train"
+        self.epoch_size = self._epoch_size
 
     @property
     def warp_stats(self):
@@ -218,7 +235,7 @@ class BatchCreatorImage(data.Dataset):
 
         ret = [images, target]  # The "normal" batch
         self.gc_count += 1
-        if self.gc_count%1000==0:
+        if self.gc_count % 1000 == 0:
             gc.collect()
         return tuple(ret)
 
