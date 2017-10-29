@@ -39,6 +39,53 @@ def get_filepaths_from_dir(directory, ending='k.zip', recursively=False):
     return files
 
 
+def save_to_h5py(data, path, hdf5_names=None, overwrite=False, compression=True):
+    """
+    Saves data to h5py File.
+
+    Parameters
+    ----------
+    data: list or dict of np.arrays
+        if list, hdf5_names has to be set.
+    path: str
+        forward-slash separated path to file
+    hdf5_names: list of str
+        has to be the same length as data
+    overwrite : bool
+        determines whether existing files are overwritten
+    compression : bool
+        True: compression='gzip' is used which is recommended for sparse and
+        ordered data
+
+    Returns
+    -------
+    nothing
+
+    """
+    if (not type(data) is dict) and hdf5_names is None:
+        raise Exception("hdf5names has to be set, when data is a list")
+    if os.path.isfile(path) and overwrite:
+        os.remove(path)
+    f = h5py.File(path, "w")
+    if type(data) is dict:
+        for key in data.keys():
+            if compression:
+                f.create_dataset(key, data=data[key], compression="gzip")
+            else:
+                f.create_dataset(key, data=data[key])
+    else:
+        if len(hdf5_names) != len(data):
+            f.close()
+            raise Exception("Not enough or to much hdf5-names given!")
+        for nb_data in range(len(data)):
+            if compression:
+                f.create_dataset(hdf5_names[nb_data], data=data[nb_data],
+                                 compression="gzip")
+            else:
+                f.create_dataset(hdf5_names[nb_data], data=data[nb_data])
+    f.close()
+
+
 def h5save(data, file_name, keys=None, compress=True):
     """
     Writes one or many arrays to h5 file

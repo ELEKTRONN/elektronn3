@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from .base import BaseModule
 
 
 def passthrough(x, **kwargs):
@@ -123,7 +124,7 @@ class OutputTransition(nn.Module):
         return x
 
 
-class VNet(nn.Module):
+class VNet(BaseModule):
     # the number of convolutions in each layer corresponds
     # to what is in the actual prototxt, not the intent
     def __init__(self, relu=True, nll=True, fac=4):

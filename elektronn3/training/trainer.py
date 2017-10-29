@@ -6,6 +6,7 @@ from scipy.misc import imsave
 from torch.autograd import Variable
 from torch.utils.trainer import Trainer
 # from torch.utils.data import DataLoader
+import torch
 from torch.optim.lr_scheduler import ExponentialLR
 import logging
 from elektronn3.training.train_utils import Timer, pretty_string_time
@@ -61,6 +62,7 @@ class StoppableTrainer(object):
                 ret = user_input(var_push)
                 if ret == 'kill':
                     break
+        torch.save(self.model.state_dict(), "%s/%s_final.pkl" % (self.save_path, self.save_name))
 
     def step(self):
         tr_loss, tr_err, mean_target, tr_speed = self.train()
@@ -80,12 +82,13 @@ class StoppableTrainer(object):
         out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
         logger.info(out)
         self.tracker.plot(self.save_path + "/" + self.save_name)
+        torch.save(self.model.state_dict(), "%s/%s_iter%d.pkl" % (self.save_path, self.save_name, self.iterations))
 
     def train(self):
         self.model.train()
         self.dataset.train()
         data_loader = DelayedDataLoader(self.dataset, batch_size=self.batchsize, shuffle=True,
-                                        num_workers=4, pin_memory=cuda_enabled)
+                                        num_workers=6, pin_memory=cuda_enabled)
         tr_loss = 0
         incorrect = 0
         numel = 0
@@ -122,8 +125,8 @@ class StoppableTrainer(object):
     def validate(self):
         self.model.eval()
         self.dataset.validate()
-        data_loader = DelayedDataLoader(self.dataset, 1, shuffle=True,
-                                 num_workers=4, pin_memory=cuda_enabled)
+        data_loader = DelayedDataLoader(self.dataset, self.batchsize, shuffle=True,
+                                 num_workers=6, pin_memory=cuda_enabled)
         val_loss = 0
         incorrect = 0
         numel = 0

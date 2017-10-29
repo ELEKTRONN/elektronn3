@@ -168,9 +168,9 @@ class ExampleNet(nn.Module):
         return x
 
 
-# model = simplenet
+# neural = simplenet
 model = neuro2dnet
-# model = ExampleNet()
+# neural = ExampleNet()
 criterion = nn.CrossEntropyLoss()
 if cuda_enabled:
     model = model.cuda()

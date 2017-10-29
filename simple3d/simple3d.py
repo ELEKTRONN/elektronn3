@@ -126,7 +126,7 @@ def flush():
 
 n_out_channels = 2  # TODO: Maybe infer from data set?
 
-# Actual neuro3d model
+# Actual neuro3d neural
 neuro3d_seq = torch.nn.Sequential(
     nn.Conv3d(1, 20, (1,6,6)), nn.ReLU(),
     nn.MaxPool3d((1,2,2)),
@@ -178,11 +178,11 @@ class Simple3DNet(nn.Module):
         # x = F.log_softmax(x)
         return x
 
-# model = simplenet
-# model = neuro2dnet
-# model = neuro3d_seq
+# neural = simplenet
+# neural = neuro2dnet
+# neural = neuro3d_seq
 model = Simple3DNet()
-# model = Neuro3DNetFlatSoftmax()  # Needs adjustments in the training loop.
+# neural = Neuro3DNetFlatSoftmax()  # Needs adjustments in the training loop.
 criterion = nn.CrossEntropyLoss()
 if cuda_enabled:
     model = model.cuda()

@@ -697,8 +697,8 @@ def plot_trainingtarget(img, lab, stride=1):
 
 def plot_exectimes(exectimes, save_path='~/exectimes.png', max_items=32):
     """
-    Plot model execution time dict obtained from
-    elektronn2.neuromancer.model.Model.measure_exectimes()
+    Plot neural execution time dict obtained from
+    elektronn2.neuromancer.neural.Model.measure_exectimes()
 
     :param exectimes: OrderedDict of execution times
                       (output of Model.measure_exectimes())

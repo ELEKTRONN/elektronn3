@@ -46,7 +46,7 @@ def user_input(local_vars):
 
     _ipython_banner = """    You are now in the embedded IPython shell.
     You still have full access to the local scope of the ELEKTRONN2 shell
-    (e.g. 'model', ), but shortcuts like 'q' no longer work.
+    (e.g. 'neural', ), but shortcuts like 'q' no longer work.
 
     To leave the IPython shell and switch back to the ELEKTRONN2 shell, run
     'exit()' or hit 'Ctrl-D'."""
