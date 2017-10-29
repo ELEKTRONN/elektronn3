@@ -500,7 +500,15 @@ def pretty_string_time(t):
 
 class DelayedDataLoaderIter(DataLoaderIter):
     def __init__(self, loader):
-        super(DelayedDataLoaderIter, self).__init__(loader)
+        try:
+            with DelayedInterrupt([signal.SIGTERM, signal.SIGINT]):
+                super(DelayedDataLoaderIter, self).__init__(loader)
+        except KeyboardInterrupt:
+            self.shutdown = True
+            self._shutdown_workers()
+            for w in self.workers:
+                w.terminate()
+            raise KeyboardInterrupt
 
     def __next__(self):
         try:
@@ -508,7 +516,10 @@ class DelayedDataLoaderIter(DataLoaderIter):
                 nxt = super(DelayedDataLoaderIter, self).__next__()
             return nxt
         except KeyboardInterrupt:
+            self.shutdown = True
             self._shutdown_workers()
+            for w in self.workers:
+                w.terminate()
             raise KeyboardInterrupt
 
 

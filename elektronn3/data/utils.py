@@ -352,7 +352,7 @@ class DelayedInterrupt(object):
             def handler(s, frame):
                 self.signal_received[sig] = (s, frame)
                 # Note: in Python 3.5, you can use signal.Signals(sig).name
-                logger.warning('Signal %s received. Delaying KeyboardInterrupt.' % sig)
+                # logger.warning('Signal %s received. Delaying KeyboardInterrupt.' % sig)
             self.old_handlers[sig] = signal.getsignal(sig)
             signal.signal(sig, handler)
 
