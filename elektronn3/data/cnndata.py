@@ -11,8 +11,10 @@ import tqdm
 from . import transformations
 from . import utils
 import torch
+import signal
 from torch.utils import data
-from .. import cuda_enabled
+from .. import cuda_enabled, floatX
+from .utils import DelayedInterrupt
 
 
 ###############################################################################
@@ -419,7 +421,7 @@ class BatchCreatorImage(data.Dataset):
                 t = h5py.File(os.path.join(self.l_path, l_f), 'r')[l_key]
                 assert d.compression == t.compression == None
                 assert len(d.shape) == len(t.shape) == 4
-                assert d.dtype == np.float32
+                assert d.dtype == floatX
                 assert t.dtype == self.t_dtype
 
             else:
@@ -459,7 +461,7 @@ class BatchCreatorImage(data.Dataset):
             # determine normalisation depending on int or float type
             if d.dtype.kind in ('u', 'i'):
                 m = 255.
-                d = np.ascontiguousarray(d, dtype=np.float32) / m
+                d = np.ascontiguousarray(d, dtype=floatX) / m
 
             if (np.dtype(self.t_dtype) is not np.dtype(t.dtype)) and \
                 self.t_dtype not in ['float32']:
@@ -472,14 +474,16 @@ class BatchCreatorImage(data.Dataset):
                                      "to renumber targets." %(self.t_dtype,
                                                              self.t_dtype, m, M))
             if not self.h5stream:
-                d = np.ascontiguousarray(d, dtype=np.float32)
+                d = np.ascontiguousarray(d, dtype=floatX)
                 t = np.ascontiguousarray(t, dtype=self.t_dtype)
 
-            pbar.write('Shapes: data %s, targets %s' % (d.shape, t.shape))
+            pbar.write('Shapes (means): data %s (%0.3f), targets %s (%0.3f)' %
+                       (d.shape,  d.mean(), t.shape, t.mean()))
 
             data.append(d)
             target.append(t)
             gc.collect()
             pbar.update()
+        print()
 
         return data, target, extras

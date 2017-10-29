@@ -1,28 +1,4 @@
 #!/usr/bin/env python3
-
-# Requires at least Python 3.6.
-
-# Copyright (c) 2017 Martin Drawitsch
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
 import os
 import numpy as np
 import torch
@@ -36,6 +12,7 @@ from elektronn3.data.utils import get_filepaths_from_dir
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.model.vnet import VNet
 from elektronn3 import cuda_enabled
+from torch.optim.lr_scheduler import ExponentialLR
 
 
 ### UTILS
@@ -84,7 +61,7 @@ model.apply(weights_init)
 
 ### DATA
 wd = '/wholebrain/scratch/j0126/'
-h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % wd, ending="rawbarr-zyx.h5")
+h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % wd, ending="rawbarr-zyx.h5")[:8]
 data_init_kwargs = {
     'zxy': True,
     'd_path' : '%s/barrier_gt_phil/' % wd,
@@ -92,15 +69,14 @@ data_init_kwargs = {
     'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
     'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
     'aniso_factor': 2, "source": "train",
-    'valid_cubes': [0, 5], 'patch_size': (16, 128, 128),
-    'grey_augment_channels': [0], "epoch_size": 100,
+    'valid_cubes': [6], 'patch_size': (16, 128, 128),
+    'grey_augment_channels': [0], "epoch_size": 20,
     'warp': 0.5, 'class_weights': True,
     'warp_args': {
         'sample_aniso': True,
         'perspective': True
     }}
 train_set = BatchCreatorImage(**data_init_kwargs)
-
 ### TRAINING
 nEpochs = int(250)
 best_prec1 = 100.
@@ -116,9 +92,12 @@ elif opt == 'adam':
 elif opt == 'rmsprop':
     optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
 
+lr_sched = ExponentialLR(optimizer, lr_dec)
+
 # start training
-st = StoppableTrainer(model, criterion=F.nll_loss, optimizer=optimizer, dataset=train_set, dest_path=None)
+st = StoppableTrainer(model, criterion=F.nll_loss, optimizer=optimizer, dataset=train_set,
+                      save_path="/u/pschuber/vnet3/", schedulers={"lr": lr_sched})
 st.run(nEpochs)
 
 # start ifnerence
-inference(train_set, model)
+# inference(train_set, model)

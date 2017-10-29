@@ -6,6 +6,10 @@ import numpy as np
 import sys
 import pickle as pkl
 import gzip
+import signal
+import logging
+from .. import floatX
+logger = logging.getLogger("elektronn3log")
 
 
 def get_filepaths_from_dir(directory, ending='k.zip', recursively=False):
@@ -323,3 +327,50 @@ class cache(DecoratorBase):
 
         else:
             raise ValueError()
+
+
+def as_floatX(x):
+    if not hasattr(x, '__len__'):
+        return np.array(x, dtype=floatX)
+    return np.ascontiguousarray(x, dtype=floatX)
+
+
+# https://gist.github.com/tcwalther/ae058c64d5d9078a9f333913718bba95
+# class based on: http://stackoverflow.com/a/21919644/487556
+class DelayedInterrupt(object):
+    def __init__(self, signals):
+        if not isinstance(signals, list) and not isinstance(signals, tuple):
+            signals = [signals]
+        self.sigs = signals
+
+    def __enter__(self):
+        self.signal_received = {}
+        self.old_handlers = {}
+        for sig in self.sigs:
+            self.signal_received[sig] = False
+            self.old_handlers[sig] = signal.getsignal(sig)
+            def handler(s, frame):
+                self.signal_received[sig] = (s, frame)
+                # Note: in Python 3.5, you can use signal.Signals(sig).name
+                logger.warning('Signal %s received. Delaying KeyboardInterrupt.' % sig)
+            self.old_handlers[sig] = signal.getsignal(sig)
+            signal.signal(sig, handler)
+
+    def __exit__(self, type, value, traceback):
+        for sig in self.sigs:
+            signal.signal(sig, self.old_handlers[sig])
+            if self.signal_received[sig] and self.old_handlers[sig]:
+                self.old_handlers[sig](*self.signal_received[sig])
+
+
+class GracefulInterrupt:
+    # by https://stackoverflow.com/questions/18499497/how-to-process-sigterm-signal-gracefully
+    now = False
+
+    def __init__(self):
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+    def exit_gracefully(self, sig, frame):
+        logger.warning('Signal %s received. Delaying KeyboardInterrupt.' % sig)
+        self.now = True

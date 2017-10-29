@@ -11,6 +11,7 @@ from functools import reduce
 import numpy as np
 import numba
 from . import utils
+from .. import floatX
 
 
 def greyAugment(d, channels, rng):
@@ -117,7 +118,7 @@ def map_coordinates_linear(src, coords, lo, dest):
 
 @numba.jit(nopython=True, cache=True)
 def map_coordinates_max_kernel(src, coords, lo, k, dest):
-    k = np.float32(k)
+    k = (k)
     kz = min(0.5, k/2)
     sh = coords.shape
     sh_src = src.shape
@@ -141,7 +142,7 @@ def map_coordinates_max_kernel(src, coords, lo, k, dest):
 
 
 def identity():
-    return np.eye(4, dtype=np.float32)
+    return np.eye(4, dtype=floatX)
 
 
 def translate(dz, dy, dx):
@@ -150,7 +151,7 @@ def translate(dz, dy, dx):
         [0.0, 1.0, 0.0,  dy],
         [0.0, 0.0, 1.0,  dx],
         [0.0, 0.0, 0.0, 1.0]
-    ], dtype=np.float32)
+    ], dtype=floatX)
 
 
 def rotate_z(a):
@@ -159,7 +160,7 @@ def rotate_z(a):
         [0.0, np.cos(a), -np.sin(a), 0.0],
         [0.0, np.sin(a), np.cos(a),  0.0],
         [0.0, 0.0,    0.0,     1.0]
-    ], dtype=np.float32)
+    ], dtype=floatX)
 
 
 def rotate_y(a):
@@ -168,7 +169,7 @@ def rotate_y(a):
         [np.sin(a),  np.cos(a), 0.0, 0.0],
         [0.0,        0.0, 1.0, 0.0],
         [0.0,        0.0, 0.0, 1.0]
-    ], dtype=np.float32)
+    ], dtype=floatX)
 
 
 def rotate_x(a):
@@ -177,7 +178,7 @@ def rotate_x(a):
         [0.0,     1.0, 0.0,    0.0],
         [-np.sin(a), 0.0, np.cos(a), 0.0],
         [0.0,     0.0, 0.0,    1.0]
-    ], dtype=np.float32)
+    ], dtype=floatX)
 
 
 def scale_inv(mz, my, mx):
@@ -186,7 +187,7 @@ def scale_inv(mz, my, mx):
         [0.0,   1/my,   0.0,  0.0],
         [0.0,   0.0,    1/mx, 0.0],
         [0.0,   0.0,    0.0,  1.0]
-    ], dtype=np.float32)
+    ], dtype=floatX)
 
 
 def scale(mz, my, mx):
@@ -195,7 +196,7 @@ def scale(mz, my, mx):
         [0.0, my,  0.0, 0.0],
         [0.0, 0.0, mx,  0.0],
         [0.0, 0.0, 0.0, 1.0]
-    ], dtype=np.float32)
+    ], dtype=floatX)
 
 
 def chain_matrices(mat_list):
@@ -251,7 +252,7 @@ def get_random_rotmat(lock_z=False, amount=1.0, rng=None):
 
 def get_random_flipmat(no_x_flip=False, rng=None):
     rng = np.random.RandomState() if rng is None else rng
-    F = np.eye(4, dtype=np.float32)
+    F = np.eye(4, dtype=floatX)
     flips = rng.binomial(1, 0.5, 4) * 2 - 1
     flips[3] = 1 # don't flip homogeneous dimension
     if no_x_flip:
@@ -263,7 +264,7 @@ def get_random_flipmat(no_x_flip=False, rng=None):
 
 def get_random_swapmat(lock_z=False, rng=None):
     rng = np.random.RandomState() if rng is None else rng
-    S = np.eye(4, dtype=np.float32)
+    S = np.eye(4, dtype=floatX)
     if lock_z:
         swaps = [[0, 1, 2, 3],
                  [0, 2, 1, 3]]
@@ -281,7 +282,7 @@ def get_random_swapmat(lock_z=False, rng=None):
 
 
 def get_random_warpmat(lock_z=False, perspective=False, amount=1.0, rng=None):
-    W = np.eye(4, dtype=np.float32)
+    W = np.eye(4, dtype=floatX)
     amount *= 0.1
     perturb = np.random.uniform(-amount, amount, (4, 4))
     perturb[3,3] = 0
@@ -306,7 +307,7 @@ def make_dest_coords(sh):
     hh = np.ones(sh, dtype=np.int)
     coords = np.concatenate([zz[...,None], xx[...,None],
                              yy[...,None], hh[...,None]], axis=-1)
-    return coords.astype(np.float32)
+    return coords.astype(floatX)
 
 
 def make_dest_corners(sh):
@@ -328,7 +329,7 @@ class WarpingOOBError(ValueError):
 class Transform(object):
     def __init__(self, M, position_l=None, aniso_factor=2):
         self.M = M
-        self.M_inv = np.linalg.inv(M.astype(np.float64)).astype(np.float32) # stability...
+        self.M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
         self.position_l = position_l
         self.aniso_factor = aniso_factor
         self.is_projective = not np.allclose(M[3,:3], 0.0)
@@ -450,7 +451,7 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
     else:
         raise ValueError('img wrong dim/shape')
 
-    M_inv = np.linalg.inv(M.astype(np.float64)).astype(np.float32) # stability...
+    M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
     dest_corners = make_dest_corners(ps)
     src_corners = np.dot(M_inv, dest_corners.T).T
     if np.any(M[3,:3] != 0): # homogeneous divide
@@ -472,9 +473,9 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
     img_cut = img[:, lo[0]:hi[0]+1, #add 1 to include this coordinate!
                      lo[1]:hi[1]+1,
                      lo[2]:hi[2]+1,]
-    img_cut = np.ascontiguousarray(img_cut, dtype=np.float32)
-    img_new = np.zeros((n_f,)+ps, dtype=np.float32)
-    lo = lo.astype(np.float32)
+    img_cut = np.ascontiguousarray(img_cut, dtype=floatX)
+    img_new = np.zeros((n_f,)+ps, dtype=floatX)
+    lo = lo.astype(floatX)
     for k in range(n_f):
         if (ksize>0.5) and last_ch_max_interp and (k==n_f-1):
             map_coordinates_max_kernel(img_cut[k], src_coords, lo, ksize, img_new[k])
@@ -507,10 +508,10 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
                                lo_targ[1]:hi_targ[1]+1,
                                lo_targ[2]:hi_targ[2]+1]
 
-        target_cut = np.ascontiguousarray(target_cut, dtype=np.float32)
-        src_coords_target = np.ascontiguousarray(src_coords_target, dtype=np.float32)
-        target_new = np.zeros((n_f_t,)+target_ps, dtype=np.float32)
-        lo_targ = (lo_targ + off).astype(np.float32)
+        target_cut = np.ascontiguousarray(target_cut, dtype=floatX)
+        src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
+        target_new = np.zeros((n_f_t,)+target_ps, dtype=floatX)
+        lo_targ = (lo_targ + off).astype(floatX)
         if target_discrete_ix is None:
             target_discrete_ix = [True for i in range(n_f_t)]
         else:
@@ -646,13 +647,13 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
     x = rng.randint(lo_pos[2], hi_pos[2]) + src_remainder[2]
     F = get_random_flipmat(no_x_flip, rng)
     if no_x_flip:
-        S = np.eye(4, dtype=np.float32)
+        S = np.eye(4, dtype=floatX)
     else:
         S = get_random_swapmat(lock_z, rng)
 
     if np.isclose(warp_amount, 0):
-        R = np.eye(4, dtype=np.float32)
-        W = np.eye(4, dtype=np.float32)
+        R = np.eye(4, dtype=floatX)
+        W = np.eye(4, dtype=floatX)
     else:
         R = get_random_rotmat(lock_z, warp_amount, rng)
         W = get_random_warpmat(lock_z, perspective, warp_amount, rng)

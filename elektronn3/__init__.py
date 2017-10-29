@@ -1,5 +1,11 @@
-__all__ = ["cuda_enabled"]
-
+__all__ = ["cuda_enabled", "floatX"]
 import torch
+import numpy as np
+from .logger import logger_setup
+import logging
+logger = logging.getLogger('elektronn3log')
+
+logger_setup()
 cuda_enabled = torch.cuda.is_available()
-print("cuda %s." % "enabled" if cuda_enabled else "disabled")
+logger.info("Cuda %s." % "available" if cuda_enabled else "unavailable")
+floatX = np.float32
