@@ -123,8 +123,7 @@ def flush():
 simplenet = torch.nn.Sequential(
     nn.Conv2d(1, 20, 5),
     nn.ReLU(),
-    nn.Conv2d(20, 2, 5),
-    nn.ReLU()
+    nn.Conv2d(20, 2, 5)
 )
 
 # Like neuro3d.py, but completely in 2D. See https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/neuro3d.py
@@ -142,7 +141,7 @@ neuro2dnet = torch.nn.Sequential(
     nn.Conv2d(150, 200, 4), nn.ReLU(),
     nn.Conv2d(200, 200, 4), nn.ReLU(),
     nn.Conv2d(200, 200, 1), nn.ReLU(),
-    nn.Conv2d(200, 2, 1), nn.ReLU()
+    nn.Conv2d(200, 2, 1)
 )
 
 class ExampleNet(nn.Module):
@@ -162,7 +161,7 @@ class ExampleNet(nn.Module):
         x = F.relu(self.conv_mid(x))
         x = F.relu(self.conv_mid(x))
 
-        x = F.relu(self.fc(x))
+        x = self.fc(x)
         x = x.view(x.size(0), -1)
         x = F.softmax(x)
         return x

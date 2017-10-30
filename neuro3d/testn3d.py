@@ -130,8 +130,7 @@ n_out_channels = 2  # TODO: Maybe infer from data set?
 simplenet = torch.nn.Sequential(
     nn.Conv2d(1, 20, 5),
     nn.ReLU(),
-    nn.Conv2d(20, n_out_channels, 5),
-    nn.ReLU()
+    nn.Conv2d(20, n_out_channels, 5)
 )
 
 # Like neuro3d.py, but completely in 2D. See https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/neuro3d.py
@@ -150,7 +149,7 @@ neuro2dnet = torch.nn.Sequential(
     nn.Conv2d(200, 200, 4), nn.ReLU(),
     nn.Conv2d(200, 200, 1), nn.ReLU(),
     
-    nn.Conv2d(200, n_out_channels, 1), nn.ReLU()
+    nn.Conv2d(200, n_out_channels, 1)
 )
 
 # Actual neuro3d neural
@@ -169,7 +168,7 @@ neuro3d_seq = torch.nn.Sequential(
     nn.Conv3d(150, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,1,1)), nn.ReLU(),
-    nn.Conv3d(200, n_out_channels, (1,1,1)), nn.ReLU()
+    nn.Conv3d(200, n_out_channels, (1,1,1))
 )
 
 class Neuro3DNetFlatSoftmax(nn.Module):

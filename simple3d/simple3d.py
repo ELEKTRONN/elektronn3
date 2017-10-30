@@ -142,7 +142,7 @@ neuro3d_seq = torch.nn.Sequential(
     nn.Conv3d(150, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,4,4)), nn.ReLU(),
     nn.Conv3d(200, 200, (1,1,1)), nn.ReLU(),
-    nn.Conv3d(200, n_out_channels, (1,1,1)), nn.ReLU()
+    nn.Conv3d(200, n_out_channels, (1,1,1))
 )
 
 class Neuro3DNetFlatSoftmax(nn.Module):
@@ -168,7 +168,7 @@ class Simple3DNet(nn.Module):
         self.conv = nn.Sequential(
             nn.Conv3d(1, 10, 3, padding=1), nn.ReLU(),
             nn.Conv3d(10, 10, 3, padding=1), nn.ReLU(),
-            nn.Conv3d(10, n_out_channels, 1), nn.ReLU()
+            nn.Conv3d(10, n_out_channels, 1)
         )
 
     def forward(self, x):
