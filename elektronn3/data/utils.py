@@ -397,9 +397,9 @@ class DelayedInterrupt(object):
             self.signal_received[sig] = False
             self.old_handlers[sig] = signal.getsignal(sig)
             def handler(s, frame):
+                logger.warning('Signal %s received. Delaying KeyboardInterrupt.' % sig)
                 self.signal_received[sig] = (s, frame)
                 # Note: in Python 3.5, you can use signal.Signals(sig).name
-                # logger.warning('Signal %s received. Delaying KeyboardInterrupt.' % sig)
             self.old_handlers[sig] = signal.getsignal(sig)
             signal.signal(sig, handler)
 
@@ -408,6 +408,18 @@ class DelayedInterrupt(object):
             signal.signal(sig, self.old_handlers[sig])
             if self.signal_received[sig] and self.old_handlers[sig]:
                 self.old_handlers[sig](*self.signal_received[sig])
+
+
+class CleanExit(object):
+    # https://stackoverflow.com/questions/4205317/capture-keyboardinterrupt-in-python-without-try-except
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        if exc_type is KeyboardInterrupt:
+            logger.warning('Delaying KeyboardInterrupt.')
+            return True
+        return exc_type is None
 
 
 class GracefulInterrupt:

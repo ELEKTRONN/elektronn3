@@ -208,10 +208,7 @@ class BatchCreatorImage(data.Dataset):
             d, t, ll_mask = self._getcube(self.source)  # get cube randomly
 
             try:
-                if self.mode == 'img-img':
-                    d, t = self.warp_cut(d, t, self.warp,self. warp_args)
-                else:
-                    d, _ = self.warp_cut(d, None, self.warp, self.warp_args)
+                d, t = self.warp_cut(d, t,  self.warp, self.warp_args)
                 self.n_successful_warp += 1
 
             except transformations.WarpingOOBError:

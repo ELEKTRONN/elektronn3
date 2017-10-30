@@ -4,18 +4,33 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 from torch import nn
-from torch.nn import functional as F
+from torch.nn.modules.loss import CrossEntropyLoss
 from torch import optim
 from torch.utils import data
 from elektronn3.data.cnndata import BatchCreatorImage
-from elektronn3.data.utils import get_filepaths_from_dir
+from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.neural.vnet import VNet
+from elektronn3.neural.fcn import fcn32s
 from elektronn3 import cuda_enabled
 from torch.optim.lr_scheduler import ExponentialLR
 
-
 ### UTILS
+def pred(dataset):
+    model = VNet(relu=False)
+    state_dict = torch.load("/u/pschuber/vnet/vnet-99900-model.pkl")
+    # corr_state_dict = state_dict.copy()
+    # for k, v in state_dict.items():
+    #     corr_state_dict[k[7:]] = v
+    #     del corr_state_dict[k]
+    # state_dict = corr_state_dict
+    model = nn.parallel.DataParallel(model, device_ids=[0, 1])
+    if cuda_enabled:
+        model = model.cuda()
+        model.load_state_dict(state_dict)
+    inference(dataset, model, "/u/pschuber/test_pred.h5")
+    raise ()
+
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv3d') != -1:
@@ -29,49 +44,35 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 
-def inference(dataset, model):
-    dataset.validate()
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=2, shuffle=True, num_workers=1, pin_memory=cuda_enabled)
+def inference(dataset, model, fname):
+    # logger.info("Starting preview prediction")
     model.eval()
-    raw = torch.from_numpy(dataset.valid_d[0][None, :, :128, :288, :288])
+    raw = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
     if cuda_enabled:
         # raw.pin_memory()
         raw = raw.cuda()
     raw = Variable(raw, volatile=True)
     # assume single GPU / batch size 1
     out = model(raw)
-    pred = np.array(out.data.view([2, 128, 288, 288]).tolist(), dtype=np.float32)[1]
-    from elektronn3.data.utils import h5save, save_to_h5py
-
-    save_to_h5py([pred[0, 0], dataset.valid_d[0][0, :240, :400, :400].astype(np.float32)], "/u/pschuber/test_longier3.h5",
+    clf = out.data.max(1)[1].view(raw.size())
+    pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]
+    save_to_h5py([pred, dataset.valid_d[0][0, :160, :288, :288].astype(np.float32)], fname,
                  hdf5_names=["pred", "raw"])
-    # h5save([pred[0, 0], dataset.valid_d[0][0, :128, :288, :288].astype(np.float32)], "/u/pschuber/test_longi.h5", keys=["pred", "raw"])
-    raise()
-
-
-### MODEL
-torch.manual_seed(0)
-if cuda_enabled:
-    torch.cuda.manual_seed(0)
-model = VNet(relu=False)
-model = nn.parallel.DataParallel(model, device_ids=[0, 1])
-if cuda_enabled:
-    model = model.cuda()
-model.apply(weights_init)
+    save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
+                 hdf5_names=["prob"])
 
 ### TRAINING
-nIters = int(19500)
+nIters = int(500000)
 wd = 0.5e-4
-lr = 0.0015
-opt = "sgd"
-lr_dec = 0.98
-bs = 2
+lr = 0.0004
+opt = "adam"
+lr_dec = 0.999
+bs = 1
 progress_steps = 100
 
 ### DATA
 d_path = '/wholebrain/scratch/j0126/'
-h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")
+h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
 data_init_kwargs = {
     'zxy': True,
     'd_path' : '%s/barrier_gt_phil/' % d_path,
@@ -79,7 +80,7 @@ data_init_kwargs = {
     'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
     'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
     'aniso_factor': 2, "source": "train",
-    'valid_cubes': [6], 'patch_size': (16, 128, 128),
+    'valid_cubes': [6], 'patch_size': (64, 64, 64),
     'grey_augment_channels': [0], "epoch_size": progress_steps*bs,
     'warp': 0.5, 'class_weights': True,
     'warp_args': {
@@ -87,6 +88,18 @@ data_init_kwargs = {
         'perspective': True
     }}
 dataset = BatchCreatorImage(**data_init_kwargs)
+
+### MODEL
+torch.manual_seed(0)
+if cuda_enabled:
+    torch.cuda.manual_seed(0)
+# model = VNet(relu=False)
+model = fcn32s(learned_billinear=False)
+if cuda_enabled:
+    model = nn.parallel.DataParallel(model, device_ids=[0, 1])
+if cuda_enabled:
+    model = model.cuda()
+model.apply(weights_init)
 
 if opt == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
@@ -97,10 +110,13 @@ elif opt == 'rmsprop':
 
 lr_sched = ExponentialLR(optimizer, lr_dec)
 
+# loss
+criterion = CrossEntropyLoss(weight=dataset.class_weights)
+
 # start training
-st = StoppableTrainer(model, criterion=F.nll_loss, optimizer=optimizer, dataset=dataset, batchsize=bs,
-                      save_path="/u/pschuber/vnet6/", schedulers={"lr": lr_sched})
+st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
+                      dataset=dataset, batchsize=bs, save_path="/u/pschuber/resnet/", schedulers={"lr": lr_sched})
 st.run(nIters)
 
 # start ifnerence
-inference(dataset, model)
+# inference(dataset, model)

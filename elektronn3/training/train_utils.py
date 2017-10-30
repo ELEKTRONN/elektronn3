@@ -310,9 +310,11 @@ class HistoryTracker(object):
             names=[u'steps', u'time', u'train_loss', u'valid_loss',
                    u'loss_gain', u'train_err', u'valid_err', u'lr', u'mom',
                    u'gradnetrate'], formats=[u'i4', ] + [u'f4', ] * 9))
+        self.loss = AccumulationArray(n_init=int(1e5), data=[])
 
     def update_timeline(self, vals):
         self.timeline.append(vals)
+        self.loss.append(vals[1])
 
     def register_debug_output_names(self, names):
         self.debug_output_names = names
