@@ -6,6 +6,6 @@ import logging
 logger = logging.getLogger('elektronn3log')
 
 logger_setup()
-cuda_enabled = torch.cuda.is_available()
+cuda_enabled = False #torch.cuda.is_available()
 logger.info("Cuda %s." % "available" if cuda_enabled else "unavailable")
 floatX = np.float32

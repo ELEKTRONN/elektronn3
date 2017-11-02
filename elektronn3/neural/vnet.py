@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .base import BaseModule
+# from .base import BaseModule
 
 
 def passthrough(x, **kwargs):
@@ -111,20 +111,14 @@ class OutputTransition(nn.Module):
         self.conv1 = nn.Conv3d(inChans, 2, kernel_size=1, )
         self.bn1 = ContBatchNorm3d(2)
         self.relu1 = ELUCons(relu, 2)
-        self.softmax = F.log_softmax
 
     def forward(self, x):
         # convolve 32 down to 2 channels
         x = self.relu1(self.bn1(self.conv1(x)))
-        # make channels the last axis
-        x = x.permute(0, 2, 3, 4, 1).contiguous()
-        # flatten
-        x = x.view(x.numel() // 2, 2)
-        x = self.softmax(x)
         return x
 
 
-class VNet(BaseModule):
+class VNet(nn.Module):
     # the number of convolutions in each layer corresponds
     # to what is in the actual prototxt, not the intent
     def __init__(self, relu=True, nll=True, fac=4):
