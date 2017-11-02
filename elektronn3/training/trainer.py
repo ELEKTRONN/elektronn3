@@ -20,8 +20,8 @@ logger = logging.getLogger('elektronn3log')
 
 
 class StoppableTrainer(object):
-    def __init__(self, model=None, criterion=None, optimizer=None, dataset=None, save_path=None,
-                 batchsize=1, schedulers=None):
+    def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
+                 save_path=None, batchsize=1, schedulers=None):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
@@ -90,8 +90,9 @@ class StoppableTrainer(object):
     def train(self):
         self.model.train()
         self.dataset.train()
-        data_loader = DelayedDataLoader(self.dataset, batch_size=self.batchsize, shuffle=False,
-                                        num_workers=4, pin_memory=cuda_enabled)
+        data_loader = DelayedDataLoader(self.dataset, batch_size=self.batchsize,
+                                        shuffle=False, num_workers=4,
+                                        pin_memory=cuda_enabled)
         tr_loss = 0
         incorrect = 0
         numel = 0
