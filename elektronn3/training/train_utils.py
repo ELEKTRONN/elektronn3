@@ -21,8 +21,6 @@ import numpy as np
 from ..data.utils import pickleload, picklesave
 from . import plotting
 from .. import floatX
-import matplotlib
-matplotlib.use("agg")
 import matplotlib.pyplot as plt
 shortcut_completions = [  # Extra words to register completions for:
     'q', 'kill', 'sethist', 'setlr', 'setmom', 'setwd', 'sf', 'preview',

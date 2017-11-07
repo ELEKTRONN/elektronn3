@@ -7,6 +7,12 @@ from torch import nn
 from torch.nn.modules.loss import CrossEntropyLoss
 from torch import optim
 from torch.utils import data
+
+# Don't move this stuff, it needs to be run this early to work
+from elektronn3 import select_mpl_backend
+mpl_backend = 'Qt5Agg'  # TODO: Make this a CLI option
+select_mpl_backend(mpl_backend)
+
 from elektronn3.data.cnndata import BatchCreatorImage
 from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
