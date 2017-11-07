@@ -10,7 +10,7 @@ from torch.utils import data
 
 # Don't move this stuff, it needs to be run this early to work
 from elektronn3 import select_mpl_backend
-mpl_backend = 'Qt5Agg'  # TODO: Make this a CLI option
+mpl_backend = 'agg'  # TODO: Make this a CLI option
 select_mpl_backend(mpl_backend)
 
 from elektronn3.data.cnndata import BatchCreatorImage
@@ -21,20 +21,41 @@ from elektronn3.neural.fcn import fcn32s
 from elektronn3 import cuda_enabled
 from torch.optim.lr_scheduler import ExponentialLR
 
+### USER PATHS
+path_prefix = os.path.expanduser('~/vnet/')
+os.makedirs(path_prefix, exist_ok=True)
+state_dict_path = '/u/pschuber/vnet/vnet-99900-model.pkl'  # TODO: Make variable
+test_cube_path = '/u/pschuber/test_pred.h5'  # TODO: Make variable
+
+timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
+save_name = 'vnet__' + timestamp
+save_path = os.path.join(path_prefix, save_name)
+
+
+### TRAINING
+nIters = int(500000)
+wd = 0.5e-4
+lr = 0.0004
+opt = 'adam'
+lr_dec = 0.999
+bs = 1
+progress_steps = 100
+
 ### UTILS
 def pred(dataset):
     model = VNet(relu=False)
-    state_dict = torch.load("/u/pschuber/vnet/vnet-99900-model.pkl")
+    state_dict = torch.load(state_dict_path)
     # corr_state_dict = state_dict.copy()
     # for k, v in state_dict.items():
     #     corr_state_dict[k[7:]] = v
     #     del corr_state_dict[k]
     # state_dict = corr_state_dict
-    model = nn.parallel.DataParallel(model, device_ids=[0, 1])
+    if bs >= 4:
+        model = nn.parallel.DataParallel(model, device_ids=[0, 1])
     if cuda_enabled:
         model = model.cuda()
         model.load_state_dict(state_dict)
-    inference(dataset, model, "/u/pschuber/test_pred.h5")
+    inference(dataset, model, test_cube_path)
     raise ()
 
 def weights_init(m):
@@ -67,17 +88,9 @@ def inference(dataset, model, fname):
     save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
                  hdf5_names=["prob"])
 
-### TRAINING
-nIters = int(500000)
-wd = 0.5e-4
-lr = 0.0004
-opt = "adam"
-lr_dec = 0.999
-bs = 1
-progress_steps = 100
 
 ### DATA
-d_path = '/wholebrain/scratch/j0126/'
+d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
 h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
 data_init_kwargs = {
     'zxy': True,
@@ -101,7 +114,7 @@ if cuda_enabled:
     torch.cuda.manual_seed(0)
 # model = VNet(relu=False)
 model = fcn32s(learned_billinear=False)
-if cuda_enabled:
+if bs >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:
     model = model.cuda()
@@ -121,7 +134,7 @@ criterion = CrossEntropyLoss(weight=dataset.class_weights)
 
 # start training
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, save_path="/u/pschuber/resnet/", schedulers={"lr": lr_sched})
+                      dataset=dataset, batchsize=bs, save_path=save_path, schedulers={"lr": lr_sched})
 st.run(nIters)
 
 # start ifnerence
