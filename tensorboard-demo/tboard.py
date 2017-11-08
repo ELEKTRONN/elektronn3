@@ -3,9 +3,9 @@
 # Tensorboard-PyTorch integration test code based on the usage example at
 # https://github.com/lanpa/tensorboard-pytorch/blob/162034215abe948d5139c0eafba842f818940c7d/README.md
 #
-# All files are written to subdirectories of ~/tboard/.
+# All files are written to subdirectories of ~/tb/.
 # To test the tensorboard server on this script's output, run
-# $ tensorboard --logdir ~/tboard
+# $ tensorboard --logdir ~/tb
 
 import os
 from socket import gethostname
@@ -18,7 +18,7 @@ import tensorboardX
 
 
 comment = ''
-root_dir = os.path.expanduser('~/tboard/')
+root_dir = os.path.expanduser('~/tb/')
 log_dir = os.path.join(
     root_dir,
     datetime.now().strftime('%b%d_%H-%M-%S') + '_' + gethostname()
