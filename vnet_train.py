@@ -40,7 +40,7 @@ lr = 0.0004
 opt = 'adam'
 lr_dec = 0.999
 bs = 1
-progress_steps = 100
+progress_steps = 2  # Temporary low value for debugging
 
 ### UTILS
 def pred(dataset):

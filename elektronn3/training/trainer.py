@@ -18,10 +18,16 @@ from ..data.image import write_overlayimg
 from .train_utils import DelayedDataLoader
 logger = logging.getLogger('elektronn3log')
 
+try:
+    import tensorboardX
+    tensorboard_available = True
+except:
+    tensorboard_available = False
 
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, schedulers=None):
+                 save_path=None, batchsize=1, schedulers=None, enable_tensorboard=True,
+                 tensorboard_root_path='~/tb/'):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
@@ -38,6 +44,17 @@ class StoppableTrainer(object):
         else:
             assert type(schedulers) == dict
         self.schedulers = schedulers
+        if not tensorboard_available and enable_tensorboard:
+            enable_tensorboard = False
+            logger.warning('Tensorboard is not available, so it has to be disabled.')
+        self.tb = None  # TensorboardX SummaryWriter
+        if enable_tensorboard:
+            # tb_dir = os.path.join(save_path, 'tb')
+            self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
+            tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
+            os.makedirs(tb_dir)
+            self.tb = tensorboardX.SummaryWriter(log_dir=tb_dir)
+        # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
 
     @property
     def save_name(self):
@@ -48,6 +65,7 @@ class StoppableTrainer(object):
             try:
                 self.step()
             except (KeyboardInterrupt) as e:
+                # TODO: The shell doesn't have access to the main training loops locals, so it's useless. Find out how to fix this.
                 if not isinstance(e, KeyboardInterrupt):
                     traceback.print_exc()
                     print("\nEntering Command line such that Exception can be "
@@ -81,6 +99,12 @@ class StoppableTrainer(object):
                % (val_err, "%", mean_target * 100, loss_gain)
         out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
         logger.info(out)
+        if self.tb:
+            self.tb.add_scalar('tr_loss', tr_loss, self.iterations)
+            self.tb.add_scalar('tr_err', tr_err, self.iterations)
+            self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
+            self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
+
         if self.save_path is not None:
             self.tracker.plot(self.save_path + "/" + self.save_name)
         if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
@@ -115,7 +139,6 @@ class StoppableTrainer(object):
 
             # update step
             self.optimizer.zero_grad()
-            print(target.size(), out.size())
             loss.backward()
             self.optimizer.step()
 
@@ -125,6 +148,7 @@ class StoppableTrainer(object):
             target_sum += target.sum().data.tolist()[0]
             incorrect += pred.ne(target.data).cpu().sum()
             tr_loss += loss.data[0]
+            print(self.iterations, target.size(), out.size(), loss.data[0])
             self.tracker.update_timeline([self.timer.t_passed, loss.data[0], float(target_sum) / numel])
             self.iterations += 1
         tr_err = 100. * incorrect / numel

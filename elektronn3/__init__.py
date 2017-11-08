@@ -6,8 +6,11 @@ import logging
 logger = logging.getLogger('elektronn3log')
 
 logger_setup()
-cuda_enabled = False #torch.cuda.is_available()
-logger.info("Cuda %s." % "available" if cuda_enabled else "unavailable")
+
+disable_cuda = True  # Temporary, until we can resolve this strange "CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input."
+
+cuda_enabled = not disable_cuda and torch.cuda.is_available()
+logger.info("Cuda %s." % "available" if cuda_enabled else "Cuda unavailable")
 floatX = np.float32
 
 

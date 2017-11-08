@@ -409,7 +409,7 @@ class BatchCreatorImage(data.Dataset):
         """
         self.check_files()
         data, target, extras = [], [], []
-        pbar = tqdm.tqdm(total=len(self.d_files), ncols=120, leave=False)
+        pbar = tqdm.tqdm(total=len(self.d_files))
 
         for (d_f, d_key), (l_f, l_key) in zip(self.d_files, self.l_files):
             pbar.write('Loading %s and %s' % (d_f, l_f))

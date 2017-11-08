@@ -28,6 +28,9 @@ shortcut_completions = [  # Extra words to register completions for:
 user_name = getpass.getuser()
 ptk_hist = InMemoryHistory()
 
+# TODO: I am not sure if there even is any benefit of using this custom shell stuff
+#       over just dropping directly to IPython.embed() like in simple3d etc.
+#       So maybe just remove the whole whole custom interface, NumaCompleter etc.
 
 def user_input(local_vars):
     _banner = """
@@ -366,6 +369,7 @@ class HistoryTracker(object):
             plt.close('all')
 
 
+# TODO: Try to remove this thing (or document/rewrite it)
 class AccumulationArray(object):
     def __init__(self, right_shape=(), dtype=floatX, n_init=100, data=None,
                  ema_factor=0.95):
