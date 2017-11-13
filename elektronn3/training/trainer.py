@@ -44,6 +44,7 @@ class StoppableTrainer(object):
         else:
             assert type(schedulers) == dict
         self.schedulers = schedulers
+        self.preview_freq = preview_freq
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False
             logger.warning('Tensorboard is not available, so it has to be disabled.')
@@ -212,7 +213,11 @@ class StoppableTrainer(object):
 def inference(dataset, model, fname=None):
     # logger.info("Starting preview prediction")
     model.eval()
-    inp = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
+    try:
+        inp = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
+    except IndexError:
+        logger.warning('valid_d not accessible. Using training data for preview.')
+        inp = torch.from_numpy(dataset.train_d[0][None, :, :160, :288, :288])
     if cuda_enabled:
         # inp.pin_memory()
         inp = inp.cuda()
