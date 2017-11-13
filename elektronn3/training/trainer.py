@@ -26,8 +26,8 @@ except:
 
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, schedulers=None, enable_tensorboard=True,
-                 tensorboard_root_path='~/tb/'):
+                 save_path=None, batchsize=1, schedulers=None, preview_freq=4,
+                 enable_tensorboard=True, tensorboard_root_path='~/tb/'):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
@@ -86,24 +86,48 @@ class StoppableTrainer(object):
         for sched in self.schedulers.values():
             sched.step()
         if self.iterations // self.dataset.epoch_size > 1:
-            loss_gain = self.tracker.history[-1][2] - tr_loss
+            tr_loss_gain = self.tracker.history[-1][2] - tr_loss
         else:
-            loss_gain = 0
+            tr_loss_gain = 0
         self.tracker.update_history([self.iterations, self.timer.t_passed, tr_loss,
-                                     val_loss, loss_gain,
+                                     val_loss, tr_loss_gain,
                                      tr_err, val_err, curr_lr, 0, 0])  # 0's correspond to mom and gradnet (?)
         t = pretty_string_time(self.timer.t_passed)
         loss_smooth = self.tracker.loss._ema
         out = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.iterations, loss_smooth, tr_loss, tr_err)
         out += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
-               % (val_err, "%", mean_target * 100, loss_gain)
+               % (val_err, "%", mean_target * 100, tr_loss_gain)
         out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
         logger.info(out)
         if self.tb:
-            self.tb.add_scalar('tr_loss', tr_loss, self.iterations)
-            self.tb.add_scalar('tr_err', tr_err, self.iterations)
-            self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
-            self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
+            if True:
+                self.tb.add_scalars('stats/loss', {
+                    'train_loss': tr_loss,
+                    'valid_loss': val_loss,
+                    },
+                    self.iterations
+                )
+                self.tb.add_scalars('stats/error', {
+                    'train_error': tr_err,
+                    'valid_errpr': val_err,
+                    },
+                    self.iterations
+                )
+                self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
+                self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
+                self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
+                if self.iterations % self.preview_freq == 0:
+                    inp, pred = inference(self.dataset, self.model)
+                    pred = torch.from_numpy(out)
+                    self.tb.add_image('preview/input', inp, self.iterations)
+                    self.tb.add_image('preview/prediction', pred, self.iterations)
+
+            else:  # TODO: Remove later
+                self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
+                self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
+                self.tb.add_scalar('error/val_err', val_err, self.iterations)
+                self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
+                self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
 
         if self.save_path is not None:
             self.tracker.plot(self.save_path + "/" + self.save_name)
@@ -184,19 +208,22 @@ class StoppableTrainer(object):
         return val_loss, val_err
 
 
-def inference(dataset, model, fname):
+# TODO: Make more flexible, avoid assumptions about shapes etc.
+def inference(dataset, model, fname=None):
     # logger.info("Starting preview prediction")
     model.eval()
-    raw = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
+    inp = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
     if cuda_enabled:
-        # raw.pin_memory()
-        raw = raw.cuda()
-    raw = Variable(raw, volatile=True)
+        # inp.pin_memory()
+        inp = inp.cuda()
+    inp = Variable(inp, volatile=True)
     # assume single GPU / batch size 1
-    out = model(raw)
-    clf = out.data.max(1)[1].view(raw.size())
+    out = model(inp)
+    clf = out.data.max(1)[1].view(inp.size())
     pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]
-    save_to_h5py([pred, dataset.valid_d[0][0, :160, :288, :288].astype(np.float32)], fname,
-                 hdf5_names=["pred", "raw"])
-    save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
-                 hdf5_names=["prob"])
+    if fname:
+        save_to_h5py([pred, dataset.valid_d[0][0, :160, :288, :288].astype(np.float32)], fname,
+                    hdf5_names=["pred", "raw"])
+        save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
+                    hdf5_names=["prob"])
+    return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
