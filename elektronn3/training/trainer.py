@@ -74,7 +74,7 @@ class StoppableTrainer(object):
     def train(self, epochs=1):
         while self.iterations < epochs:
             try:
-                # self.train() contents
+                # --> self.train()
                 self.model.train()
                 self.dataset.train()
 
@@ -116,7 +116,7 @@ class StoppableTrainer(object):
                 mean_target = float(target_sum) / numel
                 tr_speed = len(self.loader) / timer.t_passed
 
-                # self.step() contents
+                # --> self.step():
                 # val_loss, val_err = self.validate()
                 val_loss, val_err = 0, 0
                 curr_lr = self.schedulers["lr"].get_lr()[-1]
@@ -137,34 +137,34 @@ class StoppableTrainer(object):
                 out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
                 logger.info(out)
                 if self.tb:
-                    if True:
-                        self.tb.add_scalars('stats/loss', {
-                            'train_loss': tr_loss,
-                            'valid_loss': val_loss,
-                            },
-                            self.iterations
-                        )
-                        self.tb.add_scalars('stats/error', {
-                            'train_error': tr_err,
-                            'valid_errpr': val_err,
-                            },
-                            self.iterations
-                        )
-                        self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
-                        self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
-                        self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
-                        if self.iterations % self.preview_freq == 0:
-                            inp, pred = inference(self.dataset, self.model)
-                            pred = torch.from_numpy(out)
-                            self.tb.add_image('preview/input', inp, self.iterations)
-                            self.tb.add_image('preview/prediction', pred, self.iterations)
-
-                    else:  # TODO: Remove later
-                        self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
-                        self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
-                        self.tb.add_scalar('error/val_err', val_err, self.iterations)
-                        self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
-                        self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
+                    # TODO: Remove later
+                    self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
+                    self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
+                    self.tb.add_scalar('error/val_err', val_err, self.iterations)
+                    self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
+                    self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
+                else:
+                    pass
+                    # self.tb.add_scalars('stats/loss', {
+                    #     'train_loss': tr_loss,
+                    #     'valid_loss': val_loss,
+                    #     },
+                    #     self.iterations
+                    # )
+                    # self.tb.add_scalars('stats/error', {
+                    #     'train_error': tr_err,
+                    #     'valid_errpr': val_err,
+                    #     },
+                    #     self.iterations
+                    # )
+                    # self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
+                    # self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
+                    # self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
+                    # if self.iterations % self.preview_freq == 0:
+                    #     inp, pred = inference(self.dataset, self.model)
+                    #     pred = torch.from_numpy(out)
+                    #     self.tb.add_image('preview/input', inp, self.iterations)
+                    #     self.tb.add_image('preview/prediction', pred, self.iterations)
 
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
