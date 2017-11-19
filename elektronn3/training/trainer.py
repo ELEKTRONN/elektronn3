@@ -2,6 +2,7 @@ import os
 import traceback
 import signal
 import numpy as np
+import IPython
 from scipy.misc import imsave
 from torch.autograd import Variable
 from torch.utils.trainer import Trainer
@@ -27,11 +28,14 @@ except:
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
                  save_path=None, batchsize=1, schedulers=None, preview_freq=4,
-                 enable_tensorboard=True, tensorboard_root_path='~/tb/'):
+                 enable_tensorboard=True, tensorboard_root_path='~/tb/',
+                 custom_shell=False):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
         self.dataset = dataset
+        self.custom_shell = custom_shell
+        self.terminate = False
         self.iterations = 0
         self.save_path = save_path
         if save_path is not None and not os.path.isdir(save_path):
@@ -178,11 +182,16 @@ class StoppableTrainer(object):
                     print("\nEntering Command line such that Exception can be "
                           "further inspected by user.\n\n")
                 # Like a command line, but cannot change singletons
-                var_push = globals()
-                var_push.update(locals())
-                ret = user_input(var_push)
-                if ret == 'kill':
-                    return
+                if self.custom_shell:
+                    var_push = globals()
+                    var_push.update(locals())
+                    ret = user_input(var_push)
+                    if ret == 'kill':
+                        return
+                else:
+                    IPython.embed()
+                    if self.terminate:  # TODO: Somehow make this behavior more obvious
+                        return
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 
 
