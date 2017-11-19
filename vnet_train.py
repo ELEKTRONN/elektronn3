@@ -136,7 +136,7 @@ criterion = CrossEntropyLoss(weight=dataset.class_weights)
 # start training
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
                       dataset=dataset, batchsize=bs, save_path=save_path, schedulers={"lr": lr_sched})
-st.run(nIters)
+st.train(nIters)
 
 # start ifnerence
 # inference(dataset, model)

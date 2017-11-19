@@ -56,15 +56,121 @@ class StoppableTrainer(object):
             os.makedirs(tb_dir)
             self.tb = tensorboardX.SummaryWriter(log_dir=tb_dir)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
+        self.loader = DelayedDataLoader(
+            self.dataset, batch_size=self.batchsize, shuffle=False,num_workers=0,
+            pin_memory=cuda_enabled
+        )
 
     @property
     def save_name(self):
         return basename(normpath(self.save_path)) if self.save_path is not None else None
 
-    def run(self, epochs=1):
+    # Yeah I know this is an abomination, but this monolithic function makes
+    # it possible to access all important locals from within the
+    # KeyboardInterrupt-triggered IPython shell.
+    # TODO: Try to modularize it as well as possible while keeping the
+    #       above-mentioned requirement. E.g. the history tracking stuff can
+    #       be refactored into smaller functions
+    def train(self, epochs=1):
         while self.iterations < epochs:
             try:
-                self.step()
+                # self.train() contents
+                self.model.train()
+                self.dataset.train()
+
+                tr_loss = 0
+                incorrect = 0
+                numel = 0
+                target_sum = 0
+                timer = Timer()
+                for (data, target) in self.loader:
+                    if cuda_enabled:
+                        data, target = data.cuda(), target.cuda()
+                    data = Variable(data, requires_grad=True)
+                    target = Variable(target)
+
+                    # forward pass
+                    out = self.model(data)
+                    # make channels the last axis and flatten
+                    out = out.permute(0, 2, 3, 4, 1).contiguous()
+                    out = out.view(out.numel() // 2, 2)
+                    target = target.view(target.numel())
+                    loss = self.criterion(out, target)
+
+                    # update step
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+
+                    # get training performance
+                    pred = out.data.max(1)[1]  # get the index of the max log-probability
+                    numel += target.numel()
+                    target_sum += target.sum().data.tolist()[0]
+                    incorrect += pred.ne(target.data).cpu().sum()
+                    tr_loss += loss.data[0]
+                    print(self.iterations, target.size(), out.size(), loss.data[0])
+                    self.tracker.update_timeline([self.timer.t_passed, loss.data[0], float(target_sum) / numel])
+                    self.iterations += 1
+                tr_err = 100. * incorrect / numel
+                tr_loss /= len(self.loader)
+                mean_target = float(target_sum) / numel
+                tr_speed = len(self.loader) / timer.t_passed
+
+                # self.step() contents
+                # val_loss, val_err = self.validate()
+                val_loss, val_err = 0, 0
+                curr_lr = self.schedulers["lr"].get_lr()[-1]
+                for sched in self.schedulers.values():
+                    sched.step()
+                if self.iterations // self.dataset.epoch_size > 1:
+                    tr_loss_gain = self.tracker.history[-1][2] - tr_loss
+                else:
+                    tr_loss_gain = 0
+                self.tracker.update_history([self.iterations, self.timer.t_passed, tr_loss,
+                                            val_loss, tr_loss_gain,
+                                            tr_err, val_err, curr_lr, 0, 0])  # 0's correspond to mom and gradnet (?)
+                t = pretty_string_time(self.timer.t_passed)
+                loss_smooth = self.tracker.loss._ema
+                out = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.iterations, loss_smooth, tr_loss, tr_err)
+                out += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
+                    % (val_err, "%", mean_target * 100, tr_loss_gain)
+                out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
+                logger.info(out)
+                if self.tb:
+                    if True:
+                        self.tb.add_scalars('stats/loss', {
+                            'train_loss': tr_loss,
+                            'valid_loss': val_loss,
+                            },
+                            self.iterations
+                        )
+                        self.tb.add_scalars('stats/error', {
+                            'train_error': tr_err,
+                            'valid_errpr': val_err,
+                            },
+                            self.iterations
+                        )
+                        self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
+                        self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
+                        self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
+                        if self.iterations % self.preview_freq == 0:
+                            inp, pred = inference(self.dataset, self.model)
+                            pred = torch.from_numpy(out)
+                            self.tb.add_image('preview/input', inp, self.iterations)
+                            self.tb.add_image('preview/prediction', pred, self.iterations)
+
+                    else:  # TODO: Remove later
+                        self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
+                        self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
+                        self.tb.add_scalar('error/val_err', val_err, self.iterations)
+                        self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
+                        self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
+
+                if self.save_path is not None:
+                    self.tracker.plot(self.save_path + "/" + self.save_name)
+                if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
+                    inference(self.dataset, self.model, self.save_path + "/" + self.save_name + ".h5")
+                    torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
             except (KeyboardInterrupt) as e:
                 # TODO: The shell doesn't have access to the main training loops locals, so it's useless. Find out how to fix this.
                 if not isinstance(e, KeyboardInterrupt):
@@ -79,106 +185,6 @@ class StoppableTrainer(object):
                     return
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 
-    def step(self):
-        tr_loss, tr_err, mean_target, tr_speed = self.train()
-        # val_loss, val_err = self.validate()
-        val_loss, val_err = 0, 0
-        curr_lr = self.schedulers["lr"].get_lr()[-1]
-        for sched in self.schedulers.values():
-            sched.step()
-        if self.iterations // self.dataset.epoch_size > 1:
-            tr_loss_gain = self.tracker.history[-1][2] - tr_loss
-        else:
-            tr_loss_gain = 0
-        self.tracker.update_history([self.iterations, self.timer.t_passed, tr_loss,
-                                     val_loss, tr_loss_gain,
-                                     tr_err, val_err, curr_lr, 0, 0])  # 0's correspond to mom and gradnet (?)
-        t = pretty_string_time(self.timer.t_passed)
-        loss_smooth = self.tracker.loss._ema
-        out = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.iterations, loss_smooth, tr_loss, tr_err)
-        out += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
-               % (val_err, "%", mean_target * 100, tr_loss_gain)
-        out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
-        logger.info(out)
-        if self.tb:
-            if True:
-                self.tb.add_scalars('stats/loss', {
-                    'train_loss': tr_loss,
-                    'valid_loss': val_loss,
-                    },
-                    self.iterations
-                )
-                self.tb.add_scalars('stats/error', {
-                    'train_error': tr_err,
-                    'valid_errpr': val_err,
-                    },
-                    self.iterations
-                )
-                self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
-                self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
-                self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
-                if self.iterations % self.preview_freq == 0:
-                    inp, pred = inference(self.dataset, self.model)
-                    pred = torch.from_numpy(out)
-                    self.tb.add_image('preview/input', inp, self.iterations)
-                    self.tb.add_image('preview/prediction', pred, self.iterations)
-
-            else:  # TODO: Remove later
-                self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
-                self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
-                self.tb.add_scalar('error/val_err', val_err, self.iterations)
-                self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
-                self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
-
-        if self.save_path is not None:
-            self.tracker.plot(self.save_path + "/" + self.save_name)
-        if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
-            inference(self.dataset, self.model, self.save_path + "/" + self.save_name + ".h5")
-            torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
-
-    def train(self):
-        self.model.train()
-        self.dataset.train()
-        data_loader = DelayedDataLoader(self.dataset, batch_size=self.batchsize,
-                                        shuffle=False, num_workers=4,
-                                        pin_memory=cuda_enabled)
-        tr_loss = 0
-        incorrect = 0
-        numel = 0
-        target_sum = 0
-        timer = Timer()
-        for (data, target) in data_loader:
-            if cuda_enabled:
-                data, target = data.cuda(), target.cuda()
-            data = Variable(data)
-            data.requires_grad = True
-            target = Variable(target)
-
-            # forward pass
-            out = self.model(data)
-            # make channels the last axis and flatten
-            out = out.permute(0, 2, 3, 4, 1).contiguous()
-            out = out.view(out.numel() // 2, 2)
-            target = target.view(target.numel())
-            loss = self.criterion(out, target)
-
-            # update step
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-
-            # get training performance
-            pred = out.data.max(1)[1]  # get the index of the max log-probability
-            numel += target.numel()
-            target_sum += target.sum().data.tolist()[0]
-            incorrect += pred.ne(target.data).cpu().sum()
-            tr_loss += loss.data[0]
-            print(self.iterations, target.size(), out.size(), loss.data[0])
-            self.tracker.update_timeline([self.timer.t_passed, loss.data[0], float(target_sum) / numel])
-            self.iterations += 1
-        tr_err = 100. * incorrect / numel
-        tr_loss /= len(data_loader)
-        return tr_loss, tr_err, float(target_sum) / numel, len(data_loader) / timer.t_passed
 
     def validate(self):
         self.model.eval()
