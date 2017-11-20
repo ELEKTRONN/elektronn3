@@ -149,13 +149,13 @@ class StoppableTrainer(object):
                     )
                     self.tb.add_scalars('stats/error', {
                         'train_error': tr_err,
-                        'valid_errpr': val_err,
+                        'valid_error': val_err,
                         },
                         self.iterations
                     )
-                    self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
-                    self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
-                    self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
+                    self.tb.add_scalar('train_loss_gain', tr_loss_gain, self.iterations)
+                    self.tb.add_scalar('misc/train_speed', tr_speed, self.iterations)
+                    self.tb.add_scalar('misc/learning_rate', curr_lr, self.iterations)
                     if self.iterations % self.preview_freq == 0:
                         # Preview predictions
                         inp, out = inference(self.dataset, self.model, raw_out=True)
@@ -192,8 +192,9 @@ class StoppableTrainer(object):
                     if ret == 'kill':
                         return
                 else:
+                    terminate = False
                     IPython.embed()
-                    if self.terminate:  # TODO: Somehow make this behavior more obvious
+                    if terminate:  # TODO: Somehow make this behavior more obvious
                         return
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 
@@ -252,8 +253,10 @@ def inference(dataset, model, fname=None, raw_out=False):
     clf = out.data.max(1)[1].view(inp.size())
     pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]
     if fname:
-        save_to_h5py([pred, dataset.valid_d[0][0, :160, :288, :288].astype(np.float32)], fname,
-                    hdf5_names=["pred", "raw"])
-        save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
+        try:
+            save_to_h5py([pred, dataset.valid_d[0][0, :64, :64, :64].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
+        except IndexError:
+            save_to_h5py([pred, dataset.train_d[0][0, :64, :64, :64].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
+        save_to_h5py([np.exp(np.array(out.data.view([1, 2, 64, 64, 64]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
                     hdf5_names=["prob"])
     return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
