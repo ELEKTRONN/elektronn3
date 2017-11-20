@@ -27,7 +27,7 @@ except:
 
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, schedulers=None, preview_freq=4,
+                 save_path=None, batchsize=1, schedulers=None, preview_freq=2,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
                  custom_shell=False):
         self.model = model
@@ -157,9 +157,12 @@ class StoppableTrainer(object):
                     self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
                     self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
                     if self.iterations % self.preview_freq == 0:
-                        inp, p0, p1 = inference(self.dataset, self.model)
-                        # pred = torch.from_numpy(out)
-                        self.tb.add_image('preview/input', inp, self.iterations)
+                        # Preview predictions
+                        inp, out = inference(self.dataset, self.model, raw_out=True)
+                        p0 = out[0, 0, 32, ...]  # class 0
+                        p1 = out[0, 1, 32, ...]  # class 1
+                        ip = inp[0, 0, 32, ...]
+                        self.tb.add_image('preview/input', ip, self.iterations)
                         self.tb.add_image('preview/p0', p0, self.iterations)
                         self.tb.add_image('preview/p1', p1, self.iterations)
 
@@ -225,7 +228,7 @@ class StoppableTrainer(object):
 
 
 # TODO: Make more flexible, avoid assumptions about shapes etc.
-def inference(dataset, model, fname=None):
+def inference(dataset, model, fname=None, raw_out=False):
     # logger.info("Starting preview prediction")
     model.eval()
     # Attention: Inference on Variables with unexpected shapes can lead to segfaults!
@@ -243,6 +246,9 @@ def inference(dataset, model, fname=None):
     inp = Variable(inp, volatile=True)
     # assume single GPU / batch size 1
     out = model(inp)
+    if raw_out:
+        return inp, out  # return the raw output tensor
+
     clf = out.data.max(1)[1].view(inp.size())
     pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]
     if fname:
@@ -250,7 +256,4 @@ def inference(dataset, model, fname=None):
                     hdf5_names=["pred", "raw"])
         save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
                     hdf5_names=["prob"])
-    p0 = out[0,0,32,...].data.numpy()
-    p1 = out[0,1,32,...].data.numpy()
-    return inp, p0, p1  # Temporary. Clean this up later.
-    # return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
+    return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
