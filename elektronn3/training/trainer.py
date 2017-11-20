@@ -61,7 +61,7 @@ class StoppableTrainer(object):
             self.tb = tensorboardX.SummaryWriter(log_dir=tb_dir)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
         self.loader = DelayedDataLoader(
-            self.dataset, batch_size=self.batchsize, shuffle=False,num_workers=0,
+            self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=0,
             pin_memory=cuda_enabled
         )
 
@@ -141,34 +141,34 @@ class StoppableTrainer(object):
                 out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
                 logger.info(out)
                 if self.tb:
+                    self.tb.add_scalars('stats/loss', {
+                        'train_loss': tr_loss,
+                        'valid_loss': val_loss,
+                        },
+                        self.iterations
+                    )
+                    self.tb.add_scalars('stats/error', {
+                        'train_error': tr_err,
+                        'valid_errpr': val_err,
+                        },
+                        self.iterations
+                    )
+                    self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
+                    self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
+                    self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
+                    if self.iterations % self.preview_freq == 0:
+                        inp, p0, p1 = inference(self.dataset, self.model)
+                        # pred = torch.from_numpy(out)
+                        self.tb.add_image('preview/input', inp, self.iterations)
+                        self.tb.add_image('preview/p0', p0, self.iterations)
+                        self.tb.add_image('preview/p1', p1, self.iterations)
+
                     # TODO: Remove later
-                    self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
-                    self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
-                    self.tb.add_scalar('error/val_err', val_err, self.iterations)
-                    self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
-                    self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
-                else:
-                    pass
-                    # self.tb.add_scalars('stats/loss', {
-                    #     'train_loss': tr_loss,
-                    #     'valid_loss': val_loss,
-                    #     },
-                    #     self.iterations
-                    # )
-                    # self.tb.add_scalars('stats/error', {
-                    #     'train_error': tr_err,
-                    #     'valid_errpr': val_err,
-                    #     },
-                    #     self.iterations
-                    # )
-                    # self.tb.add_scalar('stats/train_loss_gain', tr_loss_gain, self.iterations)
-                    # self.tb.add_scalar('perf/train_speed', tr_speed, self.iterations)
-                    # self.tb.add_scalar('meta/learning_rate', curr_lr, self.iterations)
-                    # if self.iterations % self.preview_freq == 0:
-                    #     inp, pred = inference(self.dataset, self.model)
-                    #     pred = torch.from_numpy(out)
-                    #     self.tb.add_image('preview/input', inp, self.iterations)
-                    #     self.tb.add_image('preview/prediction', pred, self.iterations)
+                    # self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
+                    # self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
+                    # self.tb.add_scalar('error/val_err', val_err, self.iterations)
+                    # self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
+                    # self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
 
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
@@ -206,7 +206,7 @@ class StoppableTrainer(object):
         for data, target in data_loader:
             if cuda_enabled:
                 data, target = data.cuda(), target.cuda()
-            data, target = Variable(data, volatile=True), Variable(target)
+            data, target = Variable(data), Variable(target, volatile=True)
             output = self.model(data)
             target = target.view(target.numel())
             numel += target.numel()
@@ -228,11 +228,15 @@ class StoppableTrainer(object):
 def inference(dataset, model, fname=None):
     # logger.info("Starting preview prediction")
     model.eval()
+    # Attention: Inference on Variables with unexpected shapes can lead to segfaults!
+    # Some shapes (e.g. (1,1,64,128,128) sometimes work or segfault nondeterministically).
     try:
-        inp = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
+        # inp = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
+        inp = torch.from_numpy(dataset.valid_d[0][None, :, :64, :64, :64])
     except IndexError:
         logger.warning('valid_d not accessible. Using training data for preview.')
-        inp = torch.from_numpy(dataset.train_d[0][None, :, :160, :288, :288])
+        inp = torch.from_numpy(dataset.train_d[0][None, :, :64, :64, :64])
+        # inp = torch.rand(1, 1, 160, 288, 288)
     if cuda_enabled:
         # inp.pin_memory()
         inp = inp.cuda()
@@ -246,4 +250,7 @@ def inference(dataset, model, fname=None):
                     hdf5_names=["pred", "raw"])
         save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
                     hdf5_names=["prob"])
-    return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
+    p0 = out[0,0,32,...].data.numpy()
+    p1 = out[0,1,32,...].data.numpy()
+    return inp, p0, p1  # Temporary. Clean this up later.
+    # return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
