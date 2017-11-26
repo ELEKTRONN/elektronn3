@@ -13,9 +13,11 @@ from . import utils
 import torch
 import signal
 from torch.utils import data
-from .. import cuda_enabled, floatX
+from .. import global_config, floatX
 from .utils import DelayedInterrupt
 
+
+cuda_enabled = global_config['cuda_enabled']
 
 ###############################################################################
 class BatchCreatorImage(data.Dataset):

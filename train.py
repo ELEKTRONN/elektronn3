@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import logging
 import os
+import argparse
 import datetime
 import numpy as np
 import torch
@@ -14,22 +16,40 @@ from elektronn3 import select_mpl_backend
 mpl_backend = 'agg'  # TODO: Make this a CLI option
 select_mpl_backend(mpl_backend)
 
+import elektronn3
 from elektronn3.data.cnndata import BatchCreatorImage
 from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.neural.vnet import VNet
 from elektronn3.neural.fcn import fcn32s
-from elektronn3 import cuda_enabled
+from elektronn3.neural.simple import Simple3DNet
 from torch.optim.lr_scheduler import ExponentialLR
 
+
+logger = logging.getLogger('elektronn3log')
+
+parser = argparse.ArgumentParser(description='Train a network.')
+parser.add_argument('model_name', choices=['fcn32s', 'vnet', 'simple'])
+parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
+args = parser.parse_args()
+
+model_name = args.model_name
+cuda_enabled = not args.disable_cuda
+if cuda_enabled and not torch.cuda.is_available():
+    logger.warning('Cuda is not available.')
+    cuda_enabled = False
+elektronn3.global_config['cuda_enabled'] = cuda_enabled
+
+logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
+
 ### USER PATHS
-path_prefix = os.path.expanduser('~/vnet/')
+path_prefix = os.path.expanduser('~/e3training/')
 os.makedirs(path_prefix, exist_ok=True)
 state_dict_path = '/u/pschuber/vnet/vnet-99900-model.pkl'  # TODO: Make variable
 test_cube_path = '/u/pschuber/test_pred.h5'  # TODO: Make variable
 
 timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
-save_name = 'vnet__' + timestamp
+save_name = model_name + '__' + timestamp
 save_path = os.path.join(path_prefix, save_name)
 
 
@@ -42,9 +62,15 @@ lr_dec = 0.999
 bs = 1
 progress_steps = 2  # Temporary low value for debugging
 
+if model_name == 'fcn32s':
+    model = fcn32s(learned_billinear=False)
+elif model_name == 'vnet':
+    model = VNet(relu=False)
+elif model_name == 'simple':
+    model = Simple3DNet()
+
 ### UTILS
 def pred(dataset):
-    model = VNet(relu=False)
     state_dict = torch.load(state_dict_path)
     # corr_state_dict = state_dict.copy()
     # for k, v in state_dict.items():
@@ -114,12 +140,11 @@ torch.manual_seed(0)
 if cuda_enabled:
     torch.cuda.manual_seed(0)
 # model = VNet(relu=False)
-model = fcn32s(learned_billinear=False)
 if bs >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:
     model = model.cuda()
-model.apply(weights_init)
+# model.apply(weights_init)
 
 if opt == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)

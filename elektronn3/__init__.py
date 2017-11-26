@@ -1,4 +1,4 @@
-__all__ = ["cuda_enabled", "floatX"]
+__all__ = ["cuda_enabled", "floatX", "config"]
 import torch
 import numpy as np
 from .logger import logger_setup
@@ -6,11 +6,11 @@ import logging
 logger = logging.getLogger('elektronn3log')
 
 logger_setup()
+global_config = {}
 
-disable_cuda = True  # Temporary, until we can resolve this strange "CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input."
-
-cuda_enabled = not disable_cuda and torch.cuda.is_available()
-logger.info("Cuda %s." % "available" if cuda_enabled else "Cuda unavailable")
+# disable_cuda = True  # Temporary, until we can resolve this strange "CUDNN_STATUS_NOT_SUPPORTED. This error may appear if you passed in a non-contiguous input."
+# cuda_enabled = not disable_cuda and torch.cuda.is_available()
+global_config['cuda_enabled'] = False  # May be overwritten by entry point later
 floatX = np.float32
 
 

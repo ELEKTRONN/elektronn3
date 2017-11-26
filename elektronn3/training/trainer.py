@@ -14,7 +14,7 @@ import logging
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from os.path import normpath, basename
 from .train_utils import user_input, HistoryTracker
-from .. import cuda_enabled
+from .. import global_config
 from ..data.image import write_overlayimg
 from .train_utils import DelayedDataLoader
 logger = logging.getLogger('elektronn3log')
@@ -24,6 +24,8 @@ try:
     tensorboard_available = True
 except:
     tensorboard_available = False
+
+cuda_enabled = global_config['cuda_enabled']
 
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
