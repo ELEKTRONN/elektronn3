@@ -194,9 +194,8 @@ class StoppableTrainer(object):
                     if ret == 'kill':
                         return
                 else:
-                    terminate = False
                     IPython.embed()
-                    if terminate:  # TODO: Somehow make this behavior more obvious
+                    if self.terminate:  # TODO: Somehow make this behavior more obvious
                         return
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 

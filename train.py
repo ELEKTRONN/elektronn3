@@ -31,9 +31,11 @@ logger = logging.getLogger('elektronn3log')
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('model_name', choices=['fcn32s', 'vnet', 'simple'])
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
+parser.add_argument('--host', choices=['wb', 'local'], default='local')
 args = parser.parse_args()
 
 model_name = args.model_name
+host = args.host
 cuda_enabled = not args.disable_cuda
 if cuda_enabled and not torch.cuda.is_available():
     logger.warning('Cuda is not available.')
@@ -117,23 +119,48 @@ def inference(dataset, model, fname):
 
 
 ### DATA
-d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
-h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
-data_init_kwargs = {
-    'zxy': True,
-    'd_path' : '%s/barrier_gt_phil/' % d_path,
-    'l_path': '%s/barrier_gt_phil/' % d_path,
-    'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
-    'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
-    'aniso_factor': 2, "source": "train",
-    'valid_cubes': [6], 'patch_size': (64, 64, 64),
-    'grey_augment_channels': [0], "epoch_size": progress_steps*bs,
-    'warp': 0.5, 'class_weights': True,
-    'warp_args': {
-        'sample_aniso': True,
-        'perspective': True
-    }}
+if host == 'wb':
+    d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
+    h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
+    data_init_kwargs = {
+        'zxy': True,
+        'd_path' : '%s/barrier_gt_phil/' % d_path,
+        'l_path': '%s/barrier_gt_phil/' % d_path,
+        'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
+        'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
+        'aniso_factor': 2, "source": "train",
+        'valid_cubes': [6], 'patch_size': (64, 64, 64),
+        'grey_augment_channels': [0], "epoch_size": progress_steps*bs,
+        'warp': 0.5, 'class_weights': True,
+        'warp_args': {
+            'sample_aniso': True,
+            'perspective': True
+        }
+    }
+elif host == 'local':
+    d_path = os.path.expanduser('~/neuro_data_zxy/')
+    data_init_kwargs = {
+        'zxy': True,
+        'd_path': d_path,
+        'l_path': d_path,
+        'd_files': [('raw_%i.h5' %i, 'raw') for i in range(3)],
+        'l_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        'aniso_factor': 2,
+        'source': 'train',
+        'patch_size': (64, 64, 64),
+        'valid_cubes': [2],
+        'grey_augment_channels': [0],
+        'epoch_size': progress_steps*bs,
+        'warp': 0.5,
+        'class_weights': True,
+        'warp_args': {
+            'sample_aniso': True,
+            'perspective': True
+        }
+    }
+
 dataset = BatchCreatorImage(**data_init_kwargs)
+
 
 ### MODEL
 torch.manual_seed(0)
@@ -144,7 +171,7 @@ if bs >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:
     model = model.cuda()
-# model.apply(weights_init)
+model.apply(weights_init)
 
 if opt == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
