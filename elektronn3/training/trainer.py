@@ -20,7 +20,7 @@ from .train_utils import DelayedDataLoader
 logger = logging.getLogger('elektronn3log')
 
 try:
-    import tensorboardX
+    from .tensorboard import TensorBoardLogger
     tensorboard_available = True
 except:
     tensorboard_available = False
@@ -60,7 +60,7 @@ class StoppableTrainer(object):
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
             tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
             os.makedirs(tb_dir)
-            self.tb = tensorboardX.SummaryWriter(log_dir=tb_dir)
+            self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=True)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
         self.loader = DelayedDataLoader(
             self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=0,
@@ -143,30 +143,40 @@ class StoppableTrainer(object):
                 out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
                 logger.info(out)
                 if self.tb:
-                    self.tb.add_scalars('stats/loss', {
-                        'train_loss': tr_loss,
-                        'valid_loss': val_loss,
-                        },
-                        self.iterations
-                    )
-                    self.tb.add_scalars('stats/error', {
-                        'train_error': tr_err,
-                        'valid_error': val_err,
-                        },
-                        self.iterations
-                    )
-                    self.tb.add_scalar('train_loss_gain', tr_loss_gain, self.iterations)
-                    self.tb.add_scalar('misc/train_speed', tr_speed, self.iterations)
-                    self.tb.add_scalar('misc/learning_rate', curr_lr, self.iterations)
-                    if self.iterations % self.preview_freq == 0:
-                        # Preview predictions
-                        inp, out = inference(self.dataset, self.model, raw_out=True)
-                        p0 = out[0, 0, 32, ...]  # class 0
-                        p1 = out[0, 1, 32, ...]  # class 1
-                        ip = inp[0, 0, 32, ...]
-                        self.tb.add_image('preview/input', ip, self.iterations)
-                        self.tb.add_image('preview/p0', p0, self.iterations)
-                        self.tb.add_image('preview/p1', p1, self.iterations)
+                    self.tb.log_scalar('stats/tr_loss', tr_loss, self.iterations)
+                    self.tb.log_scalar('stats/val_loss', val_loss, self.iterations)
+                    self.tb.log_scalar('stats/tr_err', tr_err, self.iterations)
+                    self.tb.log_scalar('stats/val_err', val_err, self.iterations)
+                    self.tb.log_scalar('misc/speed', tr_speed, self.iterations)
+                    self.tb.log_scalar('misc/learning_rate', curr_lr, self.iterations)
+
+                    # TODO: Log preview prediction images etc.
+
+                    # TODO: Also remove this below:
+                    # self.tb.add_scalars('stats/loss', {
+                    #     'train_loss': tr_loss,
+                    #     'valid_loss': val_loss,
+                    #     },
+                    #     self.iterations
+                    # )
+                    # self.tb.add_scalars('stats/error', {
+                    #     'train_error': tr_err,
+                    #     'valid_error': val_err,
+                    #     },
+                    #     self.iterations
+                    # )
+                    # self.tb.add_scalar('train_loss_gain', tr_loss_gain, self.iterations)
+                    # self.tb.add_scalar('misc/train_speed', tr_speed, self.iterations)
+                    # self.tb.add_scalar('misc/learning_rate', curr_lr, self.iterations)
+                    # if self.iterations % self.preview_freq == 0:
+                    #     # Preview predictions
+                    #     inp, out = inference(self.dataset, self.model, raw_out=True)
+                    #     p0 = out[0, 0, 32, ...]  # class 0
+                    #     p1 = out[0, 1, 32, ...]  # class 1
+                    #     ip = inp[0, 0, 32, ...]
+                    #     self.tb.add_image('preview/input', ip, self.iterations)
+                    #     self.tb.add_image('preview/p0', p0, self.iterations)
+                    #     self.tb.add_image('preview/p1', p1, self.iterations)
 
                     # TODO: Remove later
                     # self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
