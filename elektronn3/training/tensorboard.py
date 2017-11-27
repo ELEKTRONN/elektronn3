@@ -57,39 +57,45 @@ class TensorBoardLogger:
         if self.always_flush:
             self.writer.flush()
 
-    def log_images(
+    def log_image(
         self,
         tag: str,
-        images: Sequence[np.ndarray],
+        images: Union[np.ndarray, Sequence[np.ndarray]],
         step: int,
         cmap='gray'
         ) -> None:
-        """Logs a list of images."""
+        """Logs a an image or a list of images."""
 
-        im_summaries = []
-        for i, img in enumerate(images):
-            # Write the image to a bytestring
-            image_bytes = BytesIO()
+        def image_summary(img: np.ndarray) -> tf.Summary.Image:
+            image_bytes = BytesIO()  # Bytestring for storing the image
             plt.imsave(image_bytes, img, format='png', cmap=cmap)
-
-            # Create an Image object
             img_sum = tf.Summary.Image(
                 encoded_image_string=image_bytes.getvalue(),
                 height=img.shape[0],
                 width=img.shape[1]
             )
-            # Create a Summary value
-            im_summaries.append(tf.Summary.Value(tag='%s/%d' % (tag, i),
-                                                 image=img_sum))
+            return img_sum
+
+        img_summaries = []
+        if isinstance(images, np.ndarray):  # Single image
+            img_sum = image_summary(images)
+            img_summaries = [tf.Summary.Value(tag=tag, image=img_sum)]
+        elif isinstance(images, Sequence):
+            for i, img in enumerate(images):
+                numtag = f'{tag}/{i}'  # Use sequence index as tag suffix
+                img_sum = image_summary(img)
+                img_summaries.append(
+                    tf.Summary.Value(tag=numtag, image=img_sum)
+                )
+        else:
+            raise ValueError('"images" has invalid type.')
 
         # Create and write Summary
-        summary = tf.Summary(value=im_summaries)
+        summary = tf.Summary(value=img_summaries)
         self.writer.add_summary(summary, step)
         if self.always_flush:
             self.writer.flush()
 
-    def log_image(self, tag: str, image: np.ndarray, *args, **kwargs) -> None:
-        self.log_images(tag, [image], *args, **kwargs)
 
     def log_histogram(
         self,

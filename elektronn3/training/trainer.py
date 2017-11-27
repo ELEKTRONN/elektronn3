@@ -24,6 +24,7 @@ try:
     tensorboard_available = True
 except:
     tensorboard_available = False
+    logger.exception('Tensorboard not available.')
 
 cuda_enabled = global_config['cuda_enabled']
 
@@ -150,40 +151,17 @@ class StoppableTrainer(object):
                     self.tb.log_scalar('misc/speed', tr_speed, self.iterations)
                     self.tb.log_scalar('misc/learning_rate', curr_lr, self.iterations)
 
-                    # TODO: Log preview prediction images etc.
+                    if self.iterations % self.preview_freq == 0:
+                        inp, out = inference(self.dataset, self.model, raw_out=True)
+                        p0 = out[0, 0, 32, ...].data.numpy()  # class 0
+                        p1 = out[0, 1, 32, ...].data.numpy()  # class 1
+                        ip = inp[0, 0, 32, ...].data.numpy()
 
-                    # TODO: Also remove this below:
-                    # self.tb.add_scalars('stats/loss', {
-                    #     'train_loss': tr_loss,
-                    #     'valid_loss': val_loss,
-                    #     },
-                    #     self.iterations
-                    # )
-                    # self.tb.add_scalars('stats/error', {
-                    #     'train_error': tr_err,
-                    #     'valid_error': val_err,
-                    #     },
-                    #     self.iterations
-                    # )
-                    # self.tb.add_scalar('train_loss_gain', tr_loss_gain, self.iterations)
-                    # self.tb.add_scalar('misc/train_speed', tr_speed, self.iterations)
-                    # self.tb.add_scalar('misc/learning_rate', curr_lr, self.iterations)
-                    # if self.iterations % self.preview_freq == 0:
-                    #     # Preview predictions
-                    #     inp, out = inference(self.dataset, self.model, raw_out=True)
-                    #     p0 = out[0, 0, 32, ...]  # class 0
-                    #     p1 = out[0, 1, 32, ...]  # class 1
-                    #     ip = inp[0, 0, 32, ...]
-                    #     self.tb.add_image('preview/input', ip, self.iterations)
-                    #     self.tb.add_image('preview/p0', p0, self.iterations)
-                    #     self.tb.add_image('preview/p1', p1, self.iterations)
+                        self.tb.log_image('input', ip, step=self.iterations)
+                        self.tb.log_image('p/p0', p0, step=self.iterations)
+                        self.tb.log_image('p/p1', p1, step=self.iterations)
+                        # self.tb.log_image('preview', [ip, p0, p1], step=self.iterations)
 
-                    # TODO: Remove later
-                    # self.tb.add_scalar('loss/tr_loss', tr_loss, self.iterations)
-                    # self.tb.add_scalar('error/tr_err', tr_err, self.iterations)
-                    # self.tb.add_scalar('error/val_err', val_err, self.iterations)
-                    # self.tb.add_scalar('tr_speed', tr_speed, self.iterations)
-                    # self.tb.add_scalar('curr_lr', curr_lr, self.iterations)
 
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
