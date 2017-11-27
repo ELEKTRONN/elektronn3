@@ -1,0 +1,12 @@
+# python>=3.6
+
+pytorch>=0.2.0
+tensorflow-tensorboard>=0.4.0rc3  # Note that they plan on renaming it to "tensorboard" in a while.
+tensorflow>=1.4.0
+numpy
+scipy
+h5py
+matplotlib
+numba
+ipython
+tqdm
