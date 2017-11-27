@@ -1,4 +1,0 @@
-pytorch==0.2.0
-torchvision
-tensorboard  # Note that this is not the official distribution... Slightly suspicious...
-tensorboardX
