@@ -14,7 +14,6 @@ import logging
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from os.path import normpath, basename
 from .train_utils import user_input, HistoryTracker
-from .. import global_config
 from ..data.image import write_overlayimg
 from .train_utils import DelayedDataLoader
 logger = logging.getLogger('elektronn3log')
@@ -26,13 +25,16 @@ except:
     tensorboard_available = False
     logger.exception('Tensorboard not available.')
 
-cuda_enabled = global_config['cuda_enabled']
-
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, schedulers=None, preview_freq=2,
+                 save_path=None, batchsize=1, schedulers=None, preview_freq=20,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
-                 custom_shell=False):
+                 custom_shell=False, cuda_enabled='auto'):
+        if cuda_enabled == 'auto':
+            cuda_enabled = torch.cuda.is_available()
+            device = 'GPU' if cuda_enabled else 'CPU'
+            logger.info(f'Using {device}.')
+        self.cuda_enabled = cuda_enabled
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
@@ -61,12 +63,15 @@ class StoppableTrainer(object):
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
             tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
             os.makedirs(tb_dir)
-            self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=True)
+            self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
         self.loader = DelayedDataLoader(
-            self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=0,
-            pin_memory=cuda_enabled
+            self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2,
+            pin_memory=self.cuda_enabled
         )
+        if self.cuda_enabled:
+            self.model.cuda()
+            self.criterion.cuda()
 
     @property
     def save_name(self):
@@ -91,7 +96,7 @@ class StoppableTrainer(object):
                 target_sum = 0
                 timer = Timer()
                 for (data, target) in self.loader:
-                    if cuda_enabled:
+                    if self.cuda_enabled:
                         data, target = data.cuda(), target.cuda()
                     data = Variable(data, requires_grad=True)
                     target = Variable(target)
@@ -115,7 +120,7 @@ class StoppableTrainer(object):
                     target_sum += target.sum().data.tolist()[0]
                     incorrect += pred.ne(target.data).cpu().sum()
                     tr_loss += loss.data[0]
-                    print(self.iterations, target.size(), out.size(), loss.data[0])
+                    print(f'{self.iterations:6d}, loss: {loss.data[0]:.4f}')
                     self.tracker.update_timeline([self.timer.t_passed, loss.data[0], float(target_sum) / numel])
                     self.iterations += 1
                 tr_err = 100. * incorrect / numel
@@ -153,9 +158,9 @@ class StoppableTrainer(object):
 
                     if self.iterations % self.preview_freq == 0:
                         inp, out = inference(self.dataset, self.model, raw_out=True)
-                        p0 = out[0, 0, 32, ...].data.numpy()  # class 0
-                        p1 = out[0, 1, 32, ...].data.numpy()  # class 1
-                        ip = inp[0, 0, 32, ...].data.numpy()
+                        p0 = out[0, 0, 32, ...].data.cpu().numpy()  # class 0
+                        p1 = out[0, 1, 32, ...].data.cpu().numpy()  # class 1
+                        ip = inp[0, 0, 32, ...].data.cpu().numpy()
 
                         self.tb.log_image('input', ip, step=self.iterations)
                         self.tb.log_image('p/p0', p0, step=self.iterations)
@@ -192,12 +197,12 @@ class StoppableTrainer(object):
         self.model.eval()
         self.dataset.validate()
         data_loader = DelayedDataLoader(self.dataset, self.batchsize, shuffle=False,
-                                 num_workers=4, pin_memory=cuda_enabled)
+                                 num_workers=4, pin_memory=self.cuda_enabled)
         val_loss = 0
         incorrect = 0
         numel = 0
         for data, target in data_loader:
-            if cuda_enabled:
+            if self.cuda_enabled:
                 data, target = data.cuda(), target.cuda()
             data, target = Variable(data), Variable(target, volatile=True)
             output = self.model(data)
@@ -218,8 +223,12 @@ class StoppableTrainer(object):
 
 
 # TODO: Make more flexible, avoid assumptions about shapes etc.
-def inference(dataset, model, fname=None, raw_out=False):
+def inference(dataset, model, fname=None, raw_out=False, cuda_enabled='auto'):
     # logger.info("Starting preview prediction")
+    if cuda_enabled == 'auto':
+        cuda_enabled = torch.cuda.is_available()
+        device = 'GPU' if cuda_enabled else 'CPU'
+        logger.info(f'Using {device}.')
     model.eval()
     # Attention: Inference on Variables with unexpected shapes can lead to segfaults!
     # Some shapes (e.g. (1,1,64,128,128) sometimes work or segfault nondeterministically).

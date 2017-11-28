@@ -5,6 +5,7 @@ import gc
 import os
 import sys
 import time
+import logging
 import h5py
 import numpy as np
 import tqdm
@@ -13,13 +14,12 @@ from . import utils
 import torch
 import signal
 from torch.utils import data
-from .. import global_config, floatX
+from .. import floatX
 from .utils import DelayedInterrupt
 
+logger = logging.getLogger('elektronn3log')
 
-cuda_enabled = global_config['cuda_enabled']
 
-###############################################################################
 class BatchCreatorImage(data.Dataset):
     def __init__(self, d_path=None, l_path=None,
                  d_files=None, l_files=None, cube_prios=None, valid_cubes=None,
@@ -28,12 +28,17 @@ class BatchCreatorImage(data.Dataset):
                  source='train', patch_size=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
-                 epoch_size=100):
+                 epoch_size=100, cuda_enabled='auto'):
         assert (d_path and l_path and d_files and l_files)
         if len(d_files)!=len(l_files):
             raise ValueError("d_files and l_files must be lists of same length!")
         d_path = os.path.expanduser(d_path)
         l_path = os.path.expanduser(l_path)
+        if cuda_enabled == 'auto':
+            cuda_enabled = torch.cuda.is_available()
+            device = 'GPU' if cuda_enabled else 'CPU'
+            logger.info(f'Using {device}.')
+        self.cuda_enabled = cuda_enabled
         # batch properties
         self.source = source
         self.grey_augment_channels = grey_augment_channels
@@ -100,7 +105,7 @@ class BatchCreatorImage(data.Dataset):
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
             self.class_weights = torch.FloatTensor([bg_weight, fg_weight])
-            if cuda_enabled:
+            if self.cuda_enabled:
                 self.class_weights = self.class_weights.cuda()
         else:
             self.class_weights = None

@@ -22,25 +22,21 @@ from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.neural.vnet import VNet
 from elektronn3.neural.fcn import fcn32s
-from elektronn3.neural.simple import Simple3DNet
+from elektronn3.neural.simple import Simple3DNet, Extended3DNet
 from torch.optim.lr_scheduler import ExponentialLR
 
 
 logger = logging.getLogger('elektronn3log')
 
 parser = argparse.ArgumentParser(description='Train a network.')
-parser.add_argument('model_name', choices=['fcn32s', 'vnet', 'simple'])
+parser.add_argument('model_name', choices=['fcn32s', 'vnet', 'simple', 'extended'])
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('--host', choices=['wb', 'local'], default='local')
 args = parser.parse_args()
 
 model_name = args.model_name
 host = args.host
-cuda_enabled = not args.disable_cuda
-if cuda_enabled and not torch.cuda.is_available():
-    logger.warning('Cuda is not available.')
-    cuda_enabled = False
-elektronn3.global_config['cuda_enabled'] = cuda_enabled
+cuda_enabled = not args.disable_cuda and torch.cuda.is_available()
 
 logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
 
@@ -62,7 +58,7 @@ lr = 0.0004
 opt = 'adam'
 lr_dec = 0.999
 bs = 1
-progress_steps = 2  # Temporary low value for debugging
+progress_steps = 50  # Temporary low value for debugging
 
 if model_name == 'fcn32s':
     model = fcn32s(learned_billinear=False)
@@ -70,6 +66,8 @@ elif model_name == 'vnet':
     model = VNet(relu=False)
 elif model_name == 'simple':
     model = Simple3DNet()
+elif model_name == 'extended':
+    model = Extended3DNet()
 
 ### UTILS
 def pred(dataset):
@@ -128,10 +126,14 @@ if host == 'wb':
         'l_path': '%s/barrier_gt_phil/' % d_path,
         'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
         'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
-        'aniso_factor': 2, "source": "train",
-        'valid_cubes': [6], 'patch_size': (64, 64, 64),
-        'grey_augment_channels': [0], "epoch_size": progress_steps*bs,
-        'warp': 0.5, 'class_weights': True,
+        'aniso_factor': 2,
+        "source": "train",
+        'valid_cubes': [6],
+        'patch_size': (64, 64, 64),
+        'grey_augment_channels': [0],
+        "epoch_size": progress_steps*bs,
+        'warp': 0.5,
+        'class_weights': True,
         'warp_args': {
             'sample_aniso': True,
             'perspective': True
@@ -159,7 +161,7 @@ elif host == 'local':
         }
     }
 
-dataset = BatchCreatorImage(**data_init_kwargs)
+dataset = BatchCreatorImage(**data_init_kwargs, cuda_enabled=cuda_enabled)
 
 
 ### MODEL
