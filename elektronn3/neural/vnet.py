@@ -1,7 +1,10 @@
+# This implementation of V-Net (https://arxiv.org/abs/1606.04797)
+# is taken from https://github.com/mattmacy/vnet.pytorch by Matthew Macy
+# It is published under the BSD 3-Clause License. (Thanks, Matthew.)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-# from .base import BaseModule
 
 
 def passthrough(x, **kwargs):
