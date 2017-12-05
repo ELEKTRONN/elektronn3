@@ -22,14 +22,14 @@ from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.neural.vnet import VNet
 from elektronn3.neural.fcn import fcn32s
-from elektronn3.neural.simple import Simple3DNet, Extended3DNet
+from elektronn3.neural.simple import Simple3DNet, Extended3DNet, N3DNet
 from torch.optim.lr_scheduler import ExponentialLR
 
 
 logger = logging.getLogger('elektronn3log')
 
 parser = argparse.ArgumentParser(description='Train a network.')
-parser.add_argument('model_name', choices=['fcn32s', 'vnet', 'simple', 'extended'])
+parser.add_argument('model_name')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('--host', choices=['wb', 'local'], default='local')
 args = parser.parse_args()
@@ -68,6 +68,10 @@ elif model_name == 'simple':
     model = Simple3DNet()
 elif model_name == 'extended':
     model = Extended3DNet()
+elif model_name == 'n3d':
+    model = N3DNet()
+else:
+    raise ValueError('model not found.')
 
 ### UTILS
 def pred(dataset):
@@ -168,7 +172,6 @@ dataset = BatchCreatorImage(**data_init_kwargs, cuda_enabled=cuda_enabled)
 torch.manual_seed(0)
 if cuda_enabled:
     torch.cuda.manual_seed(0)
-# model = VNet(relu=False)
 if bs >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:

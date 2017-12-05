@@ -42,6 +42,7 @@ class StoppableTrainer(object):
         self.custom_shell = custom_shell
         self.terminate = False
         self.iterations = 0
+        self.first_plot = True
         self.save_path = save_path
         if save_path is not None and not os.path.isdir(save_path):
             os.makedirs(save_path)
@@ -162,7 +163,9 @@ class StoppableTrainer(object):
                         p1 = out[0, 1, 32, ...].data.cpu().numpy()  # class 1
                         ip = inp[0, 0, 32, ...].data.cpu().numpy()
 
-                        self.tb.log_image('input', ip, step=self.iterations)
+                        if self.first_plot:
+                            self.tb.log_image('input', ip, step=self.iterations)
+                            self.first_plot = False
                         self.tb.log_image('p/p0', p0, step=self.iterations)
                         self.tb.log_image('p/p1', p1, step=self.iterations)
                         # self.tb.log_image('preview', [ip, p0, p1], step=self.iterations)
