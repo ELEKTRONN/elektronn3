@@ -70,6 +70,7 @@ class StoppableTrainer(object):
             self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2,
             pin_memory=self.cuda_enabled
         )
+        self.valid_loader = None
         if self.cuda_enabled:
             self.model.cuda()
             self.criterion.cuda()
@@ -108,7 +109,7 @@ class StoppableTrainer(object):
                     out = out.permute(0, 2, 3, 4, 1).contiguous()
                     out = out.view(out.numel() // 2, 2)
                     target = target.view(target.numel())
-                    loss = self.criterion(out, target)
+                    loss = self.criterion(out, target)  # TODO: Respect class weights
 
                     # update step
                     self.optimizer.zero_grad()
@@ -130,8 +131,7 @@ class StoppableTrainer(object):
                 tr_speed = len(self.loader) / timer.t_passed
 
                 # --> self.step():
-                # val_loss, val_err = self.validate()
-                val_loss, val_err = 0, 0
+                val_loss, val_err = self.validate()
                 curr_lr = self.schedulers["lr"].get_lr()[-1]
                 for sched in self.schedulers.values():
                     sched.step()
@@ -159,15 +159,20 @@ class StoppableTrainer(object):
 
                     if self.iterations % self.preview_freq == 0:
                         inp, out = inference(self.dataset, self.model, raw_out=True)
+                        # TODO: Redundant computations! Reduce to one call after deciding if both raw and clpred should be logged.
+                        _, clpred = inference(self.dataset, self.model, raw_out=False)
+                        # TODO: Less arbitrary slicing
                         p0 = out[0, 0, 32, ...].data.cpu().numpy()  # class 0
                         p1 = out[0, 1, 32, ...].data.cpu().numpy()  # class 1
                         ip = inp[0, 0, 32, ...].data.cpu().numpy()
+                        cl = clpred[32, ...]  # binary class prediction
 
                         if self.first_plot:
                             self.tb.log_image('input', ip, step=self.iterations)
                             self.first_plot = False
                         self.tb.log_image('p/p0', p0, step=self.iterations)
                         self.tb.log_image('p/p1', p1, step=self.iterations)
+                        self.tb.log_image('p/cl', cl, self.iterations)
                         # self.tb.log_image('preview', [ip, p0, p1], step=self.iterations)
 
 
@@ -197,24 +202,30 @@ class StoppableTrainer(object):
 
 
     def validate(self):
-        self.model.eval()
-        self.dataset.validate()
-        data_loader = DelayedDataLoader(self.dataset, self.batchsize, shuffle=False,
-                                 num_workers=4, pin_memory=self.cuda_enabled)
+        if self.valid_loader is None:
+            self.valid_loader = DelayedDataLoader(
+                self.dataset, self.batchsize, shuffle=False, num_workers=4, pin_memory=self.cuda_enabled
+            )
+
+        self.dataset.validate()  # Switch dataset to validation sources
+        self.model.eval()  # Set dropout and batchnorm to eval mode
+
         val_loss = 0
         incorrect = 0
         numel = 0
-        for data, target in data_loader:
+        for data, target in self.valid_loader:
             if self.cuda_enabled:
                 data, target = data.cuda(), target.cuda()
             data, target = Variable(data), Variable(target, volatile=True)
-            output = self.model(data)
+            out = self.model(data)
+            out = out.permute(0, 2, 3, 4, 1).contiguous()
+            out = out.view(out.numel() // 2, 2)
             target = target.view(target.numel())
             numel += target.numel()
-            val_loss += self.criterion(output, target, weight=self.dataset.class_weights).data[0]
-            pred = output.data.max(1)[1]  # get the index of the max log-probability
+            val_loss += self.criterion(out, target).data[0]  # TODO: Respect class weights
+            pred = out.data.max(1)[1]  # get the index of the max log-probability
             incorrect += pred.ne(target.data).cpu().sum()
-        val_loss /= len(data_loader)  # loss function already averages over batch size
+        val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
         if self.save_path is not None:
             write_overlayimg("%s/" % (self.save_path), np.array(data.data.view(data.size()).tolist())[0, 0],
@@ -222,28 +233,33 @@ class StoppableTrainer(object):
                              nb_of_slices=2)
             imsave("%s/target%d.png" % (self.save_path, self.iterations),
                    np.array(target.data.view(data.size()).tolist())[0, 0, 8])
+
+        # Reset dataset and model to training mode
+        self.dataset.train()
+        self.model.train()
+
         return val_loss, val_err
 
 
 # TODO: Make more flexible, avoid assumptions about shapes etc.
-def inference(dataset, model, fname=None, raw_out=False, cuda_enabled='auto'):
+def inference(dataset, model, shape=(64, 288, 288), fname=None, raw_out=False, cuda_enabled='auto'):
+    model.eval()  # Set dropout and batchnorm to eval mode
+
+    # TODO: Don't always slice from 0 to shape[i]. Make central slices instead.
     # logger.info("Starting preview prediction")
     if cuda_enabled == 'auto':
         cuda_enabled = torch.cuda.is_available()
         device = 'GPU' if cuda_enabled else 'CPU'
         logger.info(f'Using {device}.')
-    model.eval()
-    # Attention: Inference on Variables with unexpected shapes can lead to segfaults!
-    # Some shapes (e.g. (1,1,64,128,128) sometimes work or segfault nondeterministically).
+    # Attention: Inference on Variables with unexpected shapes can lead to errors!
+    # Staying with multiples of 16 for lengths seems to work.
     try:
-        # inp = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
-        inp = torch.from_numpy(dataset.valid_d[0][None, :, :64, :64, :64])
+        inp = torch.from_numpy(dataset.valid_d[0][None, :, :shape[0], :shape[1], :shape[2]])
     except IndexError:
         logger.warning('valid_d not accessible. Using training data for preview.')
-        inp = torch.from_numpy(dataset.train_d[0][None, :, :64, :64, :64])
-        # inp = torch.rand(1, 1, 160, 288, 288)
+        inp = torch.from_numpy(dataset.train_d[0][None, :, :shape[0], :shape[1], :shape[2]])
+        # inp = torch.rand(1, 1, shape[0], shape[1], shape[2])
     if cuda_enabled:
-        # inp.pin_memory()
         inp = inp.cuda()
     inp = Variable(inp, volatile=True)
     # assume single GPU / batch size 1
@@ -252,12 +268,15 @@ def inference(dataset, model, fname=None, raw_out=False, cuda_enabled='auto'):
         return inp, out  # return the raw output tensor
 
     clf = out.data.max(1)[1].view(inp.size())
-    pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]
+    # pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]  # wat
+    pred = clf.cpu().numpy()[0, 0]
     if fname:
         try:
-            save_to_h5py([pred, dataset.valid_d[0][0, :64, :64, :64].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
+            save_to_h5py([pred, dataset.valid_d[0][0, :shape[0],: shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
         except IndexError:
-            save_to_h5py([pred, dataset.train_d[0][0, :64, :64, :64].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
-        save_to_h5py([np.exp(np.array(out.data.view([1, 2, 64, 64, 64]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
+            save_to_h5py([pred, dataset.train_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
+        save_to_h5py([np.exp(np.array(out.data.view([1, 2, shape[0], shape[1], shape[2]]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
                     hdf5_names=["prob"])
+
+    model.train()  # Reset model to training mode
     return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
