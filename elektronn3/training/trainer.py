@@ -174,7 +174,7 @@ class StoppableTrainer(object):
                         self.tb.log_image('p/p1', p1, step=self.iterations)
                         self.tb.log_image('p/cl', cl, self.iterations)
                         # self.tb.log_image('preview', [ip, p0, p1], step=self.iterations)
-
+                        # TODO: Also plot ground truth target for preview prediction
 
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
@@ -228,11 +228,17 @@ class StoppableTrainer(object):
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
         if self.save_path is not None:
-            write_overlayimg("%s/" % (self.save_path), np.array(data.data.view(data.size()).tolist())[0, 0],
-                             np.array(pred.view(data.size()).tolist())[0, 0], fname="raw%d" % self.iterations,
-                             nb_of_slices=2)
-            imsave("%s/target%d.png" % (self.save_path, self.iterations),
-                   np.array(target.data.view(data.size()).tolist())[0, 0, 8])
+            write_overlayimg(
+                "%s/" % (self.save_path),
+                data.data.view(data.size())[0, 0].cpu().numpy(),
+                pred.view(data.size())[0, 0].cpu().numpy(),
+                fname="%d_overlay" % self.iterations,
+                nb_of_slices=2
+            )
+            imsave(
+                "%s/%d_target.png" % (self.save_path, self.iterations),
+                target.data.view(data.size())[0, 0, 8].cpu().numpy()
+            )
 
         # Reset dataset and model to training mode
         self.dataset.train()
@@ -242,7 +248,7 @@ class StoppableTrainer(object):
 
 
 # TODO: Make more flexible, avoid assumptions about shapes etc.
-def inference(dataset, model, shape=(64, 288, 288), fname=None, raw_out=False, cuda_enabled='auto'):
+def inference(dataset, model, fname=None, raw_out=False, shape=(64, 288, 288), cuda_enabled='auto'):
     model.eval()  # Set dropout and batchnorm to eval mode
 
     # TODO: Don't always slice from 0 to shape[i]. Make central slices instead.
@@ -269,14 +275,17 @@ def inference(dataset, model, shape=(64, 288, 288), fname=None, raw_out=False, c
 
     clf = out.data.max(1)[1].view(inp.size())
     # pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]  # wat
-    pred = clf.cpu().numpy()[0, 0]
+    pred = clf[0, 0].cpu().numpy()
     if fname:
         try:
             save_to_h5py([pred, dataset.valid_d[0][0, :shape[0],: shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
         except IndexError:
             save_to_h5py([pred, dataset.train_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
-        save_to_h5py([np.exp(np.array(out.data.view([1, 2, shape[0], shape[1], shape[2]]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
-                    hdf5_names=["prob"])
+        save_to_h5py(
+            [np.exp(out.data.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy()), dtype=np.float32)],
+            fname+"prob.h5",
+            hdf5_names=["prob"]
+        )
 
     model.train()  # Reset model to training mode
     return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.

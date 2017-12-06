@@ -58,7 +58,7 @@ lr = 0.0004
 opt = 'adam'
 lr_dec = 0.999
 bs = 1
-progress_steps = 50  # Temporary low value for debugging
+progress_steps = 100  # Temporary low value for debugging
 
 if model_name == 'fcn32s':
     model = fcn32s(learned_billinear=False)
@@ -102,24 +102,6 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 
-def inference(dataset, model, fname):
-    # logger.info("Starting preview prediction")
-    model.eval()
-    raw = torch.from_numpy(dataset.valid_d[0][None, :, :160, :288, :288])
-    if cuda_enabled:
-        # raw.pin_memory()
-        raw = raw.cuda()
-    raw = Variable(raw, volatile=True)
-    # assume single GPU / batch size 1
-    out = model(raw)
-    clf = out.data.max(1)[1].view(raw.size())
-    pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]
-    save_to_h5py([pred, dataset.valid_d[0][0, :160, :288, :288].astype(np.float32)], fname,
-                 hdf5_names=["pred", "raw"])
-    save_to_h5py([np.exp(np.array(out.data.view([1, 2, 160, 288, 288]).tolist())[0, 1], dtype=np.float32)], fname+"prob.h5",
-                 hdf5_names=["prob"])
-
-
 ### DATA
 if host == 'wb':
     d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
@@ -133,7 +115,7 @@ if host == 'wb':
         'aniso_factor': 2,
         "source": "train",
         'valid_cubes': [6],
-        'patch_size': (64, 64, 64),
+        'patch_size': (96, 96, 96),
         'grey_augment_channels': [0],
         "epoch_size": progress_steps*bs,
         'warp': 0.5,
@@ -153,7 +135,7 @@ elif host == 'local':
         'l_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
         'aniso_factor': 2,
         'source': 'train',
-        'patch_size': (64, 64, 64),
+        'patch_size': (96, 96, 96),
         'valid_cubes': [2],
         'grey_augment_channels': [0],
         'epoch_size': progress_steps*bs,
