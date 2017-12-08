@@ -420,6 +420,7 @@ class BatchCreatorImage(data.Dataset):
 
         for (d_f, d_key), (l_f, l_key) in zip(self.d_files, self.l_files):
             pbar.write('Loading %s and %s' % (d_f, l_f))
+            # TODO: Don't load files into memory, always use "h5stream" (once it works)
             if self.h5stream:
                 d = h5py.File(os.path.join(self.d_path, d_f), 'r')[d_key]
                 t = h5py.File(os.path.join(self.l_path, l_f), 'r')[l_key]

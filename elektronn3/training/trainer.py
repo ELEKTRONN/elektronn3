@@ -66,10 +66,20 @@ class StoppableTrainer(object):
             os.makedirs(tb_dir)
             self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
-        self.loader = DelayedDataLoader(
-            self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2,
-            pin_memory=self.cuda_enabled
-        )
+        try:
+            self.loader = DelayedDataLoader(
+                self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2, pin_memory=self.cuda_enabled,
+                timeout=10  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
+            )
+        except:  # TODO: Remove this try/catch once the timeout option is in an official release
+            logger.warning(
+                'DataLoader doesn\'t support timeout option. This can lead to random freezes during training.\n'
+                'If this is an issue for you, cherry-pick\nhttps://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3\n'
+                'or use a PyTorch version newer than 0.3.0'
+            )
+            self.loader = DelayedDataLoader(
+                self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2, pin_memory=self.cuda_enabled,
+            )
         self.valid_loader = None
         if self.cuda_enabled:
             self.model.cuda()
@@ -203,9 +213,15 @@ class StoppableTrainer(object):
 
     def validate(self):
         if self.valid_loader is None:
-            self.valid_loader = DelayedDataLoader(
-                self.dataset, self.batchsize, shuffle=False, num_workers=4, pin_memory=self.cuda_enabled
-            )
+            try:
+                self.valid_loader = DelayedDataLoader(
+                    self.dataset, self.batchsize, shuffle=False, num_workers=2, pin_memory=False,
+                    timeout=10  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
+                )
+            except:  # TODO: Remove this try/catch once the timeout option is in an official release
+                self.valid_loader = DelayedDataLoader(
+                    self.dataset, self.batchsize, shuffle=False, num_workers=2, pin_memory=False
+                )
 
         self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
@@ -282,7 +298,7 @@ def inference(dataset, model, fname=None, raw_out=False, shape=(64, 288, 288), c
         except IndexError:
             save_to_h5py([pred, dataset.train_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
         save_to_h5py(
-            [np.exp(out.data.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy()), dtype=np.float32)],
+            [np.exp(out.data.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
             fname+"prob.h5",
             hdf5_names=["prob"]
         )
