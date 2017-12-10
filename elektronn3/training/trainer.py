@@ -127,10 +127,10 @@ class StoppableTrainer(object):
                     self.optimizer.step()
 
                     # get training performance
-                    pred = out.data.max(1)[1]  # get the index of the max log-probability
                     numel += target.numel()
-                    target_sum += target.sum().data.tolist()[0]
-                    incorrect += pred.ne(target.data).cpu().sum()
+                    target_sum += target.sum()
+                    maxcl = maxclass(out.data)
+                    incorrect += maxcl.ne(target.data).cpu().sum()
                     tr_loss += loss.data[0]
                     print(f'{self.iterations:6d}, loss: {loss.data[0]:.4f}')
                     self.tracker.update_timeline([self.timer.t_passed, loss.data[0], float(target_sum) / numel])
@@ -158,6 +158,7 @@ class StoppableTrainer(object):
                 out += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
                     % (val_err, "%", mean_target * 100, tr_loss_gain)
                 out += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
+                # TODO: Log voxels/s
                 logger.info(out)
                 if self.tb:
                     self.tb.log_scalar('stats/tr_loss', tr_loss, self.iterations)
@@ -168,28 +169,27 @@ class StoppableTrainer(object):
                     self.tb.log_scalar('misc/learning_rate', curr_lr, self.iterations)
 
                     if self.iterations % self.preview_freq == 0:
-                        inp, out = inference(self.dataset, self.model, raw_out=True)
-                        # TODO: Redundant computations! Reduce to one call after deciding if both raw and clpred should be logged.
-                        _, clpred = inference(self.dataset, self.model, raw_out=False)
+                        inp, out = inference(self.model, self.dataset)
+                        mcl = maxclass(out)
                         # TODO: Less arbitrary slicing
                         p0 = out[0, 0, 32, ...].data.cpu().numpy()  # class 0
                         p1 = out[0, 1, 32, ...].data.cpu().numpy()  # class 1
                         ip = inp[0, 0, 32, ...].data.cpu().numpy()
-                        cl = clpred[32, ...]  # binary class prediction
+                        mc = mcl[0, 32, ...].data.cpu().numpy()
 
                         if self.first_plot:
                             self.tb.log_image('input', ip, step=self.iterations)
                             self.first_plot = False
                         self.tb.log_image('p/p0', p0, step=self.iterations)
                         self.tb.log_image('p/p1', p1, step=self.iterations)
-                        self.tb.log_image('p/cl', cl, self.iterations)
+                        self.tb.log_image('p/mc', mc, self.iterations)
                         # self.tb.log_image('preview', [ip, p0, p1], step=self.iterations)
                         # TODO: Also plot ground truth target for preview prediction
 
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
                 if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
-                    inference(self.dataset, self.model, self.save_path + "/" + self.save_name + ".h5")
+                    # inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
             except (KeyboardInterrupt) as e:
                 # TODO: The shell doesn't have access to the main training loops locals, so it's useless. Find out how to fix this.
@@ -239,15 +239,15 @@ class StoppableTrainer(object):
             target = target.view(target.numel())
             numel += target.numel()
             val_loss += self.criterion(out, target).data[0]  # TODO: Respect class weights
-            pred = out.data.max(1)[1]  # get the index of the max log-probability
-            incorrect += pred.ne(target.data).cpu().sum()
+            maxcl = maxclass(out.data)  # get the index of the max log-probability
+            incorrect += maxcl.ne(target.data).cpu().sum()
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
         if self.save_path is not None:
             write_overlayimg(
                 "%s/" % (self.save_path),
                 data.data.view(data.size())[0, 0].cpu().numpy(),
-                pred.view(data.size())[0, 0].cpu().numpy(),
+                maxcl.view(data.size())[0, 0].cpu().numpy(),
                 fname="%d_overlay" % self.iterations,
                 nb_of_slices=2
             )
@@ -263,8 +263,38 @@ class StoppableTrainer(object):
         return val_loss, val_err
 
 
+# TODO: Move all the functions below out of trainer.py
+
+def maxclass(class_predictions: Variable):
+    """For each point in a tensor, determine the class with max. probability.
+
+    Args:
+        class_predictions: Tensor of shape (N, C, D, H, W)
+
+    Returns:
+        Tensor of shape (N, D, H, W)
+    """
+    maxcl = class_predictions.max(dim=1)[1]
+    return maxcl
+
+
+# TODO
+def save_to_h5(fname: str, model_output: Variable):
+    maxcl = maxclass(model_output)  # TODO: Ensure correct shape
+    save_to_h5py(
+        [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
+        fname,
+        hdf5_names=["pred", "raw"]
+    )
+    save_to_h5py(
+        [np.exp(model_output.data.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
+        fname+"prob.h5",
+        hdf5_names=["prob"]
+    )
+
 # TODO: Make more flexible, avoid assumptions about shapes etc.
-def inference(dataset, model, fname=None, raw_out=False, shape=(64, 288, 288), cuda_enabled='auto'):
+# TODO: Rename this function (preview-*, test-*?) and write a more general inference function.
+def inference(model, dataset=None, shape=(64, 288, 288), cuda_enabled='auto'):
     model.eval()  # Set dropout and batchnorm to eval mode
 
     # TODO: Don't always slice from 0 to shape[i]. Make central slices instead.
@@ -275,33 +305,14 @@ def inference(dataset, model, fname=None, raw_out=False, shape=(64, 288, 288), c
         logger.info(f'Using {device}.')
     # Attention: Inference on Variables with unexpected shapes can lead to errors!
     # Staying with multiples of 16 for lengths seems to work.
-    try:
+    if dataset is None:
+        inp = torch.rand(1, 1, shape[0], shape[1], shape[2])
+    else:
+        # TODO: valid_d[0]: Too arbitrary
         inp = torch.from_numpy(dataset.valid_d[0][None, :, :shape[0], :shape[1], :shape[2]])
-    except IndexError:
-        logger.warning('valid_d not accessible. Using training data for preview.')
-        inp = torch.from_numpy(dataset.train_d[0][None, :, :shape[0], :shape[1], :shape[2]])
-        # inp = torch.rand(1, 1, shape[0], shape[1], shape[2])
     if cuda_enabled:
         inp = inp.cuda()
     inp = Variable(inp, volatile=True)
-    # assume single GPU / batch size 1
     out = model(inp)
-    if raw_out:
-        return inp, out  # return the raw output tensor
-
-    clf = out.data.max(1)[1].view(inp.size())
-    # pred = np.array(clf.tolist(), dtype=np.float32)[0, 0]  # wat
-    pred = clf[0, 0].cpu().numpy()
-    if fname:
-        try:
-            save_to_h5py([pred, dataset.valid_d[0][0, :shape[0],: shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
-        except IndexError:
-            save_to_h5py([pred, dataset.train_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)], fname, hdf5_names=["pred", "raw"])
-        save_to_h5py(
-            [np.exp(out.data.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
-            fname+"prob.h5",
-            hdf5_names=["prob"]
-        )
-
     model.train()  # Reset model to training mode
-    return inp, pred  # TODO: inp is Variable, but pred is ndarray. Decide on one type.
+    return inp, out

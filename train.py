@@ -86,7 +86,7 @@ def pred(dataset):
     if cuda_enabled:
         model = model.cuda()
         model.load_state_dict(state_dict)
-    inference(dataset, model, test_cube_path)
+    inference(model, dataset, test_cube_path)
     raise ()
 
 def weights_init(m):
