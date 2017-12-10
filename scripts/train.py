@@ -5,18 +5,15 @@ import argparse
 import datetime
 import numpy as np
 import torch
-from torch.autograd import Variable
 from torch import nn
 from torch.nn.modules.loss import CrossEntropyLoss
 from torch import optim
-from torch.utils import data
 
 # Don't move this stuff, it needs to be run this early to work
-from elektronn3 import select_mpl_backend
-mpl_backend = 'agg'  # TODO: Make this a CLI option
-select_mpl_backend(mpl_backend)
-
 import elektronn3
+mpl_backend = 'agg'  # TODO: Make this a CLI option
+elektronn3.select_mpl_backend(mpl_backend)
+
 from elektronn3.data.cnndata import BatchCreatorImage
 from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
@@ -40,18 +37,15 @@ cuda_enabled = not args.disable_cuda and torch.cuda.is_available()
 
 logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
 
-### USER PATHS
+# USER PATHS
 path_prefix = os.path.expanduser('~/e3training/')
 os.makedirs(path_prefix, exist_ok=True)
-state_dict_path = '/u/pschuber/vnet/vnet-99900-model.pkl'  # TODO: Make variable
-test_cube_path = '/u/pschuber/test_pred.h5'  # TODO: Make variable
 
 timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
 save_name = model_name + '__' + timestamp
 save_path = os.path.join(path_prefix, save_name)
 
 
-### TRAINING
 nIters = int(500000)
 wd = 0.5e-4
 lr = 0.0004
@@ -73,21 +67,6 @@ elif model_name == 'n3d':
 else:
     raise ValueError('model not found.')
 
-### UTILS
-def pred(dataset):
-    state_dict = torch.load(state_dict_path)
-    # corr_state_dict = state_dict.copy()
-    # for k, v in state_dict.items():
-    #     corr_state_dict[k[7:]] = v
-    #     del corr_state_dict[k]
-    # state_dict = corr_state_dict
-    if bs >= 4:
-        model = nn.parallel.DataParallel(model, device_ids=[0, 1])
-    if cuda_enabled:
-        model = model.cuda()
-        model.load_state_dict(state_dict)
-    inference(model, dataset, test_cube_path)
-    raise ()
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -102,7 +81,6 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 
-### DATA
 if host == 'wb':
     d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
     h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
@@ -150,7 +128,6 @@ elif host == 'local':
 dataset = BatchCreatorImage(**data_init_kwargs, cuda_enabled=cuda_enabled)
 
 
-### MODEL
 torch.manual_seed(0)
 if cuda_enabled:
     torch.cuda.manual_seed(0)
@@ -169,13 +146,8 @@ elif opt == 'rmsprop':
 
 lr_sched = ExponentialLR(optimizer, lr_dec)
 
-# loss
 criterion = CrossEntropyLoss(weight=dataset.class_weights)
 
-# start training
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
                       dataset=dataset, batchsize=bs, save_path=save_path, schedulers={"lr": lr_sched})
 st.train(nIters)
-
-# start ifnerence
-# inference(dataset, model)
