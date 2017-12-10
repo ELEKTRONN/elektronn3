@@ -20,9 +20,9 @@ import elektronn3
 from elektronn3.data.cnndata import BatchCreatorImage
 from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
-from elektronn3.neural.vnet import VNet
-from elektronn3.neural.fcn import fcn32s
-from elektronn3.neural.simple import Simple3DNet, Extended3DNet, N3DNet
+from elektronn3.models.vnet import VNet
+from elektronn3.models.fcn import fcn32s
+from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
 from torch.optim.lr_scheduler import ExponentialLR
 
 
