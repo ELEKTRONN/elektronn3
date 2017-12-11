@@ -34,13 +34,13 @@ directory.
 For a quick test run, first ensure that the neuro_data_zxy data set is
 in the expected path:
 
-    $ wget http://elektronn.org/downloads/neuro_data_zxy.zip
-    $ unzip neuro_data_zxy.zip -d ~/neuro_data_zxy
+    wget http://elektronn.org/downloads/neuro_data_zxy.zip
+    unzip neuro_data_zxy.zip -d ~/neuro_data_zxy
 
 To test training with an extremely small model and **elektronn3**,
 you can run:
 
-    $ python3 scripts/train.py simple
+    python3 scripts/train.py simple
 
 You can replace `simple` by `n3d`, `vnet` or ``fcn32s`` to try other
 integrated network models.
@@ -64,7 +64,7 @@ changes.
 Tensorboard logs are saved in `~/tb/` by default, so you can track training
 progress by running a tensorboard server there:
 
-    $ tensorboard --logdir ~/tb
+    tensorboard --logdir ~/tb
 
 Then you can view the visualizations at http://localhost:6006.
 
