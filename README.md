@@ -11,25 +11,42 @@ recommend using it yet if you are not already familiar with the code.
 
 # Requirements
 
+- Linux (support for Windows, MacOS and other systems is not planned)
 - Python 3.6 or later
+- PyTorch 0.3.0
 - For other requirements see `requirements.txt`
 
 
 # Setup
 
+Ensure that all of the requirements listed above are installed.
+We recommend using conda or a virtualenv for that.
+To install **elektronn3** in development mode, run
 
-For a quick local test run, first ensure that the neuro_data_zxy data set is
+    git clone https://github.com/ELEKTRONN/elektronn3 elektronn3-dev
+    pip install -e elektronn3-dev
+
+To update your installation, just `git pull` in your clone
+directory.
+
+# Training
+
+For a quick test run, first ensure that the neuro_data_zxy data set is
 in the expected path:
 
     $ wget http://elektronn.org/downloads/neuro_data_zxy.zip
     $ unzip neuro_data_zxy.zip -d ~/neuro_data_zxy
 
-
-# Training
-To simply test training with an extremely small model and **elektronn3**,
+To test training with an extremely small model and **elektronn3**,
 you can run:
 
-    $ python3 train.py simple --host local
+    $ python3 scripts/train.py simple
+
+You can replace `simple` by `n3d`, `vnet` or ``fcn32s`` to try other
+integrated network models.
+
+(Note: We will add support for supplying your own models in separate files
+soon.)
 
 
 ## Training shell
@@ -40,15 +57,6 @@ changes.
 - To continue training, hit Ctrl-D twice.
 - If you want the process to terminate after leaving the shell, set
 `self.terminate = True` inside it and then hit Ctrl-D twice.
-
-
-## Options
-
-- You can replace `simple` by `n3d`, `vnet` or ``fcn32s`` to try other network
-  models.
-- `--host` can also be set to `wb` if you run it on the wb server.
-  Then it will use the data set at `/wholebrain/scratch/j0126/barrier_gt_phil/`
-  (This setting will is just for quick lab-internal testing and will be removed later)
 
 
 ## Using Tensorboard
