@@ -21,19 +21,19 @@ logger = logging.getLogger('elektronn3log')
 
 
 class BatchCreatorImage(data.Dataset):
-    def __init__(self, d_path=None, l_path=None,
-                 d_files=None, l_files=None, cube_prios=None, valid_cubes=None,
+    def __init__(self, d_path=None, t_path=None,
+                 d_files=None, t_files=None, cube_prios=None, valid_cubes=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
                  target_discrete_ix=None,
                  source='train', patch_size=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
                  epoch_size=100, cuda_enabled='auto'):
-        assert (d_path and l_path and d_files and l_files)
-        if len(d_files)!=len(l_files):
-            raise ValueError("d_files and l_files must be lists of same length!")
+        assert (d_path and t_path and d_files and t_files)
+        if len(d_files)!=len(t_files):
+            raise ValueError("d_files and t_files must be lists of same length!")
         d_path = os.path.expanduser(d_path)
-        l_path = os.path.expanduser(l_path)
+        t_path = os.path.expanduser(t_path)
         if cuda_enabled == 'auto':
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
@@ -49,9 +49,9 @@ class BatchCreatorImage(data.Dataset):
 
         # general properties
         self.d_path = d_path
-        self.l_path = l_path
+        self.t_path = t_path
         self.d_files = d_files
-        self.l_files = l_files
+        self.t_files = t_files
         self.cube_prios = cube_prios
         self.valid_cubes = valid_cubes if valid_cubes is not None else []
         self.aniso_factor = aniso_factor
@@ -72,22 +72,22 @@ class BatchCreatorImage(data.Dataset):
         self.mode = 'img-img'
         # The following will be inferred when reading data
         self.n_labelled_pixel = 0
-        self.n_f = None  # number of channels/feature in input
-        self.t_n_f = None  # the shape of the returned label batch at index 1
+        self.c_input = None  # number of channels/feature in input
+        self.c_target = None  # the shape of the returned label batch at index 1
 
         # Actual data fields
         self.valid_d = []
-        self.valid_l = []
+        self.valid_t = []
         self.valid_extra = []
 
         self.train_d = []
-        self.train_l = []
+        self.train_t = []
         self.train_extra = []
 
         # Setup internal stuff
-        self.rng = np.random.RandomState(np.uint32((time.time() * 0.0001 -
-                                                    int(
-                                                        time.time() * 0.0001)) * 4294967295))
+        self.rng = np.random.RandomState(
+            np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
+        )
         self.pid = os.getpid()
         self.gc_count = 1
 
@@ -99,7 +99,7 @@ class BatchCreatorImage(data.Dataset):
 
         self.load_data()
         if class_weights:
-            target_mean = np.mean(self.train_l)
+            target_mean = np.mean(self.train_t)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
             self.class_weights = torch.FloatTensor([bg_weight, fg_weight])
@@ -130,7 +130,7 @@ class BatchCreatorImage(data.Dataset):
         s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
             "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
             "pixels."
-        s = s.format(self.t_n_f, self.n_f, self._training_count,
+        s = s.format(self.c_target, self.c_input, self._training_count,
                      self._valid_count, self.n_labelled_pixel)
         return s
 
@@ -157,9 +157,9 @@ class BatchCreatorImage(data.Dataset):
                                      int(time.time()*0.0001))*4294967295+self.pid))
 
     def _allocbatch(self, batch_size):
-        images = np.zeros((batch_size, self.n_f,)+tuple(self.patch_size), dtype='float32')
+        images = np.zeros((batch_size, self.c_input,) + tuple(self.patch_size), dtype='float32')
         sh = self.patch_size - self.offsets * 2
-        target = np.zeros((batch_size, self.t_n_f)+tuple(sh), dtype=self.t_dtype)
+        target = np.zeros((batch_size, self.c_target) + tuple(sh), dtype=self.t_dtype)
         return images, target
 
     def getbatch(self, batch_size=1):
@@ -208,6 +208,7 @@ class BatchCreatorImage(data.Dataset):
         self._reseed()
         images, target = self._allocbatch(batch_size)
         patch_count = 0
+        # TODO: Remove batching. This should only be done by the loader.
         while patch_count < batch_size:  # Loop to fill up batch with examples
             d, t = self._getcube(self.source)  # get cube randomly
 
@@ -229,6 +230,8 @@ class BatchCreatorImage(data.Dataset):
         # Final modification of targets: striding and replacing nan
         if not (self.force_dense or np.all(self.strides == 1)):
             target = self._stridedtargets(target)
+
+        # TODO: Normalize with global mean and std
 
         ret = [images, target]  # The "normal" batch
         self.gc_count += 1
@@ -300,14 +303,14 @@ class BatchCreatorImage(data.Dataset):
         if source == 'train':
             p = self.rng.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
-            d, t = self.train_d[i], self.train_l[i]
+            d, t = self.train_d[i], self.train_t[i]
         elif source == "valid":
             if len(self.valid_d) == 0:
                 raise ValueError("No validation set")
 
             i = self.rng.randint(0, len(self.valid_d))
             d = self.valid_d[i]
-            t = self.valid_l[i]
+            t = self.valid_t[i]
         else:
             raise ValueError("Unknown data source")
 
@@ -324,9 +327,9 @@ class BatchCreatorImage(data.Dataset):
         Parameters
         ----------
 
-        d_path/l_path: string
+        d_path/t_path: string
           Directories to load data from
-        d_files/l_files: list
+        d_files/t_files: list
           List of data/target files in <path> directory (must be in the same order!).
           Each list element is a tuple in the form
           **(<Name of h5-file>, <Key of h5-dataset>)**
@@ -339,21 +342,17 @@ class BatchCreatorImage(data.Dataset):
           estimation on validation data.
         """
         # returns lists of cubes, ll_mask is a tuple per cube
-        data, target, extras = self.read_files()
-
-        if self.mode == 'img-scalar':
-            data = transformations.border_treatment(data, self.patch_size, self.border_mode,
-                                    self.ndim)
+        data, target = self.open_files()
 
         prios = []
         # Distribute Cubes into training and valid list
         for k, (d, t) in enumerate(zip(data, target)):
             if k in self.valid_cubes:
                 self.valid_d.append(d)
-                self.valid_l.append(t)
+                self.valid_t.append(t)
             else:
                 self.train_d.append(d)
-                self.train_l.append(t)
+                self.train_t.append(t)
                 # If no priorities are given: sample proportional to cube size
                 prios.append(t.size)
 
@@ -367,14 +366,14 @@ class BatchCreatorImage(data.Dataset):
         self._training_count = len(self.train_d)
         self._valid_count = len(self.valid_d)
 
-    def check_files(self):
+    def check_files(self):  # TODO: Update for cdhw version
         """
         Check if file paths in the network config are available.
         """
         notfound = False
         give_neuro_data_hint = False
         fullpaths = [os.path.join(self.d_path, f) for f, _ in self.d_files] + \
-                    [os.path.join(self.l_path, f) for f, _ in self.l_files]
+                    [os.path.join(self.t_path, f) for f, _ in self.t_files]
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -392,91 +391,24 @@ class BatchCreatorImage(data.Dataset):
             sys.stdout.flush()
             sys.exit(1)
 
-    def read_files(self):
-        """
-        Image files on disk are expected to be in order (ch,x,y,z) or (x,y,z)
-        But image stacks are returned as (z,ch,x,y) and target as (z,x,y,)
-        irrespective of the order in the file. If the image files have no
-        channel this dimension is extended to a singleton dimension.
-        """
+    def open_files(self):
         self.check_files()
-        data, target, extras = [], [], []
-        pbar = tqdm.tqdm(total=len(self.d_files))
+        data, target = [], []
 
-        for (d_f, d_key), (l_f, l_key) in zip(self.d_files, self.l_files):
-            # pbar.write('Loading %s and %s' % (d_f, l_f))
-            # import IPython ; IPython.embed()
-            # TODO: Don't load files into memory, always use "h5stream" (once it works)
-            if True or self.h5stream:
-                d = h5py.File(os.path.join(self.d_path, d_f), 'r')[d_key]
-                t = h5py.File(os.path.join(self.l_path, l_f), 'r')[l_key]
-                # assert d.compression == t.compression == None
-                # assert len(d.shape) == len(t.shape) == 4
-                # assert d.dtype == floatX
-                # assert t.dtype == self.t_dtype
+        print('\nUsing data sets:')
+        for (d_f, d_key), (t_f, t_key) in zip(self.d_files, self.t_files):
+            d = h5py.File(os.path.join(self.d_path, d_f), 'r')[d_key]
+            t = h5py.File(os.path.join(self.t_path, t_f), 'r')[t_key]
 
-            else:
-                d = utils.h5load(os.path.join(self.d_path, d_f), d_key)
-                t = utils.h5load(os.path.join(self.l_path, l_f), l_key)
-
-            # try:
-            #     ll_mask_1 = utils.h5load(os.path.join(self.l_path, l_f),
-            #                              'll_mask')
-            #     if not self.zxy:
-            #         ll_mask_1 = transformations.xyz2zxy(ll_mask_1)
-            #     extras.append(ll_mask_1)
-            # except KeyError:
-            #     extras.append(None)
-            # if not self.zxy:
-            #     d = transformations.xyz2zxy(d)
-            #     t = transformations.xyz2zxy(t)
-            # if self.mode == 'img-scalar':
-            #     assert t.ndim == 1, "Scalar targets must be 1d"
-
-            if len(d.shape) == 4:  # h5 dataset has no ndim
-                self.n_f = d.shape[0]
-            elif len(d.shape) == 3:  # We have no channels in data
-                self.n_f = 1
-                # d = d[None]  # add (empty) 0-axis  #BREAKS
-
-            # if len(t.shape) == 3:  # If labels not empty add first axis  #BREAKS
-            #     t = t[None]
-
-            if self.t_n_f is None:
-                self.t_n_f = t.shape[0]
-            else:
-                assert self.t_n_f == t.shape[0]
-
+            assert d.ndim == 4
+            assert t.ndim == 4
+            self.c_input = d.shape[0]
+            self.c_target = t.shape[0]
             self.n_labelled_pixel += t[0].size
-
-            #BREAKS TODO: DEFER THIS TO __getitem__
-            # determine normalisation depending on int or float type
-            # if d.dtype.kind in ('u', 'i'):
-                # m = 255.
-                # d = np.ascontiguousarray(d, dtype=floatX) / m
-
-            # if (np.dtype(self.t_dtype) is not np.dtype(t.dtype)) and \
-            #     self.t_dtype not in ['float32']:
-            #     m = t.max()
-            #     M = np.iinfo(self.t_dtype).max
-            #     if m  > M:
-            #         raise ValueError("Loading of data: targets must be cast "
-            #                          "to %s, but %s cannot store value %g, "
-            #                          "maximum allowed value: %g. You may try "
-            #                          "to renumber targets." %(self.t_dtype,
-            #                                                  self.t_dtype, m, M))
-            # if not self.h5stream:
-            #     d = np.ascontiguousarray(d, dtype=floatX)
-            #     t = np.ascontiguousarray(t, dtype=self.t_dtype)
-
-            # pbar.write('Shapes (means): data %s (%0.3f), targets %s (%0.3f)' %
-            #            (d.shape,  d.mean(), t.shape, t.mean()))
-            pbar.write(f'Shapes: inputs {d.shape}, targets {t.shape}')
-
+            print(f'  input:       {d_f}[{d_key}]: {d.shape} ({d.dtype})')
+            print(f'  with target: {t_f}[{t_key}]: {t.shape} ({d.dtype})')
             data.append(d)
             target.append(t)
-            gc.collect()
-            pbar.update()
         print()
 
-        return data, target, extras
+        return data, target

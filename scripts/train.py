@@ -82,12 +82,12 @@ def weights_init(m):
 
 
 if host == 'local':
-    d_path = os.path.expanduser('~/neuro_data_cdhw/')
+    path = os.path.expanduser('~/neuro_data_cdhw/')
     data_init_kwargs = {
-        'd_path': d_path,
-        'l_path': d_path,
+        'd_path': path,
+        't_path': path,
         'd_files': [('raw_%i.h5' %i, 'raw') for i in range(3)],
-        'l_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        't_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
         'aniso_factor': 2,
         'source': 'train',
         'patch_size': (96, 96, 96),
@@ -126,6 +126,6 @@ lr_sched = ExponentialLR(optimizer, lr_dec)
 criterion = CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, num_workers=0,
+                      dataset=dataset, batchsize=bs, num_workers=2,
                       save_path=save_path, schedulers={"lr": lr_sched})
 st.train(nIters)
