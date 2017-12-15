@@ -399,7 +399,7 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
     Cuts a warped slice out of the input image and out of the target image.
     Warping is applied by multiplying the original source coordinates with
     the inverse of the homogeneous (forward) transformation matrix ``M``.
-    
+
     "Source coordinates" (``src_coords``) signify the coordinates of voxels in
     ``img`` and ``target`` that are used to compose their respective warped
     versions. The idea here is that not the images themselves, but the
@@ -410,7 +410,7 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
     The transformed coordinates usually don't align to the discrete
     voxel grids of the original images (meaning they are not integers), so the
     new voxel values are obtained by linear interpolation.
-    
+
     Parameters
     ----------
     img: np.ndarray
@@ -443,8 +443,12 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
 
     ps = tuple(ps)
     if len(img.shape)==3: # For single knossos_array
-        n_f = 1
-        sh = img.shape
+        print(f'img.shape: {img.shape}')
+        raise NotImplementedError(
+            'elektronn3 has dropped support for data stored in 3D form. '
+            'Please always supply it with a prepended channel, so it\n'
+            'has the form (C, D, H, W) (or in elektronn2 terms: (f, z, x, y).'
+        )
     elif len(img.shape)==4:
         n_f = img.shape[0]
         sh = img.shape[1:]
@@ -470,9 +474,22 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
         src_coords /= src_coords[...,3][...,None]
     # cut patch
     src_coords = src_coords[...,:3]
-    img_cut = img[:, lo[0]:hi[0]+1, #add 1 to include this coordinate!
-                     lo[1]:hi[1]+1,
-                     lo[2]:hi[2]+1,]
+    # if len(img.shape) == 3:
+    #     # Attention: This is wrong if img represents 2D data and already has a channel axis.
+    #     # Assuming we are handling 3D data here (TODO: Enforce volumetric data).
+    #     # TODO: Document change of data types here (h5py -> ndarray)
+    #     img_cut = img[
+    #         lo[0]:hi[0] + 1,  # Add 1 to include this coordinate!
+    #         lo[1]:hi[1] + 1,
+    #         lo[2]:hi[2] + 1
+    #     ]
+    #     img_cut = img_cut[None]  # Prepend empty channel axis
+    img_cut = img[
+        :,
+        lo[0]:hi[0]+1,  # Add 1 to include this coordinate!
+        lo[1]:hi[1]+1,
+        lo[2]:hi[2]+1
+    ]
     img_cut = np.ascontiguousarray(img_cut, dtype=floatX)
     img_new = np.zeros((n_f,)+ps, dtype=floatX)
     lo = lo.astype(floatX)
@@ -574,13 +591,13 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
                     target_discrete_ix=None, rng=None):
     """
     (Wraps :py:meth:`elektronn2.data.transformations.warp_slice()`)
-    
+
     Generates the warping transformation parameters and composes them into a
     single 4D homogeneous transformation matrix ``M``.
     Then this transformation is applied to ``img`` and ``target`` in the
     ``warp_slice()`` function and the transformed input and target image are
     returned.
-    
+
     Parameters
     ----------
     img: np.array
@@ -619,6 +636,7 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
     target_new: np.ndarray
         (Warped) target slice
     """
+    # TODO: Ensure everything assumes (f, z, x, y) shape
 
     rng = np.random.RandomState() if rng is None else rng
 

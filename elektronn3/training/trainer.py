@@ -27,7 +27,8 @@ except:
 
 class StoppableTrainer(object):
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, schedulers=None, preview_freq=20,
+                 save_path=None, batchsize=1, num_workers=0,
+                 schedulers=None, preview_freq=20,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
                  custom_shell=False, cuda_enabled='auto'):
         if cuda_enabled == 'auto':
@@ -47,6 +48,7 @@ class StoppableTrainer(object):
         if save_path is not None and not os.path.isdir(save_path):
             os.makedirs(save_path)
         self.batchsize = batchsize
+        self.num_workers = num_workers
         self.tracker = HistoryTracker()
         self.timer = Timer()
         if schedulers is None:
@@ -68,7 +70,8 @@ class StoppableTrainer(object):
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
         try:
             self.loader = DelayedDataLoader(
-                self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2, pin_memory=self.cuda_enabled,
+                self.dataset, batch_size=self.batchsize, shuffle=False,
+                num_workers=self.num_workers, pin_memory=self.cuda_enabled,
                 timeout=10  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
             )
         except:  # TODO: Remove this try/catch once the timeout option is in an official release
@@ -78,7 +81,8 @@ class StoppableTrainer(object):
                 'or use a PyTorch version newer than 0.3.0'
             )
             self.loader = DelayedDataLoader(
-                self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2, pin_memory=self.cuda_enabled,
+                self.dataset, batch_size=self.batchsize, shuffle=False,
+                num_workers=self.num_workers, pin_memory=self.cuda_enabled,
             )
         self.valid_loader = None
         if self.cuda_enabled:

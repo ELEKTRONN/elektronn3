@@ -81,32 +81,9 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 
-if host == 'wb':
-    d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
-    h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
+if host == 'local':
+    d_path = os.path.expanduser('~/neuro_data_cdhw/')
     data_init_kwargs = {
-        'zxy': True,
-        'd_path' : '%s/barrier_gt_phil/' % d_path,
-        'l_path': '%s/barrier_gt_phil/' % d_path,
-        'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
-        'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
-        'aniso_factor': 2,
-        "source": "train",
-        'valid_cubes': [6],
-        'patch_size': (96, 96, 96),
-        'grey_augment_channels': [0],
-        "epoch_size": progress_steps*bs,
-        'warp': 0.5,
-        'class_weights': True,
-        'warp_args': {
-            'sample_aniso': True,
-            'perspective': True
-        }
-    }
-elif host == 'local':
-    d_path = os.path.expanduser('~/neuro_data_zxy/')
-    data_init_kwargs = {
-        'zxy': True,
         'd_path': d_path,
         'l_path': d_path,
         'd_files': [('raw_%i.h5' %i, 'raw') for i in range(3)],
@@ -149,5 +126,6 @@ lr_sched = ExponentialLR(optimizer, lr_dec)
 criterion = CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, save_path=save_path, schedulers={"lr": lr_sched})
+                      dataset=dataset, batchsize=bs, num_workers=0,
+                      save_path=save_path, schedulers={"lr": lr_sched})
 st.train(nIters)

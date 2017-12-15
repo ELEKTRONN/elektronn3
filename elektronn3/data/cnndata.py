@@ -24,7 +24,7 @@ class BatchCreatorImage(data.Dataset):
     def __init__(self, d_path=None, l_path=None,
                  d_files=None, l_files=None, cube_prios=None, valid_cubes=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
-                 target_discrete_ix=None, h5stream=False, zxy=True,
+                 target_discrete_ix=None,
                  source='train', patch_size=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
@@ -48,8 +48,6 @@ class BatchCreatorImage(data.Dataset):
         self.force_dense = force_dense
 
         # general properties
-        self.zxy = zxy
-        self.h5stream = h5stream
         self.d_path = d_path
         self.l_path = l_path
         self.d_files = d_files
@@ -209,10 +207,9 @@ class BatchCreatorImage(data.Dataset):
             self.grey_augment_channels = []
         self._reseed()
         images, target = self._allocbatch(batch_size)
-        ll_masks = []
         patch_count = 0
         while patch_count < batch_size:  # Loop to fill up batch with examples
-            d, t, ll_mask = self._getcube(self.source)  # get cube randomly
+            d, t = self._getcube(self.source)  # get cube randomly
 
             try:
                 d, t = self.warp_cut(d, t,  self.warp, self.warp_args)
@@ -222,17 +219,11 @@ class BatchCreatorImage(data.Dataset):
                 self.n_failed_warp += 1
                 continue
 
-            # Check only if a ignore_thresh is set and the cube is labelled
-            if (self.ignore_thresh is not False) and (not np.any(ll_mask[1])):
-                if (t < 0).mean() > self.ignore_thresh:
-                    continue  # do not use cubes which have no information
-
             if self.source == "train":  # no grey augmentation for testing
                 d = transformations.greyAugment(d, self.grey_augment_channels, self.rng)
 
             target[patch_count] = t
             images[patch_count] = d
-            ll_masks.append(ll_mask)
             patch_count += 1
 
         # Final modification of targets: striding and replacing nan
@@ -309,7 +300,7 @@ class BatchCreatorImage(data.Dataset):
         if source == 'train':
             p = self.rng.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
-            d, t, ll_mask = self.train_d[i], self.train_l[i], self.train_extra[i]
+            d, t = self.train_d[i], self.train_l[i]
         elif source == "valid":
             if len(self.valid_d) == 0:
                 raise ValueError("No validation set")
@@ -317,11 +308,10 @@ class BatchCreatorImage(data.Dataset):
             i = self.rng.randint(0, len(self.valid_d))
             d = self.valid_d[i]
             t = self.valid_l[i]
-            ll_mask = self.valid_extra[i]
         else:
             raise ValueError("Unknown data source")
 
-        return d, t, ll_mask
+        return d, t
 
     def _stridedtargets(self, lab):
         if self.ndim == 3:
@@ -355,20 +345,15 @@ class BatchCreatorImage(data.Dataset):
             data = transformations.border_treatment(data, self.patch_size, self.border_mode,
                                     self.ndim)
 
-        default_extra = (np.ones(self.t_n_f), np.zeros(self.t_n_f))
-        extras = [default_extra if x is None else x for x in extras]
-
         prios = []
         # Distribute Cubes into training and valid list
-        for k, (d, t, e) in enumerate(zip(data, target, extras)):
+        for k, (d, t) in enumerate(zip(data, target)):
             if k in self.valid_cubes:
                 self.valid_d.append(d)
                 self.valid_l.append(t)
-                self.valid_extra.append(e)
             else:
                 self.train_d.append(d)
                 self.train_l.append(t)
-                self.train_extra.append(e)
                 # If no priorities are given: sample proportional to cube size
                 prios.append(t.size)
 
@@ -419,42 +404,43 @@ class BatchCreatorImage(data.Dataset):
         pbar = tqdm.tqdm(total=len(self.d_files))
 
         for (d_f, d_key), (l_f, l_key) in zip(self.d_files, self.l_files):
-            pbar.write('Loading %s and %s' % (d_f, l_f))
+            # pbar.write('Loading %s and %s' % (d_f, l_f))
+            # import IPython ; IPython.embed()
             # TODO: Don't load files into memory, always use "h5stream" (once it works)
-            if self.h5stream:
+            if True or self.h5stream:
                 d = h5py.File(os.path.join(self.d_path, d_f), 'r')[d_key]
                 t = h5py.File(os.path.join(self.l_path, l_f), 'r')[l_key]
-                assert d.compression == t.compression == None
-                assert len(d.shape) == len(t.shape) == 4
-                assert d.dtype == floatX
-                assert t.dtype == self.t_dtype
+                # assert d.compression == t.compression == None
+                # assert len(d.shape) == len(t.shape) == 4
+                # assert d.dtype == floatX
+                # assert t.dtype == self.t_dtype
 
             else:
                 d = utils.h5load(os.path.join(self.d_path, d_f), d_key)
                 t = utils.h5load(os.path.join(self.l_path, l_f), l_key)
 
-            try:
-                ll_mask_1 = utils.h5load(os.path.join(self.l_path, l_f),
-                                         'll_mask')
-                if not self.zxy:
-                    ll_mask_1 = transformations.xyz2zxy(ll_mask_1)
-                extras.append(ll_mask_1)
-            except KeyError:
-                extras.append(None)
-            if not self.zxy:
-                d = transformations.xyz2zxy(d)
-                t = transformations.xyz2zxy(t)
-            if self.mode == 'img-scalar':
-                assert t.ndim == 1, "Scalar targets must be 1d"
+            # try:
+            #     ll_mask_1 = utils.h5load(os.path.join(self.l_path, l_f),
+            #                              'll_mask')
+            #     if not self.zxy:
+            #         ll_mask_1 = transformations.xyz2zxy(ll_mask_1)
+            #     extras.append(ll_mask_1)
+            # except KeyError:
+            #     extras.append(None)
+            # if not self.zxy:
+            #     d = transformations.xyz2zxy(d)
+            #     t = transformations.xyz2zxy(t)
+            # if self.mode == 'img-scalar':
+            #     assert t.ndim == 1, "Scalar targets must be 1d"
 
             if len(d.shape) == 4:  # h5 dataset has no ndim
                 self.n_f = d.shape[0]
             elif len(d.shape) == 3:  # We have no channels in data
                 self.n_f = 1
-                d = d[None]  # add (empty) 0-axis
+                # d = d[None]  # add (empty) 0-axis  #BREAKS
 
-            if len(t.shape) == 3:  # If labels not empty add first axis
-                t = t[None]
+            # if len(t.shape) == 3:  # If labels not empty add first axis  #BREAKS
+            #     t = t[None]
 
             if self.t_n_f is None:
                 self.t_n_f = t.shape[0]
@@ -463,27 +449,29 @@ class BatchCreatorImage(data.Dataset):
 
             self.n_labelled_pixel += t[0].size
 
+            #BREAKS TODO: DEFER THIS TO __getitem__
             # determine normalisation depending on int or float type
-            if d.dtype.kind in ('u', 'i'):
-                m = 255.
-                d = np.ascontiguousarray(d, dtype=floatX) / m
+            # if d.dtype.kind in ('u', 'i'):
+                # m = 255.
+                # d = np.ascontiguousarray(d, dtype=floatX) / m
 
-            if (np.dtype(self.t_dtype) is not np.dtype(t.dtype)) and \
-                self.t_dtype not in ['float32']:
-                m = t.max()
-                M = np.iinfo(self.t_dtype).max
-                if m  > M:
-                    raise ValueError("Loading of data: targets must be cast "
-                                     "to %s, but %s cannot store value %g, "
-                                     "maximum allowed value: %g. You may try "
-                                     "to renumber targets." %(self.t_dtype,
-                                                             self.t_dtype, m, M))
-            if not self.h5stream:
-                d = np.ascontiguousarray(d, dtype=floatX)
-                t = np.ascontiguousarray(t, dtype=self.t_dtype)
+            # if (np.dtype(self.t_dtype) is not np.dtype(t.dtype)) and \
+            #     self.t_dtype not in ['float32']:
+            #     m = t.max()
+            #     M = np.iinfo(self.t_dtype).max
+            #     if m  > M:
+            #         raise ValueError("Loading of data: targets must be cast "
+            #                          "to %s, but %s cannot store value %g, "
+            #                          "maximum allowed value: %g. You may try "
+            #                          "to renumber targets." %(self.t_dtype,
+            #                                                  self.t_dtype, m, M))
+            # if not self.h5stream:
+            #     d = np.ascontiguousarray(d, dtype=floatX)
+            #     t = np.ascontiguousarray(t, dtype=self.t_dtype)
 
-            pbar.write('Shapes (means): data %s (%0.3f), targets %s (%0.3f)' %
-                       (d.shape,  d.mean(), t.shape, t.mean()))
+            # pbar.write('Shapes (means): data %s (%0.3f), targets %s (%0.3f)' %
+            #            (d.shape,  d.mean(), t.shape, t.mean()))
+            pbar.write(f'Shapes: inputs {d.shape}, targets {t.shape}')
 
             data.append(d)
             target.append(t)
