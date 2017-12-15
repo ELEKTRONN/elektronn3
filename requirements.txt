@@ -5,6 +5,7 @@ numpy
 scipy
 h5py
 matplotlib
+seaborn
 numba
 ipython
 tqdm
