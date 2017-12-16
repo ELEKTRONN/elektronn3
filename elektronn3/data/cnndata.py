@@ -24,7 +24,7 @@ class BatchCreatorImage(data.Dataset):
     def __init__(self, d_path=None, t_path=None,
                  d_files=None, t_files=None, cube_prios=None, valid_cubes=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
-                 target_discrete_ix=None,
+                 target_discrete_ix=None, mean=None, std=None, normalize=True,
                  source='train', patch_size=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
@@ -98,6 +98,12 @@ class BatchCreatorImage(data.Dataset):
         self.n_failed_warp = 0
 
         self.load_data()
+        self._mean = mean
+        self._std = std
+        self.normalize = normalize
+        if self.normalize:
+            # Pre-compute to prevent later redundant computation in multiple processes.
+            _, _ = self.mean, self.std
         if class_weights:
             target_mean = np.mean(self.train_t)
             bg_weight = target_mean / (1. + target_mean)
@@ -132,6 +138,8 @@ class BatchCreatorImage(data.Dataset):
                     )
                 continue
             self.n_successful_warp += 1
+            if self.normalize:
+                data = (data - self.mean) / self.std
             if self.source == "train":  # no grey augmentation for testing
                 data = transformations.greyAugment(data, self.grey_augment_channels, self.rng)
             break
@@ -140,8 +148,6 @@ class BatchCreatorImage(data.Dataset):
         # Final modification of targets: striding and replacing nan
         if not (self.force_dense or np.all(self.strides == 1)):
             target = self._stridedtargets(target)
-
-        # TODO: Normalize with global mean and std
 
         return data, target
 
@@ -164,6 +170,31 @@ class BatchCreatorImage(data.Dataset):
         s = s.format(self.c_target, self.c_input, self._training_count,
                      self._valid_count, self.n_labelled_pixel)
         return s
+
+
+    @property
+    def mean(self):  # TODO: Respect separate channels
+        if self._mean is None:
+            self._mean = np.mean(self.train_d)
+            logger.warning(
+                'Calculating mean of training data. This is potentially slow. Please supply\n'
+                'it manually when initializing the data set to make startup faster.'
+            )
+            logger.info(f'mean = {self._mean:.6f}')
+        else:
+            return self._mean
+
+    @property
+    def std(self):  # TODO: Respect separate channels
+        if self._std is None:
+            self._std = np.std(self.train_d)
+            logger.warning(
+                'Calculating std of training data. This is slow. Please supply\n'
+                'it manually when initializing the data set to make startup faster.'
+            )
+            logger.info(f'std = {self._std:.6f}')
+        else:
+            return self._std
 
     def validate(self):
         self.source = "valid"

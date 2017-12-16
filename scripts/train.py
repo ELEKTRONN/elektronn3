@@ -6,7 +6,6 @@ import datetime
 import numpy as np
 import torch
 from torch import nn
-from torch.nn.modules.loss import CrossEntropyLoss
 from torch import optim
 
 # Don't move this stuff, it needs to be run this early to work
@@ -88,6 +87,8 @@ if host == 'local':
         't_path': path,
         'd_files': [('raw_%i.h5' %i, 'raw') for i in range(3)],
         't_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        # 'mean': 155.291411,
+        # 'std': 42.599974,
         'aniso_factor': 2,
         'source': 'train',
         'patch_size': (96, 96, 96),
@@ -123,7 +124,7 @@ elif opt == 'rmsprop':
 
 lr_sched = ExponentialLR(optimizer, lr_dec)
 
-criterion = CrossEntropyLoss(weight=dataset.class_weights)
+criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
                       dataset=dataset, batchsize=bs, num_workers=2,
