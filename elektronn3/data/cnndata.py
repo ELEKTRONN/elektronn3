@@ -110,9 +110,40 @@ class BatchCreatorImage(data.Dataset):
 
     def __getitem__(self, index):
         # use index just as counter, subvolumes will be chosen randomly
-        d, l = self.getbatch(1)
-        # squeeze first axis because getitem needs ch, z, x, y; without explicit batch axis
-        return torch.from_numpy(d[0]), torch.from_numpy(l[0])
+
+        if self.grey_augment_channels is None:
+            self.grey_augment_channels = []
+        self._reseed()
+        data_coords, target_coords = self._getcube(self.source)  # get cube randomly
+
+        while True:
+            try:
+                data, target = self.warp_cut(data_coords, target_coords,  self.warp, self.warp_args)
+            except transformations.WarpingOOBError:
+                self.n_failed_warp += 1
+                if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
+                    fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
+                    fail_percentage = int(round(100 * fail_ratio))
+                    # Note that this warning will be spammed once the conditions are met.
+                    # Better than logging it once and risking that it stays unnoticed IMO.
+                    logger.warning(
+                        f'{fail_percentage}% of warping attempts are failing. '
+                        'Consider lowering the warping strength.'
+                    )
+                continue
+            self.n_successful_warp += 1
+            if self.source == "train":  # no grey augmentation for testing
+                data = transformations.greyAugment(data, self.grey_augment_channels, self.rng)
+            break
+
+        target = target.astype(np.int64)
+        # Final modification of targets: striding and replacing nan
+        if not (self.force_dense or np.all(self.strides == 1)):
+            target = self._stridedtargets(target)
+
+        # TODO: Normalize with global mean and std
+
+        return data, target
 
     def __len__(self):
         return self.epoch_size
@@ -162,82 +193,6 @@ class BatchCreatorImage(data.Dataset):
         target = np.zeros((batch_size, self.c_target) + tuple(sh), dtype=self.t_dtype)
         return images, target
 
-    def getbatch(self, batch_size=1):
-        """
-        Prepares a batch by randomly sampling, shifting and augmenting
-        patches from the data
-
-        Parameters
-        ----------
-        batch_size: int
-            Number of examples in batch (for CNNs often just 1)
-        source: str
-            Data set to draw data from: 'train'/'valid'
-        grey_augment_channels: list
-            List of channel indices to apply grey-value augmentation to
-        warp: bool or float
-            Whether warping/distortion augmentations are applied to examples
-            (slow --> use multiprocessing). If this is a float number,
-            warping is applied to this fraction of examples e.g. 0.5 --> every
-            other example.
-        warp_args: dict
-            Additional keyword arguments that get passed through to
-            elektronn2.data.transformations.get_warped_slice()
-        ignore_thresh: float
-            If the fraction of negative targets in an example patch exceeds this
-            threshold, this example is discarded (Negative targets are ignored
-            for training [but could be used for unsupervised target propagation]).
-        force_dense: bool
-            If True the targets are *not* sub-sampled according to the CNN output\
-            strides. Dense targets requires MFP in the CNN!
-
-        Returns
-        -------
-        data: np.ndarray
-            [bs, ch, x, y] or [bs, ch, z, y, x] for 2D and 3D CNNS
-        target: np.ndarray
-            [bs, ch, x, y] or [bs, ch, z, y, x]
-        ll_mask1: np.ndarray
-            (optional) [bs, n_target]
-        ll_mask2: np.ndarray
-            (optional) [bs, n_target]
-        """
-        # This is especially required for multiprocessing
-        if self.grey_augment_channels is None:
-            self.grey_augment_channels = []
-        self._reseed()
-        images, target = self._allocbatch(batch_size)
-        patch_count = 0
-        # TODO: Remove batching. This should only be done by the loader.
-        while patch_count < batch_size:  # Loop to fill up batch with examples
-            d, t = self._getcube(self.source)  # get cube randomly
-
-            try:
-                d, t = self.warp_cut(d, t,  self.warp, self.warp_args)
-                self.n_successful_warp += 1
-
-            except transformations.WarpingOOBError:
-                self.n_failed_warp += 1
-                continue
-
-            if self.source == "train":  # no grey augmentation for testing
-                d = transformations.greyAugment(d, self.grey_augment_channels, self.rng)
-
-            target[patch_count] = t
-            images[patch_count] = d
-            patch_count += 1
-
-        # Final modification of targets: striding and replacing nan
-        if not (self.force_dense or np.all(self.strides == 1)):
-            target = self._stridedtargets(target)
-
-        # TODO: Normalize with global mean and std
-
-        ret = [images, target]  # The "normal" batch
-        self.gc_count += 1
-        if self.gc_count % 1000 == 0:
-            gc.collect()
-        return tuple(ret)
 
     def warp_cut(self, img, target, warp, warp_params):
         """
