@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-import logging
-import os
+
 import argparse
 import datetime
+import logging
+import os
+
 import numpy as np
 import torch
 from torch import nn
@@ -14,12 +16,10 @@ mpl_backend = 'agg'  # TODO: Make this a CLI option
 elektronn3.select_mpl_backend(mpl_backend)
 
 from elektronn3.data.cnndata import BatchCreatorImage
-from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.models.vnet import VNet
 from elektronn3.models.fcn import fcn32s
 from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
-from torch.optim.lr_scheduler import ExponentialLR
 
 
 logger = logging.getLogger('elektronn3log')
@@ -122,7 +122,7 @@ elif opt == 'adam':
 elif opt == 'rmsprop':
     optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
 
-lr_sched = ExponentialLR(optimizer, lr_dec)
+lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
 
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 

@@ -1,13 +1,12 @@
-__all__ = ["floatX", "config"]
-import torch
+__all__ = ["floatX"]
 import numpy as np
-from .logger import logger_setup
+from elektronn3.logger import logger_setup
 import logging
 logger = logging.getLogger('elektronn3log')
 
 logger_setup()
 
-floatX = np.float32
+floatX = np.float32  # TODO: Either hardcode float32 everywhere or add float16 support
 
 
 def select_mpl_backend(mpl_backend):

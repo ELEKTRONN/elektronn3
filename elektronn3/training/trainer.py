@@ -1,21 +1,21 @@
+import logging
 import os
 import traceback
-import signal
-import numpy as np
+from os.path import normpath, basename
+
 import IPython
+import numpy as np
+import torch
 from scipy.misc import imsave
 from torch.autograd import Variable
-from torch.utils.trainer import Trainer
-from torch.utils.data import DataLoader
-from ..data.utils import save_to_h5py
-import torch
 from torch.optim.lr_scheduler import ExponentialLR
-import logging
+
 from elektronn3.training.train_utils import Timer, pretty_string_time
-from os.path import normpath, basename
-from .train_utils import user_input, HistoryTracker
-from ..data.image import write_overlayimg
-from .train_utils import DelayedDataLoader
+from elektronn3.training.train_utils import DelayedDataLoader
+from elektronn3.training.train_utils import HistoryTracker
+from elektronn3.data.image import write_overlayimg
+from elektronn3.data.utils import save_to_h5py
+
 logger = logging.getLogger('elektronn3log')
 
 try:
@@ -25,7 +25,8 @@ except:
     tensorboard_available = False
     logger.exception('Tensorboard not available.')
 
-class StoppableTrainer(object):
+
+class StoppableTrainer:
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
                  save_path=None, batchsize=1, num_workers=0,
                  schedulers=None, preview_freq=20,
@@ -195,25 +196,15 @@ class StoppableTrainer(object):
                 if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
                     # inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
-            except (KeyboardInterrupt) as e:
-                # TODO: The shell doesn't have access to the main training loops locals, so it's useless. Find out how to fix this.
+            except KeyboardInterrupt as e:
                 if not isinstance(e, KeyboardInterrupt):
                     traceback.print_exc()
                     print("\nEntering Command line such that Exception can be "
                           "further inspected by user.\n\n")
-                # Like a command line, but cannot change singletons
-                if self.custom_shell:
-                    var_push = globals()
-                    var_push.update(locals())
-                    ret = user_input(var_push)
-                    if ret == 'kill':
-                        return
-                else:
-                    IPython.embed()
-                    if self.terminate:  # TODO: Somehow make this behavior more obvious
-                        return
+                IPython.embed()
+                if self.terminate:  # TODO: Somehow make this behavior more obvious
+                    return
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
-
 
     def validate(self):
         if self.valid_loader is None:
@@ -284,6 +275,8 @@ def maxclass(class_predictions: Variable):
 
 # TODO
 def save_to_h5(fname: str, model_output: Variable):
+    raise NotImplementedError
+
     maxcl = maxclass(model_output)  # TODO: Ensure correct shape
     save_to_h5py(
         [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],

@@ -2,18 +2,18 @@
 # ELEKTRONN2 Toolkit
 # Copyright (c) 2015 Marius Killinger
 # All rights reserved
-from __future__ import absolute_import, division, print_function
-from builtins import filter, hex, input, int, map, next, oct, pow, range, super, zip
-__all__ = ['downsample_xy', 'ids2barriers', 'smearbarriers',
-           'center_cubes', ]
+__all__ = ['downsample_xy', 'ids2barriers', 'smearbarriers', 'center_cubes']
+
 from functools import reduce
+
 import numba
-import scipy.ndimage.filters as filters
 import numpy as np
-from . import utils
-from scipy.misc import imsave
+import scipy.ndimage.filters as filters
 from PIL import Image
-from .. import floatX
+from scipy.misc import imsave
+
+from elektronn3.data import utils
+from elektronn3 import floatX
 
 
 def downsample_xy(d, l, factor):

@@ -26,6 +26,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
 
+
 class TensorBoardLogger:
     """Logging in tensorboard without tensorflow ops."""
 

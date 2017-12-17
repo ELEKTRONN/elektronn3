@@ -8,7 +8,7 @@ import pickle as pkl
 import gzip
 import signal
 import logging
-from .. import floatX
+from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
@@ -225,7 +225,7 @@ def pickleload(file_name):
 
 
 ### Decorator Collection ###
-class DecoratorBase(object):
+class DecoratorBase:
     """
     If used as
     ``@DecoratorBase``
@@ -384,7 +384,7 @@ def as_floatX(x):
 
 # https://gist.github.com/tcwalther/ae058c64d5d9078a9f333913718bba95
 # class based on: http://stackoverflow.com/a/21919644/487556
-class DelayedInterrupt(object):
+class DelayedInterrupt:
     def __init__(self, signals):
         if not isinstance(signals, list) and not isinstance(signals, tuple):
             signals = [signals]
@@ -410,7 +410,7 @@ class DelayedInterrupt(object):
                 self.old_handlers[sig](*self.signal_received[sig])
 
 
-class CleanExit(object):
+class CleanExit:
     # https://stackoverflow.com/questions/4205317/capture-keyboardinterrupt-in-python-without-try-except
     def __enter__(self):
         return self

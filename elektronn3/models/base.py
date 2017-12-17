@@ -2,9 +2,9 @@ import torch.nn as nn
 import numpy as np
 import tqdm
 import time
-from .. import floatX
-from ..data.utils import as_floatX
-from ..training.train_utils import pretty_string_time
+from elektronn3 import floatX
+from elektronn3.data.utils import as_floatX
+from elektronn3.training.train_utils import pretty_string_time
 
 
 class BaseModule(nn.Module):
@@ -75,12 +75,16 @@ def predict_dense(raw_img, pred_func, as_uint8=False, pad_raw=True,
     #     raise NotImplementedError
 
     if pad_raw:
-        raw_img = np.pad(raw_img,
-                         [(0, 0),
-                          (offset[0], offset[0]),
-                          (offset[1], offset[1]),
-                          (offset[2], offset[2])],
-                         mode='symmetric')
+        raw_img = np.pad(
+            raw_img,
+            [
+                (0, 0),
+                (offset[0], offset[0]),
+                (offset[1], offset[1]),
+                (offset[2], offset[2])
+            ],
+            mode='symmetric'
+        )
 
     raw_sh = raw_img.shape[1:]  # only spatial, not channels
     tile_sh = np.add(patch_size, strides) - 1
@@ -109,10 +113,12 @@ def predict_dense(raw_img, pred_func, as_uint8=False, pad_raw=True,
             for y_t in range(y_tiles):
                 # For every z_tile a slice of thickness cnn_out_sh[2] is
                 # collected and then collectively written to the output_data
-                raw_tile = raw_img[:,
-                           z_t * prob_sh[0]:z_t * prob_sh[0] + tile_sh[0],
-                           x_t * prob_sh[1]:x_t * prob_sh[1] + tile_sh[1],
-                           y_t * prob_sh[2]:y_t * prob_sh[2] + tile_sh[2]]
+                raw_tile = raw_img[
+                    :,
+                    z_t * prob_sh[0]:z_t * prob_sh[0] + tile_sh[0],
+                    x_t * prob_sh[1]:x_t * prob_sh[1] + tile_sh[1],
+                    y_t * prob_sh[2]:y_t * prob_sh[2] + tile_sh[2]
+                ]
 
                 this_is_end_tile = False if np.all(np.equal(raw_tile.shape[1:], tile_sh)) else True
 
@@ -137,10 +143,12 @@ def predict_dense(raw_img, pred_func, as_uint8=False, pad_raw=True,
                 if as_uint8:
                     prob *= 255
 
-                predictions[:,
-                z_t * prob_sh[0]:(z_t + 1) * prob_sh[0],
-                x_t * prob_sh[1]:(x_t + 1) * prob_sh[1],
-                y_t * prob_sh[2]:(y_t + 1) * prob_sh[2]] = prob
+                predictions[
+                    :,
+                    z_t * prob_sh[0]:(z_t + 1) * prob_sh[0],
+                    x_t * prob_sh[1]:(x_t + 1) * prob_sh[1],
+                    y_t * prob_sh[2]:(y_t + 1) * prob_sh[2]
+                ] = prob
 
                 # print ("shape", prob.shape)
                 current_buffer = np.prod(prob_sh)

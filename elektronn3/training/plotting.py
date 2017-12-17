@@ -5,22 +5,22 @@
 # Max-Planck-Institute for Medical Research, Heidelberg, Germany
 # Authors: Marius Killinger, Philipp Schubert
 
-from __future__ import absolute_import, division, print_function
-from builtins import filter, hex, input, int, map, next, oct, pow, range, \
-    super, zip
-import os
 import logging
+import os
 from collections import OrderedDict
-from matplotlib import pyplot as plt
-from scipy import stats
+
 import numpy as np
 import seaborn as sns
-from ..data.locking import FileLock
-from .. import floatX
+from matplotlib import pyplot as plt
+from scipy import stats
+
+from elektronn3 import floatX
+from elektronn3.data.locking import FileLock
+
 logger = logging.getLogger('elektronn3log')
 
 
-class Scroller(object):
+class Scroller:
     def __init__(self, axes, images, names, init_z=None):
         self.axes = axes
         for ax in axes:

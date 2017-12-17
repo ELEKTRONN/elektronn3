@@ -2,16 +2,15 @@
 # ELEKTRONN3 Toolkit
 # Copyright (c) 2015 Philipp Schubert, Martin Drawitsch, Marius Killinger
 # All rights reserved
-from __future__ import absolute_import, division, print_function
-from builtins import filter, hex, input, int, map, next, oct, pow, range, super, zip
 __all__ = ['warp_slice', 'get_tracing_slice', 'WarpingOOBError',
            'Transform', 'trafo_from_array', 'get_warped_slice', 'border_treatment']
+
 import itertools
 from functools import reduce
 import numpy as np
 import numba
-from . import utils
-from .. import floatX
+from elektronn3.data import utils
+from elektronn3 import floatX
 
 
 def grey_augment(d, channels, rng):
@@ -326,7 +325,7 @@ class WarpingOOBError(ValueError):
         super(WarpingOOBError, self).__init__( *args, **kwargs)
 
 
-class Transform(object):
+class Transform:
     def __init__(self, M, position_l=None, aniso_factor=2):
         self.M = M
         self.M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
