@@ -1,21 +1,15 @@
 from __future__ import absolute_import, division, print_function
 from builtins import int, zip
 __all__ = ['BatchCreatorImage']
-import gc
 import os
 import sys
 import time
 import logging
 import h5py
 import numpy as np
-import tqdm
 from . import transformations
-from . import utils
 import torch
-import signal
 from torch.utils import data
-from .. import floatX
-from .utils import DelayedInterrupt
 
 logger = logging.getLogger('elektronn3log')
 
@@ -141,7 +135,7 @@ class BatchCreatorImage(data.Dataset):
             if self.normalize:
                 data = (data - self.mean) / self.std
             if self.source == "train":  # no grey augmentation for testing
-                data = transformations.greyAugment(data, self.grey_augment_channels, self.rng)
+                data = transformations.grey_augment(data, self.grey_augment_channels, self.rng)
             break
 
         target = target.astype(np.int64)
@@ -153,15 +147,6 @@ class BatchCreatorImage(data.Dataset):
 
     def __len__(self):
         return self.epoch_size
-        if self.source == "train":
-            return len(self.d_files) - len(self.valid_cubes)
-        elif self.source == "valid":
-            return len(self.valid_cubes)
-        else:
-            raise NotImplementedError
-
-    def close(self):
-        return
 
     def __repr__(self):
         s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
@@ -170,7 +155,6 @@ class BatchCreatorImage(data.Dataset):
         s = s.format(self.c_target, self.c_input, self._training_count,
                      self._valid_count, self.n_labelled_pixel)
         return s
-
 
     @property
     def mean(self):  # TODO: Respect separate channels
@@ -213,21 +197,16 @@ class BatchCreatorImage(data.Dataset):
     def _reseed(self):
         """Reseeds the rng if the process ID has changed!"""
         current_pid = os.getpid()
-        if current_pid!=self.pid:
+        if current_pid != self.pid:
+            logger.debug(f'New worker process started (PID {current_pid})')
             self.pid = current_pid
-            self.rng.seed(np.uint32((time.time()*0.0001 -
-                                     int(time.time()*0.0001))*4294967295+self.pid))
-
-    def _allocbatch(self, batch_size):
-        images = np.zeros((batch_size, self.c_input,) + tuple(self.patch_size), dtype='float32')
-        sh = self.patch_size - self.offsets * 2
-        target = np.zeros((batch_size, self.c_target) + tuple(sh), dtype=self.t_dtype)
-        return images, target
-
+            self.rng.seed(
+                np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
+            )
 
     def warp_cut(self, img, target, warp, warp_params):
         """
-        (Wraps :py:meth:`elektronn2.data.transformations.get_warped_slice()`)
+        (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
 
         Cuts a warped slice out of the input and target arrays.
         The same random warping transformation is each applied to both input
@@ -302,32 +281,10 @@ class BatchCreatorImage(data.Dataset):
 
         return d, t
 
-    def _stridedtargets(self, lab):
-        if self.ndim == 3:
-            return lab[:, :, ::self.strides[0], ::self.strides[1], ::self.strides[2]]
-        elif self.ndim == 2:
-            return lab[:, :, ::self.strides[0], ::self.strides[1]]
+    def _stridedtargets(self, target):
+        return target[:, :, ::self.strides[0], ::self.strides[1], ::self.strides[2]]
 
     def load_data(self):
-        """
-        Parameters
-        ----------
-
-        d_path/t_path: string
-          Directories to load data from
-        d_files/t_files: list
-          List of data/target files in <path> directory (must be in the same order!).
-          Each list element is a tuple in the form
-          **(<Name of h5-file>, <Key of h5-dataset>)**
-        cube_prios: list
-          (not normalised) list of sampling weights to draw examples from
-          the respective cubes. If None the cube sizes are taken as priorities.
-        valid_cubes: list
-          List of indices for cubes (from the file-lists) to use as validation
-          data and exclude from training, may be empty list to skip performance
-          estimation on validation data.
-        """
-        # returns lists of cubes, ll_mask is a tuple per cube
         data, target = self.open_files()
 
         prios = []
@@ -354,7 +311,7 @@ class BatchCreatorImage(data.Dataset):
 
     def check_files(self):  # TODO: Update for cdhw version
         """
-        Check if file paths in the network config are available.
+        Check if all files are accessible.
         """
         notfound = False
         give_neuro_data_hint = False

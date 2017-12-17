@@ -14,7 +14,7 @@ from . import utils
 from .. import floatX
 
 
-def greyAugment(d, channels, rng):
+def grey_augment(d, channels, rng):
     """
     Performs grey value (histogram) augmentations on ``d``. This is only
     applied to ``channels`` (list of channels indices), ``rng`` is a random
@@ -36,7 +36,7 @@ def greyAugment(d, channels, rng):
 
 
 def border_treatment(data_list, ps, border_mode, ndim):
-    def treatArray(data):
+    def treat_array(data):
         if border_mode=='keep':
             return data
 
@@ -78,7 +78,7 @@ def border_treatment(data_list, ps, border_mode, ndim):
 
         return data
 
-    return [treatArray(d) for d in data_list]
+    return [treat_array(d) for d in data_list]
 
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
