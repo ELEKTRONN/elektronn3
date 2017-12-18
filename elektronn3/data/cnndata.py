@@ -4,10 +4,12 @@ import logging
 import os
 import sys
 import time
+from typing import Tuple
 
 import h5py
 import numpy as np
 import torch
+from torch.autograd import Variable
 from torch.utils import data
 
 from elektronn3.data import transformations
@@ -20,7 +22,7 @@ class BatchCreatorImage(data.Dataset):
                  d_files=None, t_files=None, cube_prios=None, valid_cubes=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
                  target_discrete_ix=None, mean=None, std=None, normalize=True,
-                 source='train', patch_size=None,
+                 source='train', patch_shape=None, preview_shape=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
                  epoch_size=100, cuda_enabled='auto'):
@@ -58,17 +60,17 @@ class BatchCreatorImage(data.Dataset):
 
         # Infer geometric info from input/target shapes
         # HACK
-        self.patch_size = np.array(patch_size, dtype=np.int)
-        self.ndim = self.patch_size.ndim
+        self.patch_shape = np.array(patch_shape, dtype=np.int)
+        self.ndim = self.patch_shape.ndim
         self.strides = np.array([1, 1, 1], dtype=np.int) #np.array(target_node.shape.strides, dtype=np.int)
         self.offsets = np.array([0, 0, 0], dtype=np.int) #np.array(target_node.shape.offsets, dtype=np.int)
-        self.target_ps = self.patch_size - self.offsets * 2
+        self.target_ps = self.patch_shape - self.offsets * 2
         self.t_dtype = np.int64
         self.mode = 'img-img'
         # The following will be inferred when reading data
         self.n_labelled_pixel = 0
-        self.c_input = None  # number of channels/feature in input
-        self.c_target = None  # the shape of the returned label batch at index 1
+        self.c_input = None  # Number of input channels
+        self.c_target = None  # Number of target channels
 
         # Actual data fields
         self.valid_d = []
@@ -78,6 +80,14 @@ class BatchCreatorImage(data.Dataset):
         self.train_d = []
         self.train_t = []
         self.train_extra = []
+
+        if preview_shape is None:
+            self.preview_shape = self.patch_shape
+        else:
+            self.preview_shape = preview_shape
+        # Load preview data on initialization so read errors won't occur late
+        # and reading doesn't have to be done by each background worker process separately.
+        self._preview_batch = self.preview_batch
 
         # Setup internal stuff
         self.rng = np.random.RandomState(
@@ -166,20 +176,18 @@ class BatchCreatorImage(data.Dataset):
                 'it manually when initializing the data set to make startup faster.'
             )
             logger.info(f'mean = {self._mean:.6f}')
-        else:
-            return self._mean
+        return self._mean
 
     @property
     def std(self):  # TODO: Respect separate channels
         if self._std is None:
             self._std = np.std(self.train_d)
             logger.warning(
-                'Calculating std of training data. This is slow. Please supply\n'
+                'Calculating std of training data. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
             logger.info(f'std = {self._std:.6f}')
-        else:
-            return self._std
+        return self._std
 
     def validate(self):
         self.source = "valid"
@@ -188,6 +196,30 @@ class BatchCreatorImage(data.Dataset):
     def train(self):
         self.source = "train"
         self.epoch_size = self._epoch_size
+
+    # In this implementation the preview batch is always kept in GPU memory.
+    # This means much better inference speed when using it, but this may be
+    # a bad decision if GPU memory is limited.
+    # --> TODO: Document this concern and decide how to deal with it.
+    #           (E.g. suggest a smaller preview shape if catching OOM)
+    @property
+    def preview_batch(self) -> Tuple[Variable, Variable]:
+        if self._preview_batch is None:
+            d, h, w = self.preview_shape
+            # TODO: Central slices
+            # TODO: Don't hardcode valid_d[0]
+            inp_np = self.valid_d[0][:, :d, :h, :w][None]
+            inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)  # Normalize
+            target_np = self.valid_t[0][:, :d, :h, :w][None].astype(np.int64)
+            inp = torch.from_numpy(inp_np)
+            target = torch.from_numpy(target_np)
+            if self.cuda_enabled:
+                inp = inp.cuda()
+                target = target.cuda()
+            inp = Variable(inp, volatile=True)
+            target = Variable(target, volatile=True)
+            self._preview_batch = (inp, target)
+        return self._preview_batch
 
     @property
     def warp_stats(self):
@@ -251,7 +283,7 @@ class BatchCreatorImage(data.Dataset):
             warp_params = dict(warp_params)
             warp_params['warp_amount'] = 0
 
-        d, t = transformations.get_warped_slice(img, self.patch_size,
+        d, t = transformations.get_warped_slice(img, self.patch_shape,
                                                 aniso_factor=self.aniso_factor,
                                                 target=target,
                                                 target_ps=self.target_ps,
@@ -350,7 +382,7 @@ class BatchCreatorImage(data.Dataset):
             self.c_target = t.shape[0]
             self.n_labelled_pixel += t[0].size
             print(f'  input:       {d_f}[{d_key}]: {d.shape} ({d.dtype})')
-            print(f'  with target: {t_f}[{t_key}]: {t.shape} ({d.dtype})')
+            print(f'  with target: {t_f}[{t_key}]: {t.shape} ({t.dtype})')
             data.append(d)
             target.append(t)
         print()

@@ -174,7 +174,7 @@ class StoppableTrainer:
                     self.tb.log_scalar('misc/learning_rate', curr_lr, self.iterations)
 
                     if self.iterations % self.preview_freq == 0:
-                        inp, out = inference(self.model, self.dataset)
+                        inp, out = test_inference(self.model, self.dataset)
                         mcl = maxclass(out)
                         # TODO: Less arbitrary slicing
                         p0 = out[0, 0, 32, ...].data.cpu().numpy()  # class 0
@@ -194,7 +194,7 @@ class StoppableTrainer:
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
                 if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
-                    # inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
+                    # test_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
             except KeyboardInterrupt as e:
                 if not isinstance(e, KeyboardInterrupt):
@@ -210,12 +210,12 @@ class StoppableTrainer:
         if self.valid_loader is None:
             try:
                 self.valid_loader = DelayedDataLoader(
-                    self.dataset, self.batchsize, shuffle=False, num_workers=2, pin_memory=False,
+                    self.dataset, self.batchsize, shuffle=False, num_workers=self.num_workers, pin_memory=False,
                     timeout=10  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
                 )
             except:  # TODO: Remove this try/catch once the timeout option is in an official release
                 self.valid_loader = DelayedDataLoader(
-                    self.dataset, self.batchsize, shuffle=False, num_workers=2, pin_memory=False
+                    self.dataset, self.batchsize, shuffle=False, num_workers=self.num_workers, pin_memory=False
                 )
 
         self.dataset.validate()  # Switch dataset to validation sources
@@ -289,27 +289,32 @@ def save_to_h5(fname: str, model_output: Variable):
         hdf5_names=["prob"]
     )
 
+
 # TODO: Make more flexible, avoid assumptions about shapes etc.
 # TODO: Rename this function (preview-*, test-*?) and write a more general inference function.
-def inference(model, dataset=None, shape=(64, 288, 288), cuda_enabled='auto'):
+def test_inference(model, dataset=None, cuda_enabled='auto'):
     model.eval()  # Set dropout and batchnorm to eval mode
+    try:
+        # TODO: Don't always slice from 0 to shape[i]. Make central slices instead.
+        # logger.info("Starting preview prediction")
+        if cuda_enabled == 'auto':
+            cuda_enabled = torch.cuda.is_available()
+            # device = 'GPU' if cuda_enabled else 'CPU'
+            # logger.info(f'Using {device}.')
+        # Attention: Inference on Variables with unexpected shapes can lead to errors!
+        # Staying with multiples of 16 for lengths seems to work.
+        if dataset is None:
+            d, h, w = dataset.preview_shape
+            inp = torch.rand(1, dataset.c_input, d, h, w)
+            if cuda_enabled:
+                inp = inp.cuda()
+                inp = Variable(inp, volatile=True)
+        else:
+            inp = dataset.preview_batch[0]
+        out = model(inp)
+        model.train()  # Reset model to training mode
+    except:
+        traceback.print_exc()
+        import IPython; IPython.embed()
 
-    # TODO: Don't always slice from 0 to shape[i]. Make central slices instead.
-    # logger.info("Starting preview prediction")
-    if cuda_enabled == 'auto':
-        cuda_enabled = torch.cuda.is_available()
-        device = 'GPU' if cuda_enabled else 'CPU'
-        logger.info(f'Using {device}.')
-    # Attention: Inference on Variables with unexpected shapes can lead to errors!
-    # Staying with multiples of 16 for lengths seems to work.
-    if dataset is None:
-        inp = torch.rand(1, 1, shape[0], shape[1], shape[2])
-    else:
-        # TODO: valid_d[0]: Too arbitrary
-        inp = torch.from_numpy(dataset.valid_d[0][None, :, :shape[0], :shape[1], :shape[2]])
-    if cuda_enabled:
-        inp = inp.cuda()
-    inp = Variable(inp, volatile=True)
-    out = model(inp)
-    model.train()  # Reset model to training mode
     return inp, out

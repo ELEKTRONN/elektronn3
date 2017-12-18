@@ -17,7 +17,7 @@ class BaseModule(nn.Module):
 
 def predict_dense(raw_img, pred_func, as_uint8=False, pad_raw=True,
                   offset=(0, 0, 0), strides=(1, 1, 1), n_lab=2, patch_size=(16, 128, 128)):
-    # TODO: Infer offset, strides, n_lab, patch_size from neural class. best: add functionality to BaseModule and
+    # TODO: Infer offset, strides, n_lab, patch_shape from neural class. best: add functionality to BaseModule and
     # pass BaseModule inherited models to this function
     """
     Core function that performs the inference

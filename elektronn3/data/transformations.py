@@ -2,10 +2,12 @@
 # ELEKTRONN3 Toolkit
 # Copyright (c) 2015 Philipp Schubert, Martin Drawitsch, Marius Killinger
 # All rights reserved
+
 __all__ = ['warp_slice', 'get_tracing_slice', 'WarpingOOBError',
            'Transform', 'trafo_from_array', 'get_warped_slice', 'border_treatment']
 
 import itertools
+import traceback
 from functools import reduce
 import numpy as np
 import numba
@@ -473,22 +475,18 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
         src_coords /= src_coords[...,3][...,None]
     # cut patch
     src_coords = src_coords[...,:3]
-    # if len(img.shape) == 3:
-    #     # Attention: This is wrong if img represents 2D data and already has a channel axis.
-    #     # Assuming we are handling 3D data here (TODO: Enforce volumetric data).
-    #     # TODO: Document change of data types here (h5py -> ndarray)
-    #     img_cut = img[
-    #         lo[0]:hi[0] + 1,  # Add 1 to include this coordinate!
-    #         lo[1]:hi[1] + 1,
-    #         lo[2]:hi[2] + 1
-    #     ]
-    #     img_cut = img_cut[None]  # Prepend empty channel axis
-    img_cut = img[
-        :,
-        lo[0]:hi[0]+1,  # Add 1 to include this coordinate!
-        lo[1]:hi[1]+1,
-        lo[2]:hi[2]+1
-    ]
+    try:
+        img_cut = img[
+            :,
+            lo[0]:hi[0]+1,  # Add 1 to include this coordinate!
+            lo[1]:hi[1]+1,
+            lo[2]:hi[2]+1
+        ]
+    except:
+        traceback.print_exc()
+        print('Error while reading from hdf5 file. Starting IPython shell within warp_slice()...')
+        import IPython
+        IPython.embed()
     img_cut = np.ascontiguousarray(img_cut, dtype=floatX)
     img_new = np.zeros((n_f,)+ps, dtype=floatX)
     lo = lo.astype(floatX)
@@ -520,9 +518,15 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
         hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
         if np.any(lo_targ < 0) or np.any(hi_targ >= target.shape[1:]):
              raise WarpingOOBError("Out of bounds for target")
-        target_cut = target[:, lo_targ[0]:hi_targ[0]+1, #add 1 to include this coordinate!
-                               lo_targ[1]:hi_targ[1]+1,
-                               lo_targ[2]:hi_targ[2]+1]
+        try:
+            target_cut = target[:, lo_targ[0]:hi_targ[0]+1, #add 1 to include this coordinate!
+                                   lo_targ[1]:hi_targ[1]+1,
+                                   lo_targ[2]:hi_targ[2]+1]
+        except:
+            traceback.print_exc()
+            print('Error while reading from hdf5 file. Starting IPython shell within warp_slice()...')
+            import IPython
+            IPython.embed()
 
         target_cut = np.ascontiguousarray(target_cut, dtype=floatX)
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
