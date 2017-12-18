@@ -51,7 +51,7 @@ lr = 0.0004
 opt = 'adam'
 lr_dec = 0.999
 bs = 1
-progress_steps = 100  # Temporary low value for debugging
+progress_steps = 30  # Temporary low value for debugging
 
 if model_name == 'fcn32s':
     model = fcn32s(learned_billinear=False)
@@ -83,17 +83,17 @@ def weights_init(m):
 if host == 'local':
     path = os.path.expanduser('~/neuro_data_cdhw/')
     data_init_kwargs = {
-        'd_path': path,
-        't_path': path,
-        'd_files': [('raw_%i.h5' %i, 'raw') for i in range(3)],
-        't_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        'input_path': path,
+        'target_path': path,
+        'input_files': [('raw_%i.h5' % i, 'raw') for i in range(3)],
+        'target_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
         # 'mean': 155.291411,
         # 'std': 42.599974,
         'aniso_factor': 2,
         'source': 'train',
         'patch_shape': (96, 96, 96),
         'preview_shape': (64, 256, 256),
-        'valid_cubes': [2],
+        'valid_cube_indices': [2],
         'grey_augment_channels': [0],
         'epoch_size': progress_steps*bs,
         'warp': 0.5,
@@ -128,6 +128,6 @@ lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, num_workers=2,
+                      dataset=dataset, batchsize=bs, num_workers=0,
                       save_path=save_path, schedulers={"lr": lr_sched})
 st.train(nIters)

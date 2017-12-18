@@ -18,19 +18,19 @@ logger = logging.getLogger('elektronn3log')
 
 
 class BatchCreatorImage(data.Dataset):
-    def __init__(self, d_path=None, t_path=None,
-                 d_files=None, t_files=None, cube_prios=None, valid_cubes=None,
+    def __init__(self, input_path=None, target_path=None,
+                 input_files=None, target_files=None, cube_prios=None, valid_cube_indices=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
                  target_discrete_ix=None, mean=None, std=None, normalize=True,
                  source='train', patch_shape=None, preview_shape=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
                  epoch_size=100, cuda_enabled='auto'):
-        assert (d_path and t_path and d_files and t_files)
-        if len(d_files)!=len(t_files):
-            raise ValueError("d_files and t_files must be lists of same length!")
-        d_path = os.path.expanduser(d_path)
-        t_path = os.path.expanduser(t_path)
+        assert (input_path and target_path and input_files and target_files)
+        if len(input_files)!=len(target_files):
+            raise ValueError("input_files and target_files must be lists of same length!")
+        input_path = os.path.expanduser(input_path)
+        target_path = os.path.expanduser(target_path)
         if cuda_enabled == 'auto':
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
@@ -45,12 +45,14 @@ class BatchCreatorImage(data.Dataset):
         self.force_dense = force_dense
 
         # general properties
-        self.d_path = d_path
-        self.t_path = t_path
-        self.d_files = d_files
-        self.t_files = t_files
+        self.input_path = input_path
+        self.target_path = target_path
+        # TODO: "*_files" is a bit misleading, because those are actually tuples (filename, h5_key).
+        self.input_files = input_files
+        self.target_files = target_files
         self.cube_prios = cube_prios
-        self.valid_cubes = valid_cubes if valid_cubes is not None else []
+        # TODO: Support separate validation data? (Not using indices, but an own validation list)
+        self.valid_cube_indices = valid_cube_indices if valid_cube_indices is not None else []
         self.aniso_factor = aniso_factor
         self.border_mode = border_mode
         self.target_vec_ix = target_vec_ix
@@ -65,29 +67,26 @@ class BatchCreatorImage(data.Dataset):
         self.strides = np.array([1, 1, 1], dtype=np.int) #np.array(target_node.shape.strides, dtype=np.int)
         self.offsets = np.array([0, 0, 0], dtype=np.int) #np.array(target_node.shape.offsets, dtype=np.int)
         self.target_ps = self.patch_shape - self.offsets * 2
-        self.t_dtype = np.int64
+        self.target_dtype = np.int64
         self.mode = 'img-img'
         # The following will be inferred when reading data
-        self.n_labelled_pixel = 0
+        self.n_labelled_pixels = 0
         self.c_input = None  # Number of input channels
         self.c_target = None  # Number of target channels
 
         # Actual data fields
-        self.valid_d = []
-        self.valid_t = []
-        self.valid_extra = []
+        self.valid_inputs = []
+        self.valid_targets = []
 
-        self.train_d = []
-        self.train_t = []
-        self.train_extra = []
+        self.train_inputs = []
+        self.train_targets = []
 
         if preview_shape is None:
             self.preview_shape = self.patch_shape
         else:
             self.preview_shape = preview_shape
-        # Load preview data on initialization so read errors won't occur late
-        # and reading doesn't have to be done by each background worker process separately.
-        self._preview_batch = self.preview_batch
+        self._preview_batch = None
+
 
         # Setup internal stuff
         self.rng = np.random.RandomState(
@@ -109,8 +108,11 @@ class BatchCreatorImage(data.Dataset):
         if self.normalize:
             # Pre-compute to prevent later redundant computation in multiple processes.
             _, _ = self.mean, self.std
+            # Load preview data on initialization so read errors won't occur late
+            # and reading doesn't have to be done by each background worker process separately.
+            _ = self.preview_batch
         if class_weights:
-            target_mean = np.mean(self.train_t)
+            target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
             self.class_weights = torch.FloatTensor([bg_weight, fg_weight])
@@ -125,11 +127,11 @@ class BatchCreatorImage(data.Dataset):
         if self.grey_augment_channels is None:
             self.grey_augment_channels = []
         self._reseed()
-        data_coords, target_coords = self._getcube(self.source)  # get cube randomly
+        input_src_coords, target_src_coords = self._getcube(self.source)  # get cube randomly
 
         while True:
             try:
-                data, target = self.warp_cut(data_coords, target_coords,  self.warp, self.warp_args)
+                inp, target = self.warp_cut(input_src_coords, target_src_coords, self.warp, self.warp_args)
             except transformations.WarpingOOBError:
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
@@ -144,9 +146,9 @@ class BatchCreatorImage(data.Dataset):
                 continue
             self.n_successful_warp += 1
             if self.normalize:
-                data = (data - self.mean) / self.std
+                inp = (inp - self.mean) / self.std
             if self.source == "train":  # no grey augmentation for testing
-                data = transformations.grey_augment(data, self.grey_augment_channels, self.rng)
+                inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
         target = target.astype(np.int64)
@@ -154,7 +156,7 @@ class BatchCreatorImage(data.Dataset):
         if not (self.force_dense or np.all(self.strides == 1)):
             target = self._stridedtargets(target)
 
-        return data, target
+        return inp, target
 
     def __len__(self):
         return self.epoch_size
@@ -164,15 +166,15 @@ class BatchCreatorImage(data.Dataset):
             "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
             "pixels."
         s = s.format(self.c_target, self.c_input, self._training_count,
-                     self._valid_count, self.n_labelled_pixel)
+                     self._valid_count, self.n_labelled_pixels)
         return s
 
     @property
     def mean(self):  # TODO: Respect separate channels
         if self._mean is None:
-            self._mean = np.mean(self.train_d)
+            self._mean = np.mean(self.train_inputs)
             logger.warning(
-                'Calculating mean of training data. This is potentially slow. Please supply\n'
+                'Calculating mean of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
             logger.info(f'mean = {self._mean:.6f}')
@@ -181,9 +183,9 @@ class BatchCreatorImage(data.Dataset):
     @property
     def std(self):  # TODO: Respect separate channels
         if self._std is None:
-            self._std = np.std(self.train_d)
+            self._std = np.std(self.train_inputs)
             logger.warning(
-                'Calculating std of training data. This is potentially slow. Please supply\n'
+                'Calculating std of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
             logger.info(f'std = {self._std:.6f}')
@@ -207,10 +209,10 @@ class BatchCreatorImage(data.Dataset):
         if self._preview_batch is None:
             d, h, w = self.preview_shape
             # TODO: Central slices
-            # TODO: Don't hardcode valid_d[0]
-            inp_np = self.valid_d[0][:, :d, :h, :w][None]
+            # TODO: Don't hardcode valid_inputs[0]
+            inp_np = self.valid_inputs[0][:, :d, :h, :w][None]
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)  # Normalize
-            target_np = self.valid_t[0][:, :d, :h, :w][None].astype(np.int64)
+            target_np = self.valid_targets[0][:, :d, :h, :w][None].astype(np.int64)
             inp = torch.from_numpy(inp_np)
             target = torch.from_numpy(target_np)
             if self.cuda_enabled:
@@ -237,7 +239,8 @@ class BatchCreatorImage(data.Dataset):
                 np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
             )
 
-    def warp_cut(self, img, target, warp, warp_params):
+    # TODO: Clear distinction in variable names between the inp/target slice and the inp/target source
+    def warp_cut(self, inp_src, target_src, warp, warp_params):
         """
         (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
 
@@ -250,10 +253,10 @@ class BatchCreatorImage(data.Dataset):
 
         Parameters
         ----------
-        img: np.ndarray
-            Input image
-        target: np.ndarray
-            Target image
+        inp_src: h5py.Dataset
+            Input image source (in HDF5)
+        target_src: h5py.Dataset
+            Target image source (in HDF5)
         warp: float or bool
             False/True disable/enable warping completely.
             If ``warp`` is a float, it is used as the ratio of inputs that
@@ -267,14 +270,14 @@ class BatchCreatorImage(data.Dataset):
 
         Returns
         -------
-        d: np.ndarray
+        inp: np.ndarray
             (Warped) input image slice
-        t: np.ndarray
+        target_src: np.ndarray
             (Warped) target slice
         """
         if (warp is True) or (warp == 1):  # always warp
             do_warp = True
-        elif (0 < warp < 1):  # warp only a fraction of examples
+        elif 0 < warp < 1:  # warp only a fraction of examples
             do_warp = True if (self.rng.rand() < warp) else False
         else:  # never warp
             do_warp = False
@@ -283,15 +286,19 @@ class BatchCreatorImage(data.Dataset):
             warp_params = dict(warp_params)
             warp_params['warp_amount'] = 0
 
-        d, t = transformations.get_warped_slice(img, self.patch_shape,
-                                                aniso_factor=self.aniso_factor,
-                                                target=target,
-                                                target_ps=self.target_ps,
-                                                target_vec_ix=self.target_vec_ix,
-                                                target_discrete_ix=self.target_discrete_ix,
-                                                rng=self.rng, **warp_params)
+        inp, target = transformations.get_warped_slice(
+            inp_src,
+            self.patch_shape,
+            aniso_factor=self.aniso_factor,
+            target_src=target_src,
+            target_ps=self.target_ps,
+            target_vec_ix=self.target_vec_ix,
+            target_discrete_ix=self.target_discrete_ix,
+            rng=self.rng,
+            **warp_params
+        )
 
-        return d, t
+        return inp, target
 
     def _getcube(self, source):
         """
@@ -301,36 +308,36 @@ class BatchCreatorImage(data.Dataset):
         if source == 'train':
             p = self.rng.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
-            d, t = self.train_d[i], self.train_t[i]
+            inp_source, target_source = self.train_inputs[i], self.train_targets[i]
         elif source == "valid":
-            if len(self.valid_d) == 0:
+            if len(self.valid_inputs) == 0:
                 raise ValueError("No validation set")
 
-            i = self.rng.randint(0, len(self.valid_d))
-            d = self.valid_d[i]
-            t = self.valid_t[i]
+            i = self.rng.randint(0, len(self.valid_inputs))
+            inp_source = self.valid_inputs[i]
+            target_source = self.valid_targets[i]
         else:
             raise ValueError("Unknown data source")
 
-        return d, t
+        return inp_source, target_source
 
     def _stridedtargets(self, target):
         return target[:, :, ::self.strides[0], ::self.strides[1], ::self.strides[2]]
 
     def load_data(self):
-        data, target = self.open_files()
+        inp_files, target_files = self.open_files()
 
         prios = []
         # Distribute Cubes into training and valid list
-        for k, (d, t) in enumerate(zip(data, target)):
-            if k in self.valid_cubes:
-                self.valid_d.append(d)
-                self.valid_t.append(t)
+        for k, (inp, target) in enumerate(zip(inp_files, target_files)):
+            if k in self.valid_cube_indices:
+                self.valid_inputs.append(inp)
+                self.valid_targets.append(target)
             else:
-                self.train_d.append(d)
-                self.train_t.append(t)
+                self.train_inputs.append(inp)
+                self.train_targets.append(target)
                 # If no priorities are given: sample proportional to cube size
-                prios.append(t.size)
+                prios.append(target.size)
 
         if self.cube_prios is None:
             prios = np.array(prios, dtype=np.float)
@@ -339,8 +346,8 @@ class BatchCreatorImage(data.Dataset):
 
         # sample example i if: batch_prob[i] < p
         self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
-        self._training_count = len(self.train_d)
-        self._valid_count = len(self.valid_d)
+        self._training_count = len(self.train_inputs)
+        self._valid_count = len(self.valid_inputs)
 
     def check_files(self):  # TODO: Update for cdhw version
         """
@@ -348,8 +355,8 @@ class BatchCreatorImage(data.Dataset):
         """
         notfound = False
         give_neuro_data_hint = False
-        fullpaths = [os.path.join(self.d_path, f) for f, _ in self.d_files] + \
-                    [os.path.join(self.t_path, f) for f, _ in self.t_files]
+        fullpaths = [os.path.join(self.input_path, f) for f, _ in self.input_files] + \
+                    [os.path.join(self.target_path, f) for f, _ in self.target_files]
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -369,22 +376,22 @@ class BatchCreatorImage(data.Dataset):
 
     def open_files(self):
         self.check_files()
-        data, target = [], []
+        inp_h5sets, target_h5sets = [], []
 
         print('\nUsing data sets:')
-        for (d_f, d_key), (t_f, t_key) in zip(self.d_files, self.t_files):
-            d = h5py.File(os.path.join(self.d_path, d_f), 'r')[d_key]
-            t = h5py.File(os.path.join(self.t_path, t_f), 'r')[t_key]
+        for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_files, self.target_files):
+            inp_h5 = h5py.File(os.path.join(self.input_path, inp_fname), 'r')[inp_key]
+            target_h5 = h5py.File(os.path.join(self.target_path, target_fname), 'r')[target_key]
 
-            assert d.ndim == 4
-            assert t.ndim == 4
-            self.c_input = d.shape[0]
-            self.c_target = t.shape[0]
-            self.n_labelled_pixel += t[0].size
-            print(f'  input:       {d_f}[{d_key}]: {d.shape} ({d.dtype})')
-            print(f'  with target: {t_f}[{t_key}]: {t.shape} ({t.dtype})')
-            data.append(d)
-            target.append(t)
+            assert inp_h5.ndim == 4
+            assert target_h5.ndim == 4
+            self.c_input = inp_h5.shape[0]
+            self.c_target = target_h5.shape[0]
+            self.n_labelled_pixels += target_h5[0].size
+            print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
+            print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
+            inp_h5sets.append(inp_h5)
+            target_h5sets.append(target_h5)
         print()
 
-        return data, target
+        return inp_h5sets, target_h5sets
