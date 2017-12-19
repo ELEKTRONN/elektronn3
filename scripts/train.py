@@ -92,7 +92,7 @@ if host == 'local':
         'aniso_factor': 2,
         'source': 'train',
         'patch_shape': (96, 96, 96),
-        'preview_shape': (64, 256, 256),
+        'preview_shape': (64, 144, 144),
         'valid_cube_indices': [2],
         'grey_augment_channels': [0],
         'epoch_size': progress_steps*bs,
@@ -128,6 +128,6 @@ lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, num_workers=0,
+                      dataset=dataset, batchsize=bs, num_workers=1,
                       save_path=save_path, schedulers={"lr": lr_sched})
 st.train(nIters)
