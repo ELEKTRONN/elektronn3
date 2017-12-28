@@ -249,7 +249,7 @@ class PatchCreator(data.Dataset):
             target = torch.from_numpy(target_np)
             if self.cuda_enabled:
                 inp = inp.cuda()
-            target = target.cuda()
+                target = target.cuda()
             inp = Variable(inp, volatile=True)
             target = Variable(target, volatile=True)
             self._preview_batch = (inp, target)
