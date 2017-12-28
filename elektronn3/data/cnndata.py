@@ -1,4 +1,4 @@
-__all__ = ['BatchCreatorImage']
+__all__ = ['PatchCreator']
 
 import logging
 import os
@@ -17,7 +17,7 @@ from elektronn3.data import transformations
 logger = logging.getLogger('elektronn3log')
 
 
-class BatchCreatorImage(data.Dataset):
+class PatchCreator(data.Dataset):
     def __init__(self, input_path=None, target_path=None,
                  input_files=None, target_files=None, cube_prios=None, valid_cube_indices=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
@@ -64,6 +64,7 @@ class BatchCreatorImage(data.Dataset):
         # HACK
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
+        # TODO: Strides and offsets are currently hardcoded. Try to calculate them or at least make them configurable.
         self.strides = np.array([1, 1, 1], dtype=np.int) #np.array(target_node.shape.strides, dtype=np.int)
         self.offsets = np.array([0, 0, 0], dtype=np.int) #np.array(target_node.shape.offsets, dtype=np.int)
         self.target_ps = self.patch_shape - self.offsets * 2

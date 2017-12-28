@@ -15,7 +15,7 @@ import elektronn3
 mpl_backend = 'agg'  # TODO: Make this a CLI option
 elektronn3.select_mpl_backend(mpl_backend)
 
-from elektronn3.data.cnndata import BatchCreatorImage
+from elektronn3.data.cnndata import PatchCreator
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.models.vnet import VNet
 from elektronn3.models.fcn import fcn32s
@@ -103,8 +103,7 @@ if host == 'local':
             'perspective': True
         }
     }
-
-dataset = BatchCreatorImage(**data_init_kwargs, cuda_enabled=cuda_enabled)
+dataset = PatchCreator(**data_init_kwargs, cuda_enabled=cuda_enabled)
 
 
 torch.manual_seed(0)
