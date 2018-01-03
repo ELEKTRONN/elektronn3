@@ -1,15 +1,30 @@
-import h5py
-import os
-import time
-from functools import reduce, wraps
-import numpy as np
-import sys
-import pickle as pkl
 import gzip
-import signal
 import logging
+import os
+import pickle as pkl
+import signal
+import sys
+import time
+from functools import wraps
+
+import h5py
+import numpy as np
+import torch
+from torch.autograd import Variable
+
 from elektronn3 import floatX
+
 logger = logging.getLogger("elektronn3log")
+
+
+def to_variable(array: np.ndarray, volatile=True, cuda='auto') -> Variable:
+    if cuda == 'auto':
+        cuda = torch.cuda.is_available()
+    tensor = torch.from_numpy(array)
+    if cuda:
+        tensor = tensor.cuda()
+    var = Variable(tensor, volatile=volatile)
+    return var
 
 
 def get_filepaths_from_dir(directory, ending='k.zip', recursively=False):

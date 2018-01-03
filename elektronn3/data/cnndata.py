@@ -13,6 +13,7 @@ from torch.autograd import Variable
 from torch.utils import data
 
 from elektronn3.data import transformations
+from elektronn3.data.utils import to_variable
 
 logger = logging.getLogger('elektronn3log')
 
@@ -200,6 +201,52 @@ class PatchCreator(data.Dataset):
         self.source = "train"
         self.epoch_size = self._epoch_size
 
+    def _create_preview_batch(
+            self,
+            inp_source: h5py.Dataset,
+            target_source: h5py.Dataset,
+    ) -> Tuple[Variable, Variable]:
+
+        # Central slicing
+        halfshape = np.array(self.preview_shape) // 2
+        inp_shape = np.array(inp_source.shape[1:])
+        inp_center = inp_shape // 2
+        inp_lo = inp_center - halfshape
+        inp_hi = inp_center + halfshape
+        target_shape = np.array(target_source.shape[1:])
+        target_center = target_shape // 2
+        target_lo = target_center - halfshape
+        target_hi = target_center + halfshape
+        if np.any(inp_center < halfshape):
+            raise ValueError(
+                'preview_shape is too big for shape of input source.'
+                f'Requested {self.preview_shape}, but can only deliver {tuple(inp_shape)}.'
+            )
+        elif np.any(target_center < halfshape):
+            raise ValueError(
+                'preview_shape is too big for shape of target source.'
+                f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
+            )
+
+        inp_np = inp_source[
+            :,
+            inp_lo[0]:inp_hi[0],
+            inp_lo[1]:inp_hi[1],
+            inp_lo[2]:inp_hi[2]
+        ][None]
+        inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)  # Normalize
+        target_np = target_source[
+            :,
+            target_lo[0]:target_hi[0],
+            target_lo[1]:target_hi[1],
+            target_lo[2]:target_hi[2]
+        ][None].astype(np.int64)
+
+        inp = to_variable(inp_np, cuda=self.cuda_enabled)
+        target = to_variable(target_np, cuda=self.cuda_enabled)
+
+        return inp, target
+
     # In this implementation the preview batch is always kept in GPU memory.
     # This means much better inference speed when using it, but this may be
     # a bad decision if GPU memory is limited.
@@ -207,51 +254,17 @@ class PatchCreator(data.Dataset):
     #           (E.g. suggest a smaller preview shape if catching OOM)
     #
     # TODO: Make targets optional so we can have larger previews without ground truth targets?
+
+    # TODO: Support multiple preview batches (e.g. training previews AND validation previews)
+    #       This could be useful for qualitative comparison between performances on
+    #       training and validation data.
     @property
     def preview_batch(self) -> Tuple[Variable, Variable]:
         if self._preview_batch is None:
-            # Central slicing
-            halfshape = np.array(self.preview_shape) // 2
-            inp_shape = np.array(self.valid_inputs[0].shape[1:])
-            inp_center = inp_shape // 2
-            inp_lo = inp_center - halfshape
-            inp_hi = inp_center + halfshape
-            target_shape = np.array(self.valid_targets[0].shape[1:])
-            target_center = target_shape // 2
-            target_lo = target_center - halfshape
-            target_hi = target_center + halfshape
-            if np.any(inp_center < halfshape):
-                raise ValueError(
-                    'preview_shape is too big for shape of validation input.'
-                    f'Requested {self.preview_shape}, but can only deliver {tuple(inp_shape)}.'
-                )
-            elif np.any(target_center < halfshape):
-                raise ValueError(
-                    'preview_shape is too big for shape of validation target.'
-                    f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
-                )
-            # TODO: Don't hardcode valid_inputs[0]
-            inp_np = self.valid_inputs[0][
-                :,
-                inp_lo[0]:inp_hi[0],
-                inp_lo[1]:inp_hi[1],
-                inp_lo[2]:inp_hi[2]
-            ][None]
-            inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)  # Normalize
-            target_np = self.valid_targets[0][
-                :,
-                target_lo[0]:target_hi[0],
-                target_lo[1]:target_hi[1],
-                target_lo[2]:target_hi[2]
-            ][None].astype(np.int64)
+            inp, target = self._create_preview_batch(
+                self.valid_inputs[0], self.valid_targets[0]
+            )  # TODO: Don't hardcode valid_*[0]
 
-            inp = torch.from_numpy(inp_np)
-            target = torch.from_numpy(target_np)
-            if self.cuda_enabled:
-                inp = inp.cuda()
-                target = target.cuda()
-            inp = Variable(inp, volatile=True)
-            target = Variable(target, volatile=True)
             self._preview_batch = (inp, target)
         return self._preview_batch
 
