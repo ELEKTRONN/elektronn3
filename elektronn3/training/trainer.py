@@ -67,6 +67,7 @@ class StoppableTrainer:
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
             tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
             os.makedirs(tb_dir)
+            # TODO: Make always_flush user-configurable here:
             self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=True)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
         try:
@@ -180,7 +181,6 @@ class StoppableTrainer:
                         p0 = out[0, 0, 32, ...].data.cpu().numpy()  # class 0
                         p1 = out[0, 1, 32, ...].data.cpu().numpy()  # class 1
                         mc = mcl[0, 32, ...].data.cpu().numpy()
-                        mc_inv = 1 - mc  # Warning: This just assumes 2-channel predictions. Change this later.
 
                         if self.first_plot:
                             # ip = inp[0, 0, 32, ...].data.cpu().numpy()
@@ -195,7 +195,7 @@ class StoppableTrainer:
                             self.first_plot = False
                         self.tb.log_image('p/p0', p0, step=self.iterations)
                         self.tb.log_image('p/p1', p1, step=self.iterations)
-                        self.tb.log_image('p/mc', mc_inv, self.iterations)
+                        self.tb.log_image('p/mc', mc, self.iterations)
                         # self.tb.log_image('preview', [ip, p0, p1], step=self.iterations)
                         # TODO: Also plot ground truth target for preview prediction
 
