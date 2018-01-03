@@ -7,11 +7,9 @@ __all__ = ['warp_slice', 'get_tracing_slice', 'WarpingOOBError',
            'Transform', 'trafo_from_array', 'get_warped_slice', 'border_treatment']
 
 import itertools
-import traceback
-from functools import reduce
+from functools import reduce, lru_cache
 import numpy as np
 import numba
-from elektronn3.data import utils
 from elektronn3 import floatX
 
 
@@ -142,6 +140,7 @@ def map_coordinates_max_kernel(src, coords, lo, k, dest):
                 dest[z, x, y] = val
 
 
+@lru_cache(maxsize=1)
 def identity():
     return np.eye(4, dtype=floatX)
 
@@ -191,6 +190,7 @@ def scale_inv(mz, my, mx):
     ], dtype=floatX)
 
 
+@lru_cache()
 def scale(mz, my, mx):
     return np.array([
         [mz,  0.0, 0.0, 0.0],
@@ -299,7 +299,7 @@ def get_random_warpmat(lock_z=False, perspective=False, amount=1.0, rng=None):
     return W + perturb
 
 
-@utils.cache()
+@lru_cache()
 def make_dest_coords(sh):
     """
     Make coordinate list for destination array of shape sh
@@ -311,6 +311,7 @@ def make_dest_coords(sh):
     return coords.astype(floatX)
 
 
+@lru_cache()
 def make_dest_corners(sh):
     """
     Make coordinate list of the corners of destination array of shape sh
