@@ -475,50 +475,13 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         src_coords /= src_coords[...,3][...,None]
     # cut patch
     src_coords = src_coords[...,:3]
-    try:
-        img_cut = inp_src[
-            :,
-            lo[0]:hi[0]+1,  # Add 1 to include this coordinate!
-            lo[1]:hi[1]+1,
-            lo[2]:hi[2]+1
-        ]
-    except:
-        # There is currently a random OSError happening after a random amount of iterations,
-        # mostly (or only?) during validation. Looks like a bug in HDF5 or in h5py.
-        # It is similar but not the same as https://github.com/h5py/h5py/issues/480, which
-        # should long be fixed (using hdf5 1.10.1 and h5py 2.7.1 from conda-forge).
-        # Relevant part of the traceback:
-        #
-        # Traceback (most recent call last):
-        #   File "train.py", line 133, in <module>
-        #     st.train(nIters)
-        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/trainer.py", line 149, in train
-        #     val_loss, val_err = self.validate()
-        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/trainer.py", line 227, in validate
-        #     for data, target in self.valid_loader:
-        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/train_utils.py", line 234, in __next__
-        #     nxt = super(DelayedDataLoaderIter, self).__next__()
-        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/torch/utils/data/dataloader.py", line 260, in __next__
-        #     return self._process_next_batch(batch)
-        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/torch/utils/data/dataloader.py", line 280, in _process_next_batch
-        #     raise batch.exc_type(batch.exc_msg)
-        # AssertionError: Traceback (most recent call last):
-        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/data/transformations.py", line 528, in warp_slice
-        #     lo_targ[2]:hi_targ[2]+1
-        #   File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
-        #   File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
-        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/h5py/_hl/dataset.py", line 496, in __getitem__
-        #     self.id.read(mspace, fspace, arr, mtype, dxpl=self._dxpl)
-        #   File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
-        #   File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
-        #   File "h5py/h5d.pyx", line 181, in h5py.h5d.DatasetID.read
-        #   File "h5py/_proxy.pyx", line 130, in h5py._proxy.dset_rw
-        #   File "h5py/_proxy.pyx", line 84, in h5py._proxy.H5PY_H5Dread
-        # OSError: Can't read data (Invalid data for LZF decompression)
-        traceback.print_exc()
-        print('Error while reading from hdf5 file. Starting IPython shell within warp_slice()...')
-        import IPython
-        IPython.embed()  # Note that this won't work with num_workers > 0
+    img_cut = inp_src[
+        :,
+        lo[0]:hi[0]+1,  # Add 1 to include this coordinate!
+        lo[1]:hi[1]+1,
+        lo[2]:hi[2]+1
+    ]
+
     img_cut = np.ascontiguousarray(img_cut, dtype=floatX)
     inp = np.zeros((n_f,)+ps, dtype=floatX)
     lo = lo.astype(floatX)
@@ -552,18 +515,46 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
         if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[1:]):
              raise WarpingOOBError("Out of bounds for target_src")
-        try:
-            target_cut = target_src[
-                :,
-                lo_targ[0]:hi_targ[0]+1,  #add 1 to include this coordinate!
-                lo_targ[1]:hi_targ[1]+1,
-                lo_targ[2]:hi_targ[2]+1
-            ]
-        except:
-            traceback.print_exc()
-            print('Error while reading from hdf5 file. Starting IPython shell within warp_slice()...')
-            import IPython
-            IPython.embed()
+        target_cut = target_src[
+            :,
+            lo_targ[0]:hi_targ[0]+1,  #add 1 to include this coordinate!
+            lo_targ[1]:hi_targ[1]+1,
+            lo_targ[2]:hi_targ[2]+1
+        ]
+        # There is currently a random OSError happening after a random amount of iterations,
+        # mostly (or only?) during validation. Looks like a bug in HDF5 or in h5py.
+        # It is similar but not the same as https://github.com/h5py/h5py/issues/480, which
+        # should long be fixed (using hdf5 1.10.1 and h5py 2.7.1 from conda-forge).
+        # (The traceback below mentions LZF, but a very similar error also happens when using
+        #  zlib compression.)
+        # Relevant part of the traceback:
+        #
+        # Traceback (most recent call last):
+        #   File "train.py", line 133, in <module>
+        #     st.train(nIters)
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/trainer.py", line 149, in train
+        #     val_loss, val_err = self.validate()
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/trainer.py", line 227, in validate
+        #     for data, target in self.valid_loader:
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/train_utils.py", line 234, in __next__
+        #     nxt = super(DelayedDataLoaderIter, self).__next__()
+        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/torch/utils/data/dataloader.py", line 260, in __next__
+        #     return self._process_next_batch(batch)
+        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/torch/utils/data/dataloader.py", line 280, in _process_next_batch
+        #     raise batch.exc_type(batch.exc_msg)
+        # AssertionError: Traceback (most recent call last):
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/data/transformations.py", line 528, in warp_slice
+        #     lo_targ[2]:hi_targ[2]+1
+        #   File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+        #   File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/h5py/_hl/dataset.py", line 496, in __getitem__
+        #     self.id.read(mspace, fspace, arr, mtype, dxpl=self._dxpl)
+        #   File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+        #   File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+        #   File "h5py/h5d.pyx", line 181, in h5py.h5d.DatasetID.read
+        #   File "h5py/_proxy.pyx", line 130, in h5py._proxy.dset_rw
+        #   File "h5py/_proxy.pyx", line 84, in h5py._proxy.H5PY_H5Dread
+        # OSError: Can't read data (Invalid data for LZF decompression)
 
         target_cut = np.ascontiguousarray(target_cut, dtype=floatX)
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
