@@ -20,16 +20,16 @@ logger = logging.getLogger('elektronn3log')
 
 class PatchCreator(data.Dataset):
     def __init__(self, input_path=None, target_path=None,
-                 input_files=None, target_files=None, cube_prios=None, valid_cube_indices=None,
+                 input_h5data=None, target_h5data=None, cube_prios=None, valid_cube_indices=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
                  target_discrete_ix=None, mean=None, std=None, normalize=True,
                  source='train', patch_shape=None, preview_shape=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
                  epoch_size=100, eager_init=True, cuda_enabled='auto'):
-        assert (input_path and target_path and input_files and target_files)
-        if len(input_files)!=len(target_files):
-            raise ValueError("input_files and target_files must be lists of same length!")
+        assert (input_path and target_path and input_h5data and target_h5data)
+        if len(input_h5data)!=len(target_h5data):
+            raise ValueError("input_h5data and target_h5data must be lists of same length!")
         input_path = os.path.expanduser(input_path)
         target_path = os.path.expanduser(target_path)
         if cuda_enabled == 'auto':
@@ -49,8 +49,8 @@ class PatchCreator(data.Dataset):
         self.input_path = input_path
         self.target_path = target_path
         # TODO: "*_files" is a bit misleading, because those are actually tuples (filename, h5_key).
-        self.input_files = input_files
-        self.target_files = target_files
+        self.input_h5data = input_h5data
+        self.target_h5data = target_h5data
         self.cube_prios = cube_prios
         # TODO: Support separate validation data? (Not using indices, but an own validation list)
         self.valid_cube_indices = valid_cube_indices if valid_cube_indices is not None else []
@@ -401,8 +401,8 @@ class PatchCreator(data.Dataset):
         """
         notfound = False
         give_neuro_data_hint = False
-        fullpaths = [os.path.join(self.input_path, f) for f, _ in self.input_files] + \
-                    [os.path.join(self.target_path, f) for f, _ in self.target_files]
+        fullpaths = [os.path.join(self.input_path, f) for f, _ in self.input_h5data] + \
+                    [os.path.join(self.target_path, f) for f, _ in self.target_h5data]
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -425,7 +425,7 @@ class PatchCreator(data.Dataset):
         inp_h5sets, target_h5sets = [], []
 
         print('\nUsing data sets:')
-        for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_files, self.target_files):
+        for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
             inp_h5 = h5py.File(os.path.join(self.input_path, inp_fname), 'r')[inp_key]
             target_h5 = h5py.File(os.path.join(self.target_path, target_fname), 'r')[target_key]
 

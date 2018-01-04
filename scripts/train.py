@@ -85,8 +85,8 @@ if host == 'local':
     data_init_kwargs = {
         'input_path': path,
         'target_path': path,
-        'input_files': [('raw_%i.h5' % i, 'raw') for i in range(3)],
-        'target_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(3)],
+        'target_h5data': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
         'mean': 155.291411,
         'std': 42.599974,
         'aniso_factor': 2,
