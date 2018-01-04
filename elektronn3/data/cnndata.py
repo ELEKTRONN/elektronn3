@@ -26,7 +26,7 @@ class PatchCreator(data.Dataset):
                  source='train', patch_shape=None, preview_shape=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
-                 epoch_size=100, cuda_enabled='auto'):
+                 epoch_size=100, eager_init=True, cuda_enabled='auto'):
         assert (input_path and target_path and input_files and target_files)
         if len(input_files)!=len(target_files):
             raise ValueError("input_files and target_files must be lists of same length!")
@@ -107,12 +107,13 @@ class PatchCreator(data.Dataset):
         self._mean = mean
         self._std = std
         self.normalize = normalize
-        if self.normalize:
-            # Pre-compute to prevent later redundant computation in multiple processes.
-            _, _ = self.mean, self.std
-        # Load preview data on initialization so read errors won't occur late
-        # and reading doesn't have to be done by each background worker process separately.
-        _ = self.preview_batch
+        if eager_init:
+            if self.normalize:
+                # Pre-compute to prevent later redundant computation in multiple processes.
+                _, _ = self.mean, self.std
+            # Load preview data on initialization so read errors won't occur late
+            # and reading doesn't have to be done by each background worker process separately.
+            _ = self.preview_batch
         if class_weights:
             target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
