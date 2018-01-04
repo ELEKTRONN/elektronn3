@@ -110,9 +110,9 @@ class PatchCreator(data.Dataset):
         if self.normalize:
             # Pre-compute to prevent later redundant computation in multiple processes.
             _, _ = self.mean, self.std
-            # Load preview data on initialization so read errors won't occur late
-            # and reading doesn't have to be done by each background worker process separately.
-            _ = self.preview_batch
+        # Load preview data on initialization so read errors won't occur late
+        # and reading doesn't have to be done by each background worker process separately.
+        _ = self.preview_batch
         if class_weights:
             target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
