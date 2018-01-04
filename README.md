@@ -31,11 +31,11 @@ directory.
 
 # Training
 
-For a quick test run, first ensure that the neuro_data_zxy data set is
+For a quick test run, first ensure that the neuro_data_cdhw data set is
 in the expected path:
 
-    wget http://elektronn.org/downloads/neuro_data_zxy.zip
-    unzip neuro_data_zxy.zip -d ~/neuro_data_zxy
+    wget https://github.com/ELEKTRONN/elektronn.github.io/releases/download/neuro_data_cdhw/neuro_data_cdhw.zip
+    unzip neuro_data_cdhw.zip -d ~/neuro_data_cdhw
 
 To test training with an extremely small model and **elektronn3**,
 you can run:
