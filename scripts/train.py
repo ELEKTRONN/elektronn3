@@ -20,6 +20,7 @@ from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.models.vnet import VNet
 from elektronn3.models.fcn import fcn32s
 from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
+from elektronn3.models.unet import UNet
 
 
 logger = logging.getLogger('elektronn3log')
@@ -63,6 +64,8 @@ elif model_name == 'extended':
     model = Extended3DNet()
 elif model_name == 'n3d':
     model = N3DNet()
+elif model_name == 'unet':
+    model = UNet(2, 1, start_filts=32, depth=3)
 else:
     raise ValueError('model not found.')
 
