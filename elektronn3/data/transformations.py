@@ -2,19 +2,18 @@
 # ELEKTRONN3 Toolkit
 # Copyright (c) 2015 Philipp Schubert, Martin Drawitsch, Marius Killinger
 # All rights reserved
-from __future__ import absolute_import, division, print_function
-from builtins import filter, hex, input, int, map, next, oct, pow, range, super, zip
+
 __all__ = ['warp_slice', 'get_tracing_slice', 'WarpingOOBError',
            'Transform', 'trafo_from_array', 'get_warped_slice', 'border_treatment']
+
 import itertools
-from functools import reduce
+from functools import reduce, lru_cache
 import numpy as np
 import numba
-from . import utils
-from .. import floatX
+from elektronn3 import floatX
 
 
-def greyAugment(d, channels, rng):
+def grey_augment(d, channels, rng):
     """
     Performs grey value (histogram) augmentations on ``d``. This is only
     applied to ``channels`` (list of channels indices), ``rng`` is a random
@@ -36,7 +35,7 @@ def greyAugment(d, channels, rng):
 
 
 def border_treatment(data_list, ps, border_mode, ndim):
-    def treatArray(data):
+    def treat_array(data):
         if border_mode=='keep':
             return data
 
@@ -78,7 +77,7 @@ def border_treatment(data_list, ps, border_mode, ndim):
 
         return data
 
-    return [treatArray(d) for d in data_list]
+    return [treat_array(d) for d in data_list]
 
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
@@ -141,6 +140,7 @@ def map_coordinates_max_kernel(src, coords, lo, k, dest):
                 dest[z, x, y] = val
 
 
+@lru_cache(maxsize=1)
 def identity():
     return np.eye(4, dtype=floatX)
 
@@ -190,6 +190,7 @@ def scale_inv(mz, my, mx):
     ], dtype=floatX)
 
 
+@lru_cache()
 def scale(mz, my, mx):
     return np.array([
         [mz,  0.0, 0.0, 0.0],
@@ -298,7 +299,7 @@ def get_random_warpmat(lock_z=False, perspective=False, amount=1.0, rng=None):
     return W + perturb
 
 
-@utils.cache()
+@lru_cache()
 def make_dest_coords(sh):
     """
     Make coordinate list for destination array of shape sh
@@ -310,6 +311,7 @@ def make_dest_coords(sh):
     return coords.astype(floatX)
 
 
+@lru_cache()
 def make_dest_corners(sh):
     """
     Make coordinate list of the corners of destination array of shape sh
@@ -326,7 +328,7 @@ class WarpingOOBError(ValueError):
         super(WarpingOOBError, self).__init__( *args, **kwargs)
 
 
-class Transform(object):
+class Transform:
     def __init__(self, M, position_l=None, aniso_factor=2):
         self.M = M
         self.M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
@@ -392,41 +394,41 @@ def trafo_from_array(a):
     return Transform(M, offset_l, aniso_factor)
 
 
-def warp_slice(img, ps, M, target=None, target_ps=None,
+def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
                target_vec_ix=None, target_discrete_ix=None,
                last_ch_max_interp=False, ksize=0.5):
     """
-    Cuts a warped slice out of the input image and out of the target image.
+    Cuts a warped slice out of the input image and out of the target_src image.
     Warping is applied by multiplying the original source coordinates with
     the inverse of the homogeneous (forward) transformation matrix ``M``.
-    
+
     "Source coordinates" (``src_coords``) signify the coordinates of voxels in
-    ``img`` and ``target`` that are used to compose their respective warped
+    ``inp_src`` and ``target_src`` that are used to compose their respective warped
     versions. The idea here is that not the images themselves, but the
-    coordinates from where they are read are warped. his allows for much higher
+    coordinates from where they are read are warped. This allows for much higher
     efficiency for large image volumes because we don't have to calculate the
     expensive warping transform for the whole image, but only for the voxels
     that we eventually want to use for the new warped image.
     The transformed coordinates usually don't align to the discrete
     voxel grids of the original images (meaning they are not integers), so the
     new voxel values are obtained by linear interpolation.
-    
+
     Parameters
     ----------
-    img: np.ndarray
-        Image array in shape ``(f, z, x, y)``
+    inp_src: h5py.Dataset
+        Input image source (in HDF5)
     ps: tuple
-        (spatial only) Patch size ``(z, x, y)``
+        (spatial only) Patch size ``(D, H, W)``
         (spatial shape of the neural network's input node)
     M: np.ndarray
         Forward warping tansformation matrix (4x4).
-        Must contain translations in source and target array.
-    target: np.ndarray or None
-        Optional target array to be extracted in the same way.
+        Must contain translations in source and target_src array.
+    target_src: h5py.Dataset or None
+        Optional target source array to be extracted from in the same way.
     target_ps: tuple
-        Patch size for the ``target`` array.
+        Patch size for the ``target_src`` array.
     target_vec_ix: list
-        List of triples that denote vector value parts in the target array.
+        List of triples that denote vector value parts in the target_src array.
         E.g. [(0,1,2), (4,5,6)] denotes two vector fields, separated by a
         scalar field in channel 3.
     last_ch_max_interp: bool
@@ -434,22 +436,26 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
 
     Returns
     -------
-    img_new: np.ndarray
+    inp: np.ndarray
         Warped input image slice
-    target_new: np.ndarray or None
-        Warped target image slice
-        or ``None``, if ``target is None``.
+    target: np.ndarray or None
+        Warped target_src image slice
+        or ``None``, if ``target_src is None``.
     """
 
     ps = tuple(ps)
-    if len(img.shape)==3: # For single knossos_array
-        n_f = 1
-        sh = img.shape
-    elif len(img.shape)==4:
-        n_f = img.shape[0]
-        sh = img.shape[1:]
+    if len(inp_src.shape) == 3:
+        print(f'inp_src.shape: {inp_src.shape}')
+        raise NotImplementedError(
+            'elektronn3 has dropped support for data stored in raw 3D form without a channel axis. '
+            'Please always supply it with a prepended channel, so it\n'
+            'has the form (C, D, H, W) (or in ELEKTRONN2 terms: (f, z, x, y)).'
+        )
+    elif len(inp_src.shape) == 4:
+        n_f = inp_src.shape[0]
+        sh = inp_src.shape[1:]
     else:
-        raise ValueError('img wrong dim/shape')
+        raise ValueError('inp_src wrong dim/shape')
 
     M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
     dest_corners = make_dest_corners(ps)
@@ -470,22 +476,26 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
         src_coords /= src_coords[...,3][...,None]
     # cut patch
     src_coords = src_coords[...,:3]
-    img_cut = img[:, lo[0]:hi[0]+1, #add 1 to include this coordinate!
-                     lo[1]:hi[1]+1,
-                     lo[2]:hi[2]+1,]
+    img_cut = inp_src[
+        :,
+        lo[0]:hi[0]+1,  # Add 1 to include this coordinate!
+        lo[1]:hi[1]+1,
+        lo[2]:hi[2]+1
+    ]
+
     img_cut = np.ascontiguousarray(img_cut, dtype=floatX)
-    img_new = np.zeros((n_f,)+ps, dtype=floatX)
+    inp = np.zeros((n_f,)+ps, dtype=floatX)
     lo = lo.astype(floatX)
     for k in range(n_f):
-        if (ksize>0.5) and last_ch_max_interp and (k==n_f-1):
-            map_coordinates_max_kernel(img_cut[k], src_coords, lo, ksize, img_new[k])
+        if (ksize>0.5) and last_ch_max_interp and k == n_f - 1:
+            map_coordinates_max_kernel(img_cut[k], src_coords, lo, ksize, inp[k])
         else:
-            map_coordinates_linear(img_cut[k], src_coords, lo, img_new[k])
-    if target is not None:
+            map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
+    if target_src is not None:
         target_ps = tuple(target_ps)
-        n_f_t = target.shape[0]
+        n_f_t = target_src.shape[0]
 
-        off = np.subtract(sh, target.shape[1:])
+        off = np.subtract(sh, target_src.shape[1:])
         if np.any(np.mod(off, 2)):
             raise ValueError("targets must be centered w.r.t. images")
         off //= 2
@@ -495,22 +505,61 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
             raise ValueError("targets must be centered w.r.t. images")
         off_ps //= 2
 
-        src_coords_target = src_coords[off_ps[0]:off_ps[0]+target_ps[0],
-                                       off_ps[1]:off_ps[1]+target_ps[1],
-                                       off_ps[2]:off_ps[2]+target_ps[2]]
-        # shift coords to be w.r.t. to origin of target array
+        src_coords_target = src_coords[
+            off_ps[0]:off_ps[0]+target_ps[0],
+            off_ps[1]:off_ps[1]+target_ps[1],
+            off_ps[2]:off_ps[2]+target_ps[2]
+        ]
+        # shift coords to be w.r.t. to origin of target_src array
         lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - off).astype(np.int)
         # add 1 because linear interp
         hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
-        if np.any(lo_targ < 0) or np.any(hi_targ >= target.shape[1:]):
-             raise WarpingOOBError("Out of bounds for target")
-        target_cut = target[:, lo_targ[0]:hi_targ[0]+1, #add 1 to include this coordinate!
-                               lo_targ[1]:hi_targ[1]+1,
-                               lo_targ[2]:hi_targ[2]+1]
+        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[1:]):
+             raise WarpingOOBError("Out of bounds for target_src")
+        target_cut = target_src[
+            :,
+            lo_targ[0]:hi_targ[0]+1,  #add 1 to include this coordinate!
+            lo_targ[1]:hi_targ[1]+1,
+            lo_targ[2]:hi_targ[2]+1
+        ]
+        # There is currently a random OSError happening after a random amount of iterations,
+        # mostly (or only?) during validation. Looks like a bug in HDF5 or in h5py.
+        # It is similar but not the same as https://github.com/h5py/h5py/issues/480, which
+        # should long be fixed (using hdf5 1.10.1 and h5py 2.7.1 from conda-forge).
+        # (The traceback below mentions LZF, but a very similar error also happens when using
+        #  zlib compression.)
+        # Relevant part of the traceback:
+        #
+        # Traceback (most recent call last):
+        #   File "train.py", line 133, in <module>
+        #     st.train(nIters)
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/trainer.py", line 149, in train
+        #     val_loss, val_err = self.validate()
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/trainer.py", line 227, in validate
+        #     for data, target in self.valid_loader:
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/training/train_utils.py", line 234, in __next__
+        #     nxt = super(DelayedDataLoaderIter, self).__next__()
+        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/torch/utils/data/dataloader.py", line 260, in __next__
+        #     return self._process_next_batch(batch)
+        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/torch/utils/data/dataloader.py", line 280, in _process_next_batch
+        #     raise batch.exc_type(batch.exc_msg)
+        # AssertionError: Traceback (most recent call last):
+        #   File "/wholebrain/u/mdraw/elektronn3/elektronn3/data/transformations.py", line 528, in warp_slice
+        #     lo_targ[2]:hi_targ[2]+1
+        #   File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+        #   File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+        #   File "/u/mdraw/anaconda/lib/python3.6/site-packages/h5py/_hl/dataset.py", line 496, in __getitem__
+        #     self.id.read(mspace, fspace, arr, mtype, dxpl=self._dxpl)
+        #   File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+        #   File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+        #   File "h5py/h5d.pyx", line 181, in h5py.h5d.DatasetID.read
+        #   File "h5py/_proxy.pyx", line 130, in h5py._proxy.dset_rw
+        #   File "h5py/_proxy.pyx", line 84, in h5py._proxy.H5PY_H5Dread
+        # OSError: Can't read data (Invalid data for LZF decompression)
 
         target_cut = np.ascontiguousarray(target_cut, dtype=floatX)
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
-        target_new = np.zeros((n_f_t,)+target_ps, dtype=floatX)
+        target = np.zeros((n_f_t,) + target_ps, dtype=floatX)
         lo_targ = (lo_targ + off).astype(floatX)
         if target_discrete_ix is None:
             target_discrete_ix = [True for i in range(n_f_t)]
@@ -519,19 +568,19 @@ def warp_slice(img, ps, M, target=None, target_ps=None,
 
         for k, discr in enumerate(target_discrete_ix):
             if discr:
-                map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target_new[k])
+                map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target[k])
             else:
-                map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target_new[k])
+                map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
 
         if target_vec_ix is not None: # Vectors must be transformed again
             assert np.allclose(M[3,:3], 0.0) # no projective transform
             M_lin = M[:3,:3]
             for ix in target_vec_ix:
                 assert len(ix)==3
-                target_new[ix] = np.tensordot(M_lin, target_new[ix], axes=[[1],[0]])
+                target[ix] = np.tensordot(M_lin, target[ix], axes=[[1],[0]])
     else:
-        target_new =  None
-    return img_new, target_new
+        target = None
+    return inp, target
 
 
 def get_tracing_slice(img, ps, pos, z_shift=0, aniso_factor=2,
@@ -558,33 +607,33 @@ def get_tracing_slice(img, ps, pos, z_shift=0, aniso_factor=2,
     M = chain_matrices([T_dest, S_zoom, S_dest, R, S_src, T_src])
     ksize = min(0.5, 0.5/scale_factor)
     img_new, target_new = warp_slice(img, ps, M,
-                     target=target,
-                     target_ps=target_ps,
-                     target_vec_ix=target_vec_ix,
-                     target_discrete_ix=target_discrete_ix,
-                     last_ch_max_interp=last_ch_max_interp,
-                     ksize=ksize)
+                                     target_src=target,
+                                     target_ps=target_ps,
+                                     target_vec_ix=target_vec_ix,
+                                     target_discrete_ix=target_discrete_ix,
+                                     last_ch_max_interp=last_ch_max_interp,
+                                     ksize=ksize)
 
     return img_new, target_new, M
 
 
-def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
-                    warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
-                    target=None, target_ps=None, target_vec_ix=None,
-                    target_discrete_ix=None, rng=None):
+def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
+                     warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
+                     target_src=None, target_ps=None, target_vec_ix=None,
+                     target_discrete_ix=None, rng=None):
     """
     (Wraps :py:meth:`elektronn2.data.transformations.warp_slice()`)
-    
+
     Generates the warping transformation parameters and composes them into a
     single 4D homogeneous transformation matrix ``M``.
-    Then this transformation is applied to ``img`` and ``target`` in the
+    Then this transformation is applied to ``inp_source`` and ``target`` in the
     ``warp_slice()`` function and the transformed input and target image are
     returned.
-    
+
     Parameters
     ----------
-    img: np.array
-        Input image
+    inp_src: h5py.Dataset
+        Input image source (in HDF5)
     ps: np.array
         Patch size (spatial shape of the neural network's input node)
     aniso_factor: float
@@ -601,8 +650,8 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
         Don't flip ``x`` axis during random warping.
     perspective: bool
         Apply perspective transformations (in addition to affine ones).
-    target: np.array
-        Target image
+    target_src: h5py.Dataset
+        Target image source (in HDF5)
     target_ps: np.array
         Target patch size
     target_vec_ix
@@ -614,11 +663,12 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
 
     Returns
     -------
-    img_new: np.ndarray
+    inp: np.ndarray
         (Warped) input image slice
-    target_new: np.ndarray
+    target: np.ndarray
         (Warped) target slice
     """
+    # TODO: Ensure everything assumes (f, z, x, y) shape
 
     rng = np.random.RandomState() if rng is None else rng
 
@@ -626,7 +676,7 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
     if len(ps)==2:
         strip_2d = True
         ps = np.array([1]+list(ps))
-        if target is not None:
+        if target_src is not None:
             target_ps = np.array([1]+list(target_ps))
 
     dest_center = np.array(ps, dtype=np.float) / 2
@@ -634,13 +684,13 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
 
     if target_ps is not None:
         t_center = np.array(target_ps, dtype=np.float) / 2
-        off = np.subtract(img.shape[1:], target.shape[1:])
+        off = np.subtract(inp_src.shape[1:], target_src.shape[1:])
         off //= 2
         lo_pos = np.maximum(dest_center, t_center+off)
-        hi_pos = np.minimum(img.shape[1:] - dest_center, target.shape[1:] - t_center + off)
+        hi_pos = np.minimum(inp_src.shape[1:] - dest_center, target_src.shape[1:] - t_center + off)
     else:
         lo_pos = dest_center
-        hi_pos = img.shape[1:] - dest_center
+        hi_pos = inp_src.shape[1:] - dest_center
     assert np.all([lo_pos[i] < hi_pos[i] for i in range(3)])
     z = rng.randint(lo_pos[0], hi_pos[0]) + src_remainder[0]
     y = rng.randint(lo_pos[1], hi_pos[1]) + src_remainder[1]
@@ -669,18 +719,22 @@ def get_warped_slice(img, ps, aniso_factor=2, sample_aniso=True,
 
     M = chain_matrices([T_dest, S_dest, R, W, F, S, S_src, T_src])
 
-    img_new, target_new = warp_slice(img, ps, M,
-                                     target=target,
-                                     target_ps=target_ps,
-                                     target_vec_ix=target_vec_ix,
-                                     target_discrete_ix=target_discrete_ix)
+    inp, target = warp_slice(
+        inp_src,
+        ps,
+        M,
+        target_src=target_src,
+        target_ps=target_ps,
+        target_vec_ix=target_vec_ix,
+        target_discrete_ix=target_discrete_ix
+    )
 
     if strip_2d:
-        img_new = img_new[:,0]
-        if target is not None:
-            target_new = target_new[:,0]
+        inp = inp[:,0]
+        if target_src is not None:
+            target = target[:,0]
 
-    return img_new, target_new
+    return inp, target
 
 
 def xyz2zxy(vol):

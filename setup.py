@@ -25,6 +25,8 @@ setup(
         'matplotlib',
         'numba',
         'ipython',
+        'pillow',
+        'colorlog',
         'tqdm',
         'tensorflow-tensorboard>=0.4.0rc3',
         'tensorflow>=1.4.0',

@@ -9,6 +9,8 @@ seaborn
 numba
 ipython
 tqdm
+pillow
+colorlog
 
 # For tensorboard logger (not strictly required):
 tensorflow-tensorboard>=0.4.0rc3

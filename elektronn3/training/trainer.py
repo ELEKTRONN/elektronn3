@@ -1,21 +1,21 @@
+import logging
 import os
 import traceback
-import signal
-import numpy as np
+from os.path import normpath, basename
+
 import IPython
+import numpy as np
+import torch
 from scipy.misc import imsave
 from torch.autograd import Variable
-from torch.utils.trainer import Trainer
-from torch.utils.data import DataLoader
-from ..data.utils import save_to_h5py
-import torch
 from torch.optim.lr_scheduler import ExponentialLR
-import logging
+
 from elektronn3.training.train_utils import Timer, pretty_string_time
-from os.path import normpath, basename
-from .train_utils import user_input, HistoryTracker
-from ..data.image import write_overlayimg
-from .train_utils import DelayedDataLoader
+from elektronn3.training.train_utils import DelayedDataLoader
+from elektronn3.training.train_utils import HistoryTracker
+from elektronn3.data.image import write_overlayimg
+from elektronn3.data.utils import save_to_h5py
+
 logger = logging.getLogger('elektronn3log')
 
 try:
@@ -25,9 +25,11 @@ except:
     tensorboard_available = False
     logger.exception('Tensorboard not available.')
 
-class StoppableTrainer(object):
+
+class StoppableTrainer:
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, schedulers=None, preview_freq=20,
+                 save_path=None, batchsize=1, num_workers=0,
+                 schedulers=None, preview_freq=20,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
                  custom_shell=False, cuda_enabled='auto'):
         if cuda_enabled == 'auto':
@@ -47,6 +49,7 @@ class StoppableTrainer(object):
         if save_path is not None and not os.path.isdir(save_path):
             os.makedirs(save_path)
         self.batchsize = batchsize
+        self.num_workers = num_workers
         self.tracker = HistoryTracker()
         self.timer = Timer()
         if schedulers is None:
@@ -64,11 +67,13 @@ class StoppableTrainer(object):
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
             tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
             os.makedirs(tb_dir)
-            self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
+            # TODO: Make always_flush user-configurable here:
+            self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=True)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
         try:
             self.loader = DelayedDataLoader(
-                self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2, pin_memory=self.cuda_enabled,
+                self.dataset, batch_size=self.batchsize, shuffle=False,
+                num_workers=self.num_workers, pin_memory=self.cuda_enabled,
                 timeout=10  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
             )
         except:  # TODO: Remove this try/catch once the timeout option is in an official release
@@ -78,7 +83,8 @@ class StoppableTrainer(object):
                 'or use a PyTorch version newer than 0.3.0'
             )
             self.loader = DelayedDataLoader(
-                self.dataset, batch_size=self.batchsize, shuffle=False, num_workers=2, pin_memory=self.cuda_enabled,
+                self.dataset, batch_size=self.batchsize, shuffle=False,
+                num_workers=self.num_workers, pin_memory=self.cuda_enabled,
             )
         self.valid_loader = None
         if self.cuda_enabled:
@@ -107,14 +113,14 @@ class StoppableTrainer(object):
                 numel = 0
                 target_sum = 0
                 timer = Timer()
-                for (data, target) in self.loader:
+                for (inp, target) in self.loader:
                     if self.cuda_enabled:
-                        data, target = data.cuda(), target.cuda()
-                    data = Variable(data, requires_grad=True)
+                        inp, target = inp.cuda(), target.cuda()
+                    inp = Variable(inp, requires_grad=True)
                     target = Variable(target)
 
                     # forward pass
-                    out = self.model(data)
+                    out = self.model(inp)
                     # make channels the last axis and flatten
                     out = out.permute(0, 2, 3, 4, 1).contiguous()
                     out = out.view(out.numel() // 2, 2)
@@ -168,17 +174,24 @@ class StoppableTrainer(object):
                     self.tb.log_scalar('misc/speed', tr_speed, self.iterations)
                     self.tb.log_scalar('misc/learning_rate', curr_lr, self.iterations)
 
-                    if self.iterations % self.preview_freq == 0:
-                        inp, out = inference(self.model, self.dataset)
+                    if self.iterations % self.preview_freq == 0:  # TODO: Fix this. Condition is only met with certain epoch_size
+                        _, out = preview_inference(self.model, self.dataset)
                         mcl = maxclass(out)
                         # TODO: Less arbitrary slicing
                         p0 = out[0, 0, 32, ...].data.cpu().numpy()  # class 0
                         p1 = out[0, 1, 32, ...].data.cpu().numpy()  # class 1
-                        ip = inp[0, 0, 32, ...].data.cpu().numpy()
                         mc = mcl[0, 32, ...].data.cpu().numpy()
 
                         if self.first_plot:
-                            self.tb.log_image('input', ip, step=self.iterations)
+                            # ip = inp[0, 0, 32, ...].data.cpu().numpy()
+                            preview_inp, preview_target = self.dataset.preview_batch
+                            inp = preview_inp[0, 0, 32, ...].data.cpu().numpy()
+                            target = preview_target[0, 0, 32, ...].data.cpu().numpy()  # TODO: Target does not match!
+                            try:
+                                self.tb.log_image('gt_input', inp, step=self.iterations)
+                                self.tb.log_image('gt_target', target, step=self.iterations)
+                            except:
+                                IPython.embed()
                             self.first_plot = False
                         self.tb.log_image('p/p0', p0, step=self.iterations)
                         self.tb.log_image('p/p1', p1, step=self.iterations)
@@ -189,38 +202,28 @@ class StoppableTrainer(object):
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
                 if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
-                    # inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
+                    # preview_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
-            except (KeyboardInterrupt) as e:
-                # TODO: The shell doesn't have access to the main training loops locals, so it's useless. Find out how to fix this.
+            except KeyboardInterrupt as e:
                 if not isinstance(e, KeyboardInterrupt):
                     traceback.print_exc()
                     print("\nEntering Command line such that Exception can be "
                           "further inspected by user.\n\n")
-                # Like a command line, but cannot change singletons
-                if self.custom_shell:
-                    var_push = globals()
-                    var_push.update(locals())
-                    ret = user_input(var_push)
-                    if ret == 'kill':
-                        return
-                else:
-                    IPython.embed()
-                    if self.terminate:  # TODO: Somehow make this behavior more obvious
-                        return
+                IPython.embed()
+                if self.terminate:  # TODO: Somehow make this behavior more obvious
+                    return
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
-
 
     def validate(self):
         if self.valid_loader is None:
             try:
                 self.valid_loader = DelayedDataLoader(
-                    self.dataset, self.batchsize, shuffle=False, num_workers=2, pin_memory=False,
+                    self.dataset, self.batchsize, shuffle=False, num_workers=self.num_workers, pin_memory=False,
                     timeout=10  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
                 )
             except:  # TODO: Remove this try/catch once the timeout option is in an official release
                 self.valid_loader = DelayedDataLoader(
-                    self.dataset, self.batchsize, shuffle=False, num_workers=2, pin_memory=False
+                    self.dataset, self.batchsize, shuffle=False, num_workers=self.num_workers, pin_memory=False
                 )
 
         self.dataset.validate()  # Switch dataset to validation sources
@@ -280,6 +283,8 @@ def maxclass(class_predictions: Variable):
 
 # TODO
 def save_to_h5(fname: str, model_output: Variable):
+    raise NotImplementedError
+
     maxcl = maxclass(model_output)  # TODO: Ensure correct shape
     save_to_h5py(
         [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
@@ -292,27 +297,25 @@ def save_to_h5(fname: str, model_output: Variable):
         hdf5_names=["prob"]
     )
 
-# TODO: Make more flexible, avoid assumptions about shapes etc.
-# TODO: Rename this function (preview-*, test-*?) and write a more general inference function.
-def inference(model, dataset=None, shape=(64, 288, 288), cuda_enabled='auto'):
-    model.eval()  # Set dropout and batchnorm to eval mode
 
-    # TODO: Don't always slice from 0 to shape[i]. Make central slices instead.
+def preview_inference(model, dataset=None, cuda_enabled='auto'):
+    model.eval()  # Set dropout and batchnorm to eval mode
     # logger.info("Starting preview prediction")
     if cuda_enabled == 'auto':
         cuda_enabled = torch.cuda.is_available()
-        device = 'GPU' if cuda_enabled else 'CPU'
-        logger.info(f'Using {device}.')
+        # device = 'GPU' if cuda_enabled else 'CPU'
+        # logger.info(f'Using {device}.')
     # Attention: Inference on Variables with unexpected shapes can lead to errors!
     # Staying with multiples of 16 for lengths seems to work.
     if dataset is None:
-        inp = torch.rand(1, 1, shape[0], shape[1], shape[2])
+        d, h, w = dataset.preview_shape
+        inp = torch.rand(1, dataset.c_input, d, h, w)
+        if cuda_enabled:
+            inp = inp.cuda()
+            inp = Variable(inp, volatile=True)
     else:
-        # TODO: valid_d[0]: Too arbitrary
-        inp = torch.from_numpy(dataset.valid_d[0][None, :, :shape[0], :shape[1], :shape[2]])
-    if cuda_enabled:
-        inp = inp.cuda()
-    inp = Variable(inp, volatile=True)
+        inp = dataset.preview_batch[0]
     out = model(inp)
     model.train()  # Reset model to training mode
+
     return inp, out

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-import logging
-import os
+
 import argparse
 import datetime
+import logging
+import os
+
 import numpy as np
 import torch
 from torch import nn
-from torch.nn.modules.loss import CrossEntropyLoss
 from torch import optim
 
 # Don't move this stuff, it needs to be run this early to work
@@ -14,13 +15,11 @@ import elektronn3
 mpl_backend = 'agg'  # TODO: Make this a CLI option
 elektronn3.select_mpl_backend(mpl_backend)
 
-from elektronn3.data.cnndata import BatchCreatorImage
-from elektronn3.data.utils import get_filepaths_from_dir, save_to_h5py
+from elektronn3.data.cnndata import PatchCreator
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.models.vnet import VNet
 from elektronn3.models.fcn import fcn32s
 from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
-from torch.optim.lr_scheduler import ExponentialLR
 
 
 logger = logging.getLogger('elektronn3log')
@@ -52,7 +51,7 @@ lr = 0.0004
 opt = 'adam'
 lr_dec = 0.999
 bs = 1
-progress_steps = 100  # Temporary low value for debugging
+progress_steps = 30  # Temporary low value for debugging
 
 if model_name == 'fcn32s':
     model = fcn32s(learned_billinear=False)
@@ -81,40 +80,20 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 
-if host == 'wb':
-    d_path = '/wholebrain/scratch/j0126/'  # TODO: Make variable
-    h5_fnames = get_filepaths_from_dir('%s/barrier_gt_phil/' % d_path, ending="rawbarr-zyx.h5")[:2]
+if host == 'local':
+    path = os.path.expanduser('~/neuro_data_cdhw/')
     data_init_kwargs = {
-        'zxy': True,
-        'd_path' : '%s/barrier_gt_phil/' % d_path,
-        'l_path': '%s/barrier_gt_phil/' % d_path,
-        'd_files': [(os.path.split(fname)[1], 'raW') for fname in h5_fnames],
-        'l_files': [(os.path.split(fname)[1], 'labels') for fname in h5_fnames],
-        'aniso_factor': 2,
-        "source": "train",
-        'valid_cubes': [6],
-        'patch_size': (96, 96, 96),
-        'grey_augment_channels': [0],
-        "epoch_size": progress_steps*bs,
-        'warp': 0.5,
-        'class_weights': True,
-        'warp_args': {
-            'sample_aniso': True,
-            'perspective': True
-        }
-    }
-elif host == 'local':
-    d_path = os.path.expanduser('~/neuro_data_zxy/')
-    data_init_kwargs = {
-        'zxy': True,
-        'd_path': d_path,
-        'l_path': d_path,
-        'd_files': [('raw_%i.h5' %i, 'raw') for i in range(3)],
-        'l_files': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        'input_path': path,
+        'target_path': path,
+        'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(3)],
+        'target_h5data': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+        'mean': 155.291411,
+        'std': 42.599974,
         'aniso_factor': 2,
         'source': 'train',
-        'patch_size': (96, 96, 96),
-        'valid_cubes': [2],
+        'patch_shape': (96, 96, 96),
+        'preview_shape': (64, 144, 144),
+        'valid_cube_indices': [2],
         'grey_augment_channels': [0],
         'epoch_size': progress_steps*bs,
         'warp': 0.5,
@@ -124,8 +103,7 @@ elif host == 'local':
             'perspective': True
         }
     }
-
-dataset = BatchCreatorImage(**data_init_kwargs, cuda_enabled=cuda_enabled)
+dataset = PatchCreator(**data_init_kwargs, cuda_enabled=cuda_enabled)
 
 
 torch.manual_seed(0)
@@ -144,10 +122,11 @@ elif opt == 'adam':
 elif opt == 'rmsprop':
     optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
 
-lr_sched = ExponentialLR(optimizer, lr_dec)
+lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
 
-criterion = CrossEntropyLoss(weight=dataset.class_weights)
+criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, save_path=save_path, schedulers={"lr": lr_sched})
+                      dataset=dataset, batchsize=bs, num_workers=1,
+                      save_path=save_path, schedulers={"lr": lr_sched})
 st.train(nIters)

@@ -1,15 +1,30 @@
-import h5py
-import os
-import time
-from functools import reduce, wraps
-import numpy as np
-import sys
-import pickle as pkl
 import gzip
-import signal
 import logging
-from .. import floatX
+import os
+import pickle as pkl
+import signal
+import sys
+import time
+from functools import wraps
+
+import h5py
+import numpy as np
+import torch
+from torch.autograd import Variable
+
+from elektronn3 import floatX
+
 logger = logging.getLogger("elektronn3log")
+
+
+def to_variable(array: np.ndarray, volatile=True, cuda='auto') -> Variable:
+    if cuda == 'auto':
+        cuda = torch.cuda.is_available()
+    tensor = torch.from_numpy(array)
+    if cuda:
+        tensor = tensor.cuda()
+    var = Variable(tensor, volatile=volatile)
+    return var
 
 
 def get_filepaths_from_dir(directory, ending='k.zip', recursively=False):
@@ -225,7 +240,7 @@ def pickleload(file_name):
 
 
 ### Decorator Collection ###
-class DecoratorBase(object):
+class DecoratorBase:
     """
     If used as
     ``@DecoratorBase``
@@ -317,65 +332,6 @@ class timeit(DecoratorBase):
             raise ValueError()
 
 
-class cache(DecoratorBase):
-    def __init__(self, *args, **kwargs):
-        super(cache, self).__init__(*args, **kwargs)
-        self.memo = {}
-        self.default = None
-
-    @staticmethod
-    def hash_args(args):
-        tmp = []
-        for arg in args:
-            if isinstance(arg, np.ndarray):
-                tmp.append(hash(arg.tostring()))
-            elif isinstance(arg, (list, tuple)):
-                tmp.append(reduce(lambda x, y: x + hash(y), arg, 0))
-            else:
-                tmp.append(hash(arg))
-
-        return reduce(lambda x, y: x + y, tmp, 0)
-
-    def __call__(self, *args, **kwargs):
-        # The nor args for the decorator --> n=1
-        if not self.func is None:
-            if len(args)==0 and len(kwargs)==0:
-                if self.default is None:
-                    self.default = self()
-                return self.default()
-            else:
-                key1 = self.hash_args(args)
-                key2 = self.hash_args(kwargs.values())
-                key = key1 + key2
-                if not key in self.memo:
-                    self.memo[key] = self.func(*args, **kwargs)
-                return self.memo[key]
-
-        # The decorator was initialised with args, it now returns a wrapped function
-        elif len(args)==1 and not len(kwargs):
-            assert hasattr(args[0], '__call__')
-            func = args[0]
-
-            @wraps(func)
-            def decorated(*args0, **kwargs0):
-                if len(args0)==0 and len(kwargs0)==0:
-                    if self.default is None:
-                        self.default = self()
-                    return self.default()
-                else:
-                    key1 = self.hash_args(args0)
-                    key2 = self.hash_args(kwargs0.values())
-                    key = key1 + key2
-                    if not key in self.memo:
-                        self.memo[key] = func(*args0, **kwargs0)
-                    return self.memo[key]
-
-            return decorated
-
-        else:
-            raise ValueError()
-
-
 def as_floatX(x):
     if not hasattr(x, '__len__'):
         return np.array(x, dtype=floatX)
@@ -384,7 +340,7 @@ def as_floatX(x):
 
 # https://gist.github.com/tcwalther/ae058c64d5d9078a9f333913718bba95
 # class based on: http://stackoverflow.com/a/21919644/487556
-class DelayedInterrupt(object):
+class DelayedInterrupt:
     def __init__(self, signals):
         if not isinstance(signals, list) and not isinstance(signals, tuple):
             signals = [signals]
@@ -410,7 +366,7 @@ class DelayedInterrupt(object):
                 self.old_handlers[sig](*self.signal_received[sig])
 
 
-class CleanExit(object):
+class CleanExit:
     # https://stackoverflow.com/questions/4205317/capture-keyboardinterrupt-in-python-without-try-except
     def __enter__(self):
         return self
