@@ -13,6 +13,7 @@ import numba
 from elektronn3 import floatX
 
 
+# TODO: Revise this. Especially the clipping is very destructive!
 def grey_augment(d, channels, rng):
     """
     Performs grey value (histogram) augmentations on ``d``. This is only

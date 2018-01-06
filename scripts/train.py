@@ -97,7 +97,7 @@ if host == 'local':
         'patch_shape': (96, 96, 96),
         'preview_shape': (64, 144, 144),
         'valid_cube_indices': [2],
-        'grey_augment_channels': [0],
+        'grey_augment_channels': [],
         'epoch_size': progress_steps*bs,
         'warp': 0.5,
         'class_weights': True,
