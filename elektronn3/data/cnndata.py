@@ -46,6 +46,7 @@ class PatchCreator(data.Dataset):
         self.force_dense = force_dense
 
         # general properties
+        # TODO: Merge *_path with *_h5data, i.e. *_h5data should contain tuples (<full/path/to/hdf5.h5>, <hdf5datasetkey>).
         self.input_path = input_path
         self.target_path = target_path
         # TODO: "*_files" is a bit misleading, because those are actually tuples (filename, h5_key).
@@ -235,7 +236,8 @@ class PatchCreator(data.Dataset):
             inp_lo[1]:inp_hi[1],
             inp_lo[2]:inp_hi[2]
         ][None]
-        inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)  # Normalize
+        if self.normalize:
+            inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
         target_np = target_source[
             :,
             target_lo[0]:target_hi[0],
