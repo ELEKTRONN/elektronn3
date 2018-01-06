@@ -77,5 +77,5 @@ The **elektronn3** project is being developed by the
 Max Planck Institute of Neurobiology and is funded by
 [Winfried Denk's lab](http://www.neuro.mpg.de/denk).
 
-`Jörgen Kornfeld <http://www.neuro.mpg.de/person/43611/3242677>`_
+[Jörgen Kornfeld](http://www.neuro.mpg.de/person/43611/3242677)
 is academic advisor to this project.
