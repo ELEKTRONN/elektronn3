@@ -14,12 +14,16 @@ from elektronn3 import floatX
 
 
 # TODO: Revise this. Especially the clipping is very destructive!
+# This is currently broken because it expects floats in the range (0, 1)
+# and we can't supply those (except by re-breaking normalization or awkward
+# and lossy transforms before and after calling this function).
 def grey_augment(d, channels, rng):
     """
     Performs grey value (histogram) augmentations on ``d``. This is only
     applied to ``channels`` (list of channels indices), ``rng`` is a random
     number generator
     """
+    raise NotImplementedError
     if channels == []:
         return d
     else:
