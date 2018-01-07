@@ -173,10 +173,15 @@ class PatchCreator(data.Dataset):
                      self._valid_count, self.n_labelled_pixels)
         return s
 
+    # TODO: Support individual per-cube mean/std (in case of high differences
+    #       between cubes)? Not sure if this is important.
+
+    # TODO: Respect separate channels
     @property
-    def mean(self):  # TODO: Respect separate channels
+    def mean(self):
         if self._mean is None:
-            self._mean = np.mean(self.train_inputs)
+            means = [np.mean(x) for x in self.train_inputs]
+            self._mean = np.mean(means)
             logger.warning(
                 'Calculating mean of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
@@ -184,10 +189,19 @@ class PatchCreator(data.Dataset):
             logger.info(f'mean = {self._mean:.6f}')
         return self._mean
 
+    # TODO: Respect separate channels
     @property
-    def std(self):  # TODO: Respect separate channels
+    def std(self):
         if self._std is None:
-            self._std = np.std(self.train_inputs)
+            stds = [np.std(x) for x in self.train_inputs]
+            # Note that this is not the same as the std of all train_inputs
+            # together. The mean of stds of the individual input data cubes
+            # is different because it only acknowledges intra-cube variance,
+            # not variance between training cubes.
+            # TODO: Does it make sense to have the actual global std of all
+            #       training inputs? If yes, how can it be computed without
+            #       loading everything into RAM at once?
+            self._std = np.mean(stds)
             logger.warning(
                 'Calculating std of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'

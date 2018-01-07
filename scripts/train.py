@@ -91,7 +91,7 @@ if host == 'local':
         'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(3)],
         'target_h5data': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
         'mean': 155.291411,
-        'std': 42.599974,
+        'std': 41.812504,
         'aniso_factor': 2,
         'source': 'train',
         'patch_shape': (96, 96, 96),
