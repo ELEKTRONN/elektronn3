@@ -264,11 +264,11 @@ class StoppableTrainer:
         val_loss = 0
         incorrect = 0
         numel = 0
-        for data, target in self.valid_loader:
+        for inp, target in self.valid_loader:
             if self.cuda_enabled:
-                data, target = data.cuda(), target.cuda()
-            data, target = Variable(data), Variable(target, volatile=True)
-            out = self.model(data)
+                inp, target = inp.cuda(), target.cuda()
+            inp, target = Variable(inp), Variable(target, volatile=True)
+            out = self.model(inp)
             out = out.permute(0, 2, 3, 4, 1).contiguous()
             out = out.view(out.numel() // 2, 2)
             target = target.view(target.numel())
@@ -281,14 +281,14 @@ class StoppableTrainer:
         if self.save_path is not None:
             write_overlayimg(
                 "%s/" % (self.save_path),
-                data.data.view(data.size())[0, 0].cpu().numpy(),
-                maxcl.view(data.size())[0, 0].cpu().numpy(),
+                inp.data.view(inp.size())[0, 0].cpu().numpy(),
+                maxcl.view(inp.size())[0, 0].cpu().numpy(),
                 fname="%d_overlay" % self.iterations,
                 nb_of_slices=2
             )
             imsave(
                 "%s/%d_target.png" % (self.save_path, self.iterations),
-                target.data.view(data.size())[0, 0, 8].cpu().numpy()
+                target.data.view(inp.size())[0, 0, 8].cpu().numpy()
             )
 
         # Reset dataset and model to training mode
