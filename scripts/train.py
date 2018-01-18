@@ -28,11 +28,20 @@ logger = logging.getLogger('elektronn3log')
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('model_name')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('--host', choices=['wb', 'local'], default='local')
+parser.add_argument('--data-config', choices=['wb', 'local'], default='local')
+parser.add_argument('--save-name', default=None, help='Manually set save_name')
+parser.add_argument(
+    '--ignore-errors', action='store_true',
+    help='Ignore training errors (You should probably not use this!)'
+)
+parser.add_argument(
+    '--disable-ipython-on-error', action='store_true',
+    help='Disable IPython inspection shell on unhandled errors.'
+)
 args = parser.parse_args()
 
 model_name = args.model_name
-host = args.host
+data_config = args.data_config
 cuda_enabled = not args.disable_cuda and torch.cuda.is_available()
 
 logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
@@ -41,8 +50,11 @@ logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
 path_prefix = os.path.expanduser('~/e3training/')
 os.makedirs(path_prefix, exist_ok=True)
 
-timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
-save_name = model_name + '__' + timestamp
+if args.name is None:
+    timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
+    save_name = model_name + '__' + timestamp
+else:
+    save_name = args.save_name  # TODO: Warn if directory already exists
 save_path = os.path.join(path_prefix, save_name)
 
 
@@ -50,7 +62,7 @@ nIters = int(500000)
 wd = 0.5e-4
 lr = 0.0004
 opt = 'adam'
-lr_dec = 0.999
+# lr_dec = 0.999
 bs = 1
 progress_steps = 30  # Temporary low value for debugging
 
@@ -65,7 +77,7 @@ elif model_name == 'extended':
 elif model_name == 'n3d':
     model = N3DNet()
 elif model_name == 'unet':
-    model = UNet(2, 1, start_filts=32, depth=3)
+    model = UNet(depth=3, start_filts=32)
 else:
     raise ValueError('model not found.')
 
@@ -83,7 +95,7 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 
-if host == 'local':
+if data_config == 'local':
     path = os.path.expanduser('~/neuro_data_cdhw/')
     data_init_kwargs = {
         'input_path': path,
@@ -92,6 +104,29 @@ if host == 'local':
         'target_h5data': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
         'mean': 155.291411,
         'std': 41.812504,
+        'aniso_factor': 2,
+        'source': 'train',
+        'patch_shape': (96, 96, 96),
+        'preview_shape': (64, 144, 144),
+        'valid_cube_indices': [2],
+        'grey_augment_channels': [],
+        'epoch_size': progress_steps*bs,
+        'warp': 0.5,
+        'class_weights': True,
+        'warp_args': {
+            'sample_aniso': True,
+            'perspective': True
+        }
+    }
+elif data_config == 'wb':  # For internal testing. To be removed later.
+    path = os.path.expanduser('~/barrier_gt_phil_cdhw/')
+    data_init_kwargs = {
+        'input_path': path,
+        'target_path': path,
+        'input_h5data': [('v2_new_%i-rawbarr-zyx.h5' % i, 'raW') for i in range(29)],
+        'target_h5data': [('v2_new_%i-rawbarr-zyx.h5' %i, 'labels') for i in range(29)],
+        'mean': 0.617148,
+        'std': 0.155292,
         'aniso_factor': 2,
         'source': 'train',
         'patch_shape': (96, 96, 96),
@@ -116,7 +151,8 @@ if bs >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:
     model = model.cuda()
-model.apply(weights_init)
+if model_name == 'vnet':
+    model.apply(weights_init)
 
 if opt == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
@@ -125,11 +161,15 @@ elif opt == 'adam':
 elif opt == 'rmsprop':
     optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
 
-lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
+# lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
 
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, num_workers=1,
-                      save_path=save_path, schedulers={"lr": lr_sched})
+                      dataset=dataset, batchsize=bs, num_workers=2,
+                      save_path=save_path,
+                      # schedulers={"lr": lr_sched},
+                      cuda_enabled=cuda_enabled,
+                      ignore_errors=args.ignore_errors,
+                      ipython_on_error=not args.disable_ipython_on_error)
 st.train(nIters)
