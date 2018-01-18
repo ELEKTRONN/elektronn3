@@ -31,17 +31,18 @@ class StoppableTrainer:
                  save_path=None, batchsize=1, num_workers=0,
                  schedulers=None,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
-                 custom_shell=False, cuda_enabled='auto'):
+                 cuda_enabled='auto', ignore_errors=False, ipython_on_error=True):
         if cuda_enabled == 'auto':
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
             logger.info(f'Using {device}.')
+        self.ignore_errors = ignore_errors
+        self.ipython_on_error = ipython_on_error
         self.cuda_enabled = cuda_enabled
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
         self.dataset = dataset
-        self.custom_shell = custom_shell
         self.terminate = False
         self.iterations = 0
         self.first_plot = True
@@ -65,7 +66,7 @@ class StoppableTrainer:
             # tb_dir = os.path.join(save_path, 'tb')
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
             tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
-            os.makedirs(tb_dir)
+            os.makedirs(tb_dir, exist_ok=True)
             # TODO: Make always_flush user-configurable here:
             self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
         # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
@@ -113,7 +114,8 @@ class StoppableTrainer:
                 target_sum = 0
                 timer = Timer()
                 inp, target, out = None, None, None  # Pre-assign to extend variable scope.
-                for (inp, target) in self.loader:
+                for batch in self.loader:
+                    inp, target = batch
                     if self.cuda_enabled:
                         inp, target = inp.cuda(), target.cuda()
                     inp = Variable(inp, requires_grad=True)
@@ -125,6 +127,9 @@ class StoppableTrainer:
                     out_ = out.permute(0, 2, 3, 4, 1).contiguous()
                     out_ = out_.view(out_.numel() // 2, 2)
                     target_ = target.view(target.numel())
+                    if (target_.max() > 1).any() or (target_.min() < 0).any():  # TODO: Remove this later. Breaks n_classes != 2
+                        print('Current target is out of expected value range.')
+                        IPython.embed()
                     loss = self.criterion(out_, target_)  # TODO: Respect class weights
 
                     # update step
@@ -148,6 +153,8 @@ class StoppableTrainer:
 
                 # --> self.step():
                 val_loss, val_err = self.validate()
+                # TODO: Scheduler steps are currently tied to "epochs", whose size is user-defined.
+                #       This has the confusing effect that lr decay scales with epoch_size.
                 curr_lr = self.schedulers["lr"].get_lr()[-1]
                 for sched in self.schedulers.values():
                     sched.step()
@@ -221,20 +228,29 @@ class StoppableTrainer:
                         self.first_plot = False
 
                     self.tb.writer.flush()
-
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
                 if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
                     # preview_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
             except KeyboardInterrupt as e:
-                if not isinstance(e, KeyboardInterrupt):
-                    traceback.print_exc()
-                    print("\nEntering Command line such that Exception can be "
-                          "further inspected by user.\n\n")
                 IPython.embed()
                 if self.terminate:  # TODO: Somehow make this behavior more obvious
                     return
+            except Exception as e:
+                traceback.print_exc()
+                if self.ignore_errors:
+                    # Just print the traceback and try to carry on with training.
+                    # This can go wrong in unexpected ways, so don't leave the training unattended.
+                    pass
+                elif self.ipython_on_error:
+                    print("\nEntering Command line such that Exception can be "
+                          "further inspected by user.\n\n")
+                    IPython.embed()
+                    if self.terminate:  # TODO: Somehow make this behavior more obvious
+                        return
+                else:
+                    raise e
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 
     def validate(self):
