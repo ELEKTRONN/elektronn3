@@ -39,6 +39,9 @@ class TensorBoardLogger:
         self.writer = tf.summary.FileWriter(log_dir)
         self.always_flush = always_flush
 
+    def flush(self) -> None:
+        self.writer.flush()
+
     def log_scalar(self, tag: str, value: Number, step: int) -> None:
         """Log a scalar variable.
 
@@ -59,12 +62,12 @@ class TensorBoardLogger:
             self.writer.flush()
 
     def log_image(
-        self,
-        tag: str,
-        images: Union[np.ndarray, Sequence[np.ndarray]],
-        step: int,
-        cmap='gray'
-        ) -> None:
+            self,
+            tag: str,
+            images: Union[np.ndarray, Sequence[np.ndarray]],
+            step: int,
+            cmap='gray'
+    ) -> None:
         """Logs a an image or a list of images."""
 
         def image_summary(img: np.ndarray) -> tf.Summary.Image:
@@ -97,14 +100,13 @@ class TensorBoardLogger:
         if self.always_flush:
             self.writer.flush()
 
-
     def log_histogram(
-        self,
-        tag: str,
-        values: Union[Sequence[Number], np.ndarray],
-        step: int,
-        bins: int = 1000
-        ) -> None:
+            self,
+            tag: str,
+            values: Union[Sequence[Number], np.ndarray],
+            step: int,
+            bins: int = 1000
+    ) -> None:
         """(Not yet tested!) Logs the histogram of a list/vector of values."""
         # Convert to a numpy array
         values = np.array(values)
