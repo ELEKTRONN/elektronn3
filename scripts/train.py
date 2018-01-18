@@ -50,7 +50,7 @@ logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
 path_prefix = os.path.expanduser('~/e3training/')
 os.makedirs(path_prefix, exist_ok=True)
 
-if args.name is None:
+if args.save_name is None:
     timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
     save_name = model_name + '__' + timestamp
 else:
