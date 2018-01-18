@@ -116,10 +116,12 @@ class PatchCreator(data.Dataset):
             # and reading doesn't have to be done by each background worker process separately.
             _ = self.preview_batch
         if class_weights:
+            # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param.
             target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
             self.class_weights = torch.FloatTensor([bg_weight, fg_weight])
+            logger.info(f'Calculated class weights: {[bg_weight, fg_weight]}')
             if self.cuda_enabled:
                 self.class_weights = self.class_weights.cuda()
         else:
@@ -151,11 +153,15 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp += 1
             if self.normalize:
                 inp = (inp - self.mean) / self.std
-            if self.source == "train":  # no grey augmentation for testing
+            if self.grey_augment_channels and self.source == "train":  # grey augmentation only for training
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
-        target = target.astype(np.int64)
+        target = target.astype(self.target_dtype)
+        if target.max() > self.c_target:
+            logger.warning(f'invalid target: max = {target.max()}. Clipping target...')
+            target = target.clip(0, self.c_target)
+            # TODO: Find out where to catch this early / prevent this issue from happening
         # Final modification of targets: striding and replacing nan
         if not (self.force_dense or np.all(self.strides == 1)):
             target = self._stridedtargets(target)
@@ -180,12 +186,12 @@ class PatchCreator(data.Dataset):
     @property
     def mean(self):
         if self._mean is None:
-            means = [np.mean(x) for x in self.train_inputs]
-            self._mean = np.mean(means)
             logger.warning(
                 'Calculating mean of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
+            means = [np.mean(x) for x in self.train_inputs]
+            self._mean = np.mean(means)
             logger.info(f'mean = {self._mean:.6f}')
         return self._mean
 
@@ -193,6 +199,10 @@ class PatchCreator(data.Dataset):
     @property
     def std(self):
         if self._std is None:
+            logger.warning(
+                'Calculating std of training inputs. This is potentially slow. Please supply\n'
+                'it manually when initializing the data set to make startup faster.'
+            )
             stds = [np.std(x) for x in self.train_inputs]
             # Note that this is not the same as the std of all train_inputs
             # together. The mean of stds of the individual input data cubes
@@ -202,10 +212,6 @@ class PatchCreator(data.Dataset):
             #       training inputs? If yes, how can it be computed without
             #       loading everything into RAM at once?
             self._std = np.mean(stds)
-            logger.warning(
-                'Calculating std of training inputs. This is potentially slow. Please supply\n'
-                'it manually when initializing the data set to make startup faster.'
-            )
             logger.info(f'std = {self._std:.6f}')
         return self._std
 
@@ -225,11 +231,15 @@ class PatchCreator(data.Dataset):
 
         # Central slicing
         halfshape = np.array(self.preview_shape) // 2
-        inp_shape = np.array(inp_source.shape[1:])
+        if inp_source.ndim == 4:
+            inp_shape = np.array(inp_source.shape[1:])
+            target_shape = np.array(target_source.shape[1:])
+        elif inp_source.ndim == 3:
+            inp_shape = np.array(inp_source.shape)
+            target_shape = np.array(target_source.shape)
         inp_center = inp_shape // 2
         inp_lo = inp_center - halfshape
         inp_hi = inp_center + halfshape
-        target_shape = np.array(target_source.shape[1:])
         target_center = target_shape // 2
         target_lo = target_center - halfshape
         target_hi = target_center + halfshape
@@ -243,22 +253,33 @@ class PatchCreator(data.Dataset):
                 'preview_shape is too big for shape of target source.'
                 f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
             )
+        if inp_source.ndim == 4:
+            inp_np = inp_source[
+                :,
+                inp_lo[0]:inp_hi[0],
+                inp_lo[1]:inp_hi[1],
+                inp_lo[2]:inp_hi[2]
+            ][None]
+            target_np = target_source[
+                :,
+                target_lo[0]:target_hi[0],
+                target_lo[1]:target_hi[1],
+                target_lo[2]:target_hi[2]
+            ][None].astype(self.target_dtype)
+        elif inp_source.ndim == 3:
+            inp_np = inp_source[
+                inp_lo[0]:inp_hi[0],
+                inp_lo[1]:inp_hi[1],
+                inp_lo[2]:inp_hi[2]
+            ][None]
+            target_np = target_source[
+                target_lo[0]:target_hi[0],
+                target_lo[1]:target_hi[1],
+                target_lo[2]:target_hi[2]
+            ][None].astype(self.target_dtype)
 
-        inp_np = inp_source[
-            :,
-            inp_lo[0]:inp_hi[0],
-            inp_lo[1]:inp_hi[1],
-            inp_lo[2]:inp_hi[2]
-        ][None]
         if self.normalize:
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
-        target_np = target_source[
-            :,
-            target_lo[0]:target_hi[0],
-            target_lo[1]:target_hi[1],
-            target_lo[2]:target_hi[2]
-        ][None].astype(np.int64)
-
         inp = to_variable(inp_np, cuda=self.cuda_enabled)
         target = to_variable(target_np, cuda=self.cuda_enabled)
 
@@ -445,11 +466,16 @@ class PatchCreator(data.Dataset):
             inp_h5 = h5py.File(os.path.join(self.input_path, inp_fname), 'r')[inp_key]
             target_h5 = h5py.File(os.path.join(self.target_path, target_fname), 'r')[target_key]
 
-            assert inp_h5.ndim == 4
-            assert target_h5.ndim == 4
-            self.c_input = inp_h5.shape[0]
-            self.c_target = target_h5.shape[0]
-            self.n_labelled_pixels += target_h5[0].size
+            # assert inp_h5.ndim == 4
+            # assert target_h5.ndim == 4
+            if inp_h5.ndim == 4:
+                self.c_input = inp_h5.shape[0]
+                self.c_target = target_h5.shape[0]
+                self.n_labelled_pixels += target_h5[0].size
+            elif inp_h5.ndim == 3:
+                self.c_input = 1
+                self.c_target = 1
+                self.n_labelled_pixels += target_h5.size
             print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
             print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
             inp_h5sets.append(inp_h5)

@@ -562,6 +562,8 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         #   File "h5py/_proxy.pyx", line 84, in h5py._proxy.H5PY_H5Dread
         # OSError: Can't read data (Invalid data for LZF decompression)
 
+        # TODO: This and the checks below only make sense for discrete targets. Continuous targets are currently BROKEN.
+        n_target_classes = target_cut.max()
         target_cut = np.ascontiguousarray(target_cut, dtype=floatX)
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
         target = np.zeros((n_f_t,) + target_ps, dtype=floatX)
@@ -583,6 +585,10 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
             for ix in target_vec_ix:
                 assert len(ix)==3
                 target[ix] = np.tensordot(M_lin, target[ix], axes=[[1],[0]])
+        if np.any(target > n_target_classes):
+            print(f'warp_slice: Invalid target: max = {target.max()}. Clipping target...')
+            target = target.clip(0, n_target_classes)
+            # TODO: Or should we just throw an error? (~ WarpingOOB)
     else:
         target = None
     return inp, target
