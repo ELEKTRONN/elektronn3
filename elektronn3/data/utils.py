@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 from functools import wraps
+from typing import Sequence
 
 import h5py
 import numpy as np
@@ -25,6 +26,43 @@ def to_variable(array: np.ndarray, volatile=True, cuda='auto') -> Variable:
         tensor = tensor.cuda()
     var = Variable(tensor, volatile=volatile)
     return var
+
+
+# TODO: Handle intermittent OSErrors when reading h5 files
+def slice_h5(
+        src: h5py.Dataset,
+        coords_lo: Sequence,
+        coords_hi: Sequence,
+        dtype: type = np.float32,
+        prepend_batch_axis: bool = False
+) -> np.ndarray:
+    assert len(coords_lo) == len(coords_hi) == 3
+    if src.ndim == 4:
+        cut = src[
+            :,
+            coords_lo[0]:coords_hi[0],
+            coords_lo[1]:coords_hi[1],
+            coords_lo[2]:coords_hi[2]
+        ]
+    elif src.ndim == 3:
+        cut = src[
+            coords_lo[0]:coords_hi[0],
+            coords_lo[1]:coords_hi[1],
+            coords_lo[2]:coords_hi[2]
+        ]
+        cut = cut[None]  # Prepend a new C axis
+    else:
+        raise ValueError(
+            f'src has wrong shape {src.shape}. Only 3D and 4D shapes are supported.'
+        )
+    if prepend_batch_axis:
+        cut = cut[None]
+        assert cut.ndim == 5
+    else:
+        assert cut.ndim == 4
+    if cut.dtype != dtype:
+        cut = cut.astype(dtype)
+    return cut
 
 
 def get_filepaths_from_dir(directory, ending='k.zip', recursively=False):

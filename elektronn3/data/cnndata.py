@@ -13,7 +13,7 @@ from torch.autograd import Variable
 from torch.utils import data
 
 from elektronn3.data import transformations
-from elektronn3.data.utils import to_variable
+from elektronn3.data.utils import to_variable, slice_h5
 
 logger = logging.getLogger('elektronn3log')
 
@@ -253,30 +253,11 @@ class PatchCreator(data.Dataset):
                 'preview_shape is too big for shape of target source.'
                 f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
             )
-        if inp_source.ndim == 4:
-            inp_np = inp_source[
-                :,
-                inp_lo[0]:inp_hi[0],
-                inp_lo[1]:inp_hi[1],
-                inp_lo[2]:inp_hi[2]
-            ][None]
-            target_np = target_source[
-                :,
-                target_lo[0]:target_hi[0],
-                target_lo[1]:target_hi[1],
-                target_lo[2]:target_hi[2]
-            ][None].astype(self.target_dtype)
-        elif inp_source.ndim == 3:
-            inp_np = inp_source[
-                inp_lo[0]:inp_hi[0],
-                inp_lo[1]:inp_hi[1],
-                inp_lo[2]:inp_hi[2]
-            ][None]
-            target_np = target_source[
-                target_lo[0]:target_hi[0],
-                target_lo[1]:target_hi[1],
-                target_lo[2]:target_hi[2]
-            ][None].astype(self.target_dtype)
+        inp_np = slice_h5(inp_source, inp_lo, inp_hi, prepend_batch_axis=True)
+        target_np = slice_h5(
+            target_source, target_lo, target_hi,
+            dtype=self.target_dtype, prepend_batch_axis=True
+        )
 
         if self.normalize:
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
