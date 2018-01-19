@@ -87,6 +87,7 @@ class StoppableTrainer:
                 num_workers=self.num_workers, pin_memory=self.cuda_enabled,
             )
         self.valid_loader = None
+        self.invalid_targets = []  # For interactive debugging of invalid targets
         if self.cuda_enabled:
             self.model.cuda()
             self.criterion.cuda()
@@ -126,11 +127,17 @@ class StoppableTrainer:
                     # make channels the last axis and flatten
                     out_ = out.permute(0, 2, 3, 4, 1).contiguous()
                     out_ = out_.view(out_.numel() // 2, 2)
+
+                    if (target.max() > 1).any() or (target.min() < 0).any():  # TODO: Remove this later. Breaks if  n_classes != 2
+                        print(
+                            'Current target is out of expected value range. '
+                            ' Appending to self.invalid_targets...'
+                        )
+                        self.invalid_targets.append(target)
+                        continue
                     target_ = target.view(target.numel())
-                    if (target_.max() > 1).any() or (target_.min() < 0).any():  # TODO: Remove this later. Breaks n_classes != 2
-                        print('Current target is out of expected value range.')
-                        IPython.embed()
                     loss = self.criterion(out_, target_)  # TODO: Respect class weights
+                    # TODO: Handle NaN losses (would it be sufficient to `continue`, skipping optimizer.step())?
 
                     # update step
                     self.optimizer.zero_grad()
@@ -252,6 +259,15 @@ class StoppableTrainer:
                 else:
                     raise e
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
+        if self.invalid_targets:
+            print(
+                f'{len(self.invalid_targets)} invalid targets have been '
+                'encountered during training.\n'
+                'Entering IPython for inspection... '
+                '(see self.invalid_targets)\n\n'
+            )
+            IPython.embed()
+
 
     def validate(self):
         if self.valid_loader is None:
