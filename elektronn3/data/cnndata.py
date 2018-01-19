@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from typing import Tuple
 
 import h5py
@@ -103,6 +104,7 @@ class PatchCreator(data.Dataset):
         self._valid_count = None
         self.n_successful_warp = 0
         self.n_failed_warp = 0
+        self.n_read_failures = 0
 
         self.load_data()
         self._mean = mean
@@ -133,11 +135,10 @@ class PatchCreator(data.Dataset):
         if self.grey_augment_channels is None:
             self.grey_augment_channels = []
         self._reseed()
-        input_src_coords, target_src_coords = self._getcube(self.source)  # get cube randomly
-
+        input_src, target_src = self._getcube(self.source)  # get cube randomly
         while True:
             try:
-                inp, target = self.warp_cut(input_src_coords, target_src_coords, self.warp, self.warp_args)
+                inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_args)
             except transformations.WarpingOOBError:
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
@@ -149,6 +150,26 @@ class PatchCreator(data.Dataset):
                         f'{fail_percentage}% of warping attempts are failing. '
                         'Consider lowering the warping strength.'
                     )
+                continue
+            # TODO: Actually find out what's causing those.
+            except OSError:
+                if self.n_read_failures > self.n_successful_warp:
+                    logger.error(
+                        'Encountered more OSErrors than successful samples\n'
+                        f'(Counted {self.n_read_failures} errors.)\n'
+                        'There is probably something wrong with your HDF5 '
+                        'files. Aborting...'
+                    )
+                    raise RuntimeError
+                self.n_read_failures += 1
+                traceback.print_exc()
+                logger.warning(
+                    '\nUnhandled OSError while reading data from HDF5 file.\n'
+                    f'  input: {input_src.file.filename}\n'
+                    f'  target: {target_src.file.filename}\n'
+                    'Continuing with next sample. For details, see the '
+                    'traceback above.\n'
+                )
                 continue
             self.n_successful_warp += 1
             if self.normalize:
