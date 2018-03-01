@@ -5,6 +5,7 @@ import pickle as pkl
 import signal
 import sys
 import time
+import traceback
 from functools import wraps
 from typing import Sequence
 
@@ -18,6 +19,7 @@ logger = logging.getLogger("elektronn3log")
 
 # TODO: Handle intermittent OSErrors when reading h5 files
 # TODO: Investigate: Retry at the same coords on read failure
+# TODO: Remove temporary try/excepts once intermittent read errors are better understood/solved.
 def slice_h5(
         src: h5py.Dataset,
         coords_lo: Sequence,
@@ -27,18 +29,37 @@ def slice_h5(
 ) -> np.ndarray:
     assert len(coords_lo) == len(coords_hi) == 3
     if src.ndim == 4:
-        cut = src[
-            :,
-            coords_lo[0]:coords_hi[0],
-            coords_lo[1]:coords_hi[1],
-            coords_lo[2]:coords_hi[2]
-        ]
+        try:
+            cut = src[
+                :,
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        except Exception:  # Temporary code for debugging: Retry once at the same location
+            traceback.print_exc()
+            print('\n\nRetrying at the same location...\n\n')
+            cut = src[
+                :,
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
     elif src.ndim == 3:
-        cut = src[
-            coords_lo[0]:coords_hi[0],
-            coords_lo[1]:coords_hi[1],
-            coords_lo[2]:coords_hi[2]
-        ]
+        try:
+            cut = src[
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        except Exception:  # Temporary code for debugging: Retry once at the same location
+            traceback.print_exc()
+            print('\n\nRetrying at the same location...\n\n')
+            cut = src[
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
         cut = cut[None]  # Prepend a new C axis
     else:
         raise ValueError(
