@@ -10,25 +10,14 @@ from typing import Sequence
 
 import h5py
 import numpy as np
-import torch
-from torch.autograd import Variable
 
 from elektronn3 import floatX
 
 logger = logging.getLogger("elektronn3log")
 
 
-def to_variable(array: np.ndarray, volatile=True, cuda='auto') -> Variable:
-    if cuda == 'auto':
-        cuda = torch.cuda.is_available()
-    tensor = torch.from_numpy(array)
-    if cuda:
-        tensor = tensor.cuda()
-    var = Variable(tensor, volatile=volatile)
-    return var
-
-
 # TODO: Handle intermittent OSErrors when reading h5 files
+# TODO: Investigate: Retry at the same coords on read failure
 def slice_h5(
         src: h5py.Dataset,
         coords_lo: Sequence,

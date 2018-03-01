@@ -145,17 +145,21 @@ class StoppableTrainer:
                     self.optimizer.step()
 
                     # get training performance
-                    numel += target_.numel()
-                    target_sum += target_.sum()
+                    numel += int(target_.numel())
+                    target_sum += int(target_.sum())
                     maxcl = maxclass(out_.data)
-                    incorrect += maxcl.ne(target_.data).cpu().sum()
-                    tr_loss += loss.data[0]
-                    print(f'{self.iterations:6d}, loss: {loss.data[0]:.4f}')
-                    self.tracker.update_timeline([self.timer.t_passed, loss.data[0], float(target_sum) / numel])
+                    # .ne() creates a ByteTensor, which leads to integer
+                    # overflows when it is sum-reduced. Therefore it's
+                    # necessary to cast to a LongTensor before reducing.
+                    incorrect += int(maxcl.ne(target_.data).long().sum())
+                    floss = float(loss)
+                    tr_loss += floss
+                    print(f'{self.iterations:6d}, loss: {floss:.4f}')
+                    self.tracker.update_timeline([self.timer.t_passed, floss, target_sum / numel])
                     self.iterations += 1
                 tr_err = 100. * incorrect / numel
                 tr_loss /= len(self.loader)
-                mean_target = float(target_sum) / numel
+                mean_target = target_sum / numel
                 tr_speed = len(self.loader) / timer.t_passed
 
                 # --> self.step():
@@ -268,7 +272,6 @@ class StoppableTrainer:
             )
             IPython.embed()
 
-
     def validate(self):
         if self.valid_loader is None:
             # num_workers is set to 0 here because background processes for validation sometimes
@@ -299,15 +302,15 @@ class StoppableTrainer:
         for inp, target in self.valid_loader:
             if self.cuda_enabled:
                 inp, target = inp.cuda(), target.cuda()
-            inp, target = Variable(inp), Variable(target, volatile=True)
-            out = self.model(inp)
-            out = out.permute(0, 2, 3, 4, 1).contiguous()
-            out = out.view(out.numel() // 2, 2)
-            target = target.view(target.numel())
-            numel += target.numel()
-            val_loss += self.criterion(out, target).data[0]  # TODO: Respect class weights
-            maxcl = maxclass(out.data)  # get the index of the max log-probability
-            incorrect += maxcl.ne(target.data).cpu().sum()
+            with torch.no_grad():
+                out = self.model(inp)
+                out = out.permute(0, 2, 3, 4, 1).contiguous()
+                out = out.view(out.numel() // 2, 2)
+                target = target.view(target.numel())
+                numel += int(target.numel())
+                val_loss += float(self.criterion(out, target))  # TODO: Respect class weights
+                maxcl = maxclass(out.data)  # get the index of the max log-probability
+                incorrect += int(maxcl.ne(target.data).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
         if self.save_path is not None:
@@ -376,10 +379,10 @@ def preview_inference(model, dataset=None, cuda_enabled='auto'):
         inp = torch.rand(1, dataset.c_input, d, h, w)
         if cuda_enabled:
             inp = inp.cuda()
-            inp = Variable(inp, volatile=True)
     else:
         inp = dataset.preview_batch[0]
-    out = model(inp)
+    with torch.no_grad():
+        out = model(inp)
     model.train()  # Reset model to training mode
 
     return inp, out

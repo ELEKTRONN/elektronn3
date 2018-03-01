@@ -14,7 +14,7 @@ from torch.autograd import Variable
 from torch.utils import data
 
 from elektronn3.data import transformations
-from elektronn3.data.utils import to_variable, slice_h5
+from elektronn3.data.utils import slice_h5
 
 logger = logging.getLogger('elektronn3log')
 
@@ -248,7 +248,7 @@ class PatchCreator(data.Dataset):
             self,
             inp_source: h5py.Dataset,
             target_source: h5py.Dataset,
-    ) -> Tuple[Variable, Variable]:
+    ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
 
         # Central slicing
         halfshape = np.array(self.preview_shape) // 2
@@ -282,22 +282,25 @@ class PatchCreator(data.Dataset):
 
         if self.normalize:
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
-        inp = to_variable(inp_np, cuda=self.cuda_enabled)
-        target = to_variable(target_np, cuda=self.cuda_enabled)
 
+        inp = torch.from_numpy(inp_np)
+        target = torch.from_numpy(target_np)
+        if self.cuda_enabled:
+            inp = inp.cuda()
+            target = target.cuda()
         return inp, target
 
     # In this implementation the preview batch is always kept in GPU memory.
     # This means much better inference speed when using it, but this may be
     # a bad decision if GPU memory is limited.
     # --> TODO: Document this concern and decide how to deal with it.
-    #           (E.g. suggest a smaller preview shape if catching OOM)
+    #           (E.g. suggest a smaller preview shape if catching OOM,
+    #            or keep the batch in main memory ("cpu") and only move it
+    #            to GPU when needed, freeing up GPU memory afterwards
+    #            -> first evaluate cost of moving?...)
     #
     # TODO: Make targets optional so we can have larger previews without ground truth targets?
 
-    # TODO: Support multiple preview batches (e.g. training previews AND validation previews)
-    #       This could be useful for qualitative comparison between performances on
-    #       training and validation data.
     @property
     def preview_batch(self) -> Tuple[Variable, Variable]:
         if self._preview_batch is None:
@@ -324,7 +327,6 @@ class PatchCreator(data.Dataset):
                 np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
             )
 
-    # TODO: Clear distinction in variable names between the inp/target slice and the inp/target source
     def warp_cut(self, inp_src, target_src, warp, warp_params):
         """
         (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
