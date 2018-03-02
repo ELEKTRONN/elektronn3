@@ -17,54 +17,61 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
-# TODO: Handle intermittent OSErrors when reading h5 files
-# TODO: Investigate: Retry at the same coords on read failure
-# TODO: Remove temporary try/excepts once intermittent read errors are better understood/solved.
 def slice_h5(
         src: h5py.Dataset,
         coords_lo: Sequence,
         coords_hi: Sequence,
         dtype: type = np.float32,
-        prepend_batch_axis: bool = False
+        prepend_batch_axis: bool = False,
+        max_retries: int = 5,
 ) -> np.ndarray:
-    assert len(coords_lo) == len(coords_hi) == 3
-    if src.ndim == 4:
-        try:
-            cut = src[
-                :,
-                coords_lo[0]:coords_hi[0],
-                coords_lo[1]:coords_hi[1],
-                coords_lo[2]:coords_hi[2]
-            ]
-        except Exception:  # Temporary code for debugging: Retry once at the same location
-            traceback.print_exc()
-            print('\n\nRetrying at the same location...\n\n')
-            cut = src[
-                :,
-                coords_lo[0]:coords_hi[0],
-                coords_lo[1]:coords_hi[1],
-                coords_lo[2]:coords_hi[2]
-            ]
-    elif src.ndim == 3:
-        try:
-            cut = src[
-                coords_lo[0]:coords_hi[0],
-                coords_lo[1]:coords_hi[1],
-                coords_lo[2]:coords_hi[2]
-            ]
-        except Exception:  # Temporary code for debugging: Retry once at the same location
-            traceback.print_exc()
-            print('\n\nRetrying at the same location...\n\n')
-            cut = src[
-                coords_lo[0]:coords_hi[0],
-                coords_lo[1]:coords_hi[1],
-                coords_lo[2]:coords_hi[2]
-            ]
-        cut = cut[None]  # Prepend a new C axis
-    else:
-        raise ValueError(
-            f'src has wrong shape {src.shape}. Only 3D and 4D shapes are supported.'
+    if max_retries <= 0:
+        logger.error(
+            f'slice_h5(): max_retries exceeded at {coords_lo}, {coords_hi}. Aborting...'
         )
+        raise ValueError
+    assert len(coords_lo) == len(coords_hi) == 3
+    try:
+        if src.ndim == 4:
+            cut = src[
+                :,
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        elif src.ndim == 3:
+            cut = src[
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+            cut = cut[None]  # Prepend a new C axis
+        else:
+            raise ValueError(  # TODO: Other (custom) exception type
+                f'src has wrong shape {src.shape}. Only 3D and 4D shapes are supported.'
+            )
+    # Work around mysterious random HDF5 read errors by recursively calling
+    # this function from within itself until it works again or until
+    # max_retries is exceeded.
+    except OSError:
+        traceback.print_exc()
+        logger.warning(
+            f'Read error. Retrying at the same location ({max_retries} attempts remaining)...'
+        )
+        # Try slicing from the same coordinates, but with max_retries -= 1.
+        # (Overriding prepend_batch_axis to False because the initial (outer)
+        #  call will prepend the axis and propagating it to the recursive
+        #  (inner) calls could lead to multiple axes being prepended.)
+        cut = slice_h5(
+            src=src,
+            coords_lo=coords_lo,
+            coords_hi=coords_hi,
+            dtype=dtype,
+            prepend_batch_axis=False,  # See comment above
+            max_retries=(max_retries - 1)
+        )
+        # If the recursive call above was sucessfull, use its result `cut`
+        # as if it was the immediate result of the first slice attempt.
     if prepend_batch_axis:
         cut = cut[None]
         assert cut.ndim == 5
