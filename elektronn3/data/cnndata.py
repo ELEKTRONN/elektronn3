@@ -139,6 +139,11 @@ class PatchCreator(data.Dataset):
         while True:
             try:
                 inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_args)
+                target = target.astype(self.target_dtype)
+                if target.max() > self.c_target:
+                    # TODO: Find out where to catch this early / prevent this issue from happening
+                    logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
+                    continue
             except transformations.WarpingOOBError:
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
@@ -178,11 +183,6 @@ class PatchCreator(data.Dataset):
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
-        target = target.astype(self.target_dtype)
-        if target.max() > self.c_target:
-            logger.warning(f'invalid target: max = {target.max()}. Clipping target...')
-            target = target.clip(0, self.c_target)
-            # TODO: Find out where to catch this early / prevent this issue from happening
         # Final modification of targets: striding and replacing nan
         if not (self.force_dense or np.all(self.strides == 1)):
             target = self._stridedtargets(target)
