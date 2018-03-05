@@ -38,6 +38,11 @@ parser.add_argument(
     '--disable-ipython-on-error', action='store_true',
     help='Disable IPython inspection shell on unhandled errors.'
 )
+parser.add_argument(
+    '--epoch-size', type=int, default=100,
+    help='How many training steps to perform between '
+         'validation/preview/extended-stat calculation phases.'
+)
 args = parser.parse_args()
 
 model_name = args.model_name
@@ -63,8 +68,8 @@ wd = 0.5e-4
 lr = 0.0004
 opt = 'adam'
 # lr_dec = 0.999
-bs = 1
-progress_steps = 30  # Temporary low value for debugging
+batch_size = 1
+epoch_size = args.epoch_size
 
 if model_name == 'fcn32s':
     model = fcn32s(learned_billinear=False)
@@ -110,7 +115,7 @@ if data_config == 'local':
         'preview_shape': (64, 144, 144),
         'valid_cube_indices': [2],
         'grey_augment_channels': [],
-        'epoch_size': progress_steps*bs,
+        'epoch_size': epoch_size * batch_size,
         'warp': 0.5,
         'class_weights': True,
         'warp_args': {
@@ -133,7 +138,7 @@ elif data_config == 'wb':  # For internal testing. To be removed later.
         'preview_shape': (64, 144, 144),
         'valid_cube_indices': [2],
         'grey_augment_channels': [],
-        'epoch_size': progress_steps*bs,
+        'epoch_size': epoch_size * batch_size,
         'warp': 0.5,
         'class_weights': True,
         'warp_args': {
@@ -147,7 +152,7 @@ dataset = PatchCreator(**data_init_kwargs, cuda_enabled=cuda_enabled)
 torch.manual_seed(0)
 if cuda_enabled:
     torch.cuda.manual_seed(0)
-if bs >= 4 and cuda_enabled:
+if batch_size >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:
     model = model.cuda()
@@ -166,7 +171,7 @@ elif opt == 'rmsprop':
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
-                      dataset=dataset, batchsize=bs, num_workers=2,
+                      dataset=dataset, batchsize=batch_size, num_workers=2,
                       save_path=save_path,
                       # schedulers={"lr": lr_sched},
                       cuda_enabled=cuda_enabled,
