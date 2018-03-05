@@ -3,8 +3,7 @@
 # Copyright (c) 2015 Philipp Schubert, Martin Drawitsch, Marius Killinger
 # All rights reserved
 
-__all__ = ['warp_slice', 'get_tracing_slice', 'WarpingOOBError',
-           'Transform', 'trafo_from_array', 'get_warped_slice', 'border_treatment']
+__all__ = ['warp_slice', 'get_warped_slice', 'WarpingOOBError']
 
 import itertools
 from functools import reduce, lru_cache
@@ -39,51 +38,6 @@ def grey_augment(d, channels, rng):
         d[channels] = d[channels] ** gamma[:,None,None]
     return d
 
-
-def border_treatment(data_list, ps, border_mode, ndim):
-    def treat_array(data):
-        if border_mode=='keep':
-            return data
-
-        sh = data.shape[1:] # (z,y,x)/(x,y)
-
-
-        if border_mode=='crop':
-            excess = [int((x[0] - x[1])//2) for x in zip(sh, ps)]
-            if ndim == 3:
-                data = data[:,
-                            excess[0]:excess[0]+ps[0],
-                            excess[1]:excess[1]+ps[1],
-                            excess[2]:excess[2]+ps[2]]
-            elif ndim==2:
-                data = data[:,
-                            :,
-                            excess[0]:excess[0]+ps[0],
-                            excess[1]:excess[1]+ps[1]]
-
-        else:
-            excess_l = [int(np.ceil(float(x[0] - x[1])/2)) for x in zip(ps, sh)]
-            excess_r = [int(np.floor(float(x[0] - x[1])/2)) for x in zip(ps, sh)]
-            if ndim == 3:
-                pad_with = [(0,0),
-                            (excess_l[0],excess_r[0]),
-                            (excess_l[1],excess_r[1]),
-                            (excess_l[2],excess_r[2])]
-            else:
-                pad_with = [(0,0),
-                            (0,0),
-                            (excess_l[0],excess_r[0]),
-                            (excess_l[1],excess_r[1])]
-
-            if border_mode=='mirror':
-                data = np.pad(data, pad_with, mode='symmetric')
-
-            if border_mode=='0-pad':
-                data = np.pad(data, pad_with, mode='constant', constant_values=0)
-
-        return data
-
-    return [treat_array(d) for d in data_list]
 
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
@@ -210,36 +164,6 @@ def chain_matrices(mat_list):
     return reduce(np.dot, mat_list, identity())
 
 
-def get_euler_angles(direc, gamma):
-    """
-    tracing_dir (z, x, y) normalised
-    angle3 rotation around z in dest frame
-    phi is the rotation about the 1-2 axis
-    theta is the rotation about the 0'-1' axis
-    """
-    assert abs(np.linalg.norm(direc) - 1) < 1e-3
-    phi = np.arctan2(direc[2], direc[1])
-    theta = np.arccos(direc[0])
-    return phi, theta, gamma
-
-
-def get_rotmat_from_direc(direc, gamma=None, rng=None):
-    if gamma is None:
-        gamma=0.0
-    elif gamma=='rand':
-        if rng is None:
-            gamma = np.random.rand() * 2 * np.pi
-        else:
-            gamma = rng.rand() * 2 * np.pi
-
-    phi, theta, gamma = get_euler_angles(direc, gamma)
-    R1 = rotate_z(-phi)
-    R2 = rotate_y(-theta)
-    R3 = rotate_z(gamma)
-    R = chain_matrices([R3, R2, R1])
-    return R
-
-
 def get_random_rotmat(lock_z=False, amount=1.0, rng=None):
     rng = np.random.RandomState() if rng is None else rng
 
@@ -332,72 +256,6 @@ def make_dest_corners(sh):
 class WarpingOOBError(ValueError):
     def __init__(self, *args, **kwargs):
         super(WarpingOOBError, self).__init__( *args, **kwargs)
-
-
-class Transform:
-    def __init__(self, M, position_l=None, aniso_factor=2):
-        self.M = M
-        self.M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
-        self.position_l = position_l
-        self.aniso_factor = aniso_factor
-        self.is_projective = not np.allclose(M[3,:3], 0.0)
-
-    @property
-    def M_lin(self):
-        if self.is_projective:
-            raise ValueError("This transform requires homogeneous coordinates")
-        else:
-            return self.M[:3,:3]
-
-    @property
-    def M_lin_inv(self):
-        if self.is_projective:
-            raise ValueError("This transform requires homogeneous coordinates")
-        else:
-            return self.M_inv[:3, :3]
-
-    def to_array(self):
-        return np.hstack([self.M.ravel(), self.position_l, self.aniso_factor])
-
-    def lab_coord2cnn_coord(self, vec_l):
-        assert not self.is_projective
-        if vec_l.ndim==1:
-            vec_c = np.dot(self.M_lin, vec_l)  # rotation
-        else:
-            # assume vec_l.shape=(n,3)
-            assert vec_l.shape[1]==3
-            vec_c = np.dot(vec_l, self.M_lin.T)  # rotation
-        return vec_c
-
-    def cnn_coord2lab_coord(self, vec_c, add_offset_l=False):
-        assert not self.is_projective
-        if vec_c.ndim==1:
-            vec_l = np.dot(self.M_lin_inv, vec_c)  # rotation
-            if add_offset_l:
-                vec_l += self.position_l
-        else:
-            # assume vec_l.shape=(n,3)
-            assert vec_c.shape[1]==3
-            vec_l = np.dot(vec_c, self.M_lin_inv.T)  # rotation
-            if add_offset_l:
-                vec_l += self.position_l[None,:]
-        return vec_l
-
-    def cnn_pred2lab_position(self, prediction_c):
-        assert not self.is_projective
-        tracin_direc_l = self.cnn_coord2lab_coord(prediction_c, add_offset_l=False)
-        new_position_l = tracin_direc_l + self.position_l
-        tracing_direc_il = tracin_direc_l * [self.aniso_factor,1,1]
-        assert np.linalg.norm(tracing_direc_il) > 0 # normalise
-        tracing_direc_il /= np.linalg.norm(tracing_direc_il)
-        return new_position_l, tracing_direc_il
-
-
-def trafo_from_array(a):
-    M = a[:16].reshape((4,4))
-    offset_l = a[16:19]
-    aniso_factor = a[19]
-    return Transform(M, offset_l, aniso_factor)
 
 
 def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
@@ -552,40 +410,6 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
     return inp, target
 
 
-def get_tracing_slice(img, ps, pos, z_shift=0, aniso_factor=2,
-                      sample_aniso=True, gamma=0, scale_factor=1.0, direction_iso=None,
-                      target=None, target_ps=None, target_vec_ix=None,
-                      target_discrete_ix=None, rng=None, last_ch_max_interp=False):
-
-    # positive z_shift --> see more slices in positive z-direction w.r.t. pos
-    # scale_factor > 1 zooms into image / magnifies
-    rng = np.random.RandomState() if rng is None else rng
-    dest_center = np.array(ps, dtype=np.float)/2
-    dest_center[0] -= z_shift
-    R = get_rotmat_from_direc(direction_iso, gamma, rng)
-    T_src = translate(-pos[0], -pos[1], -pos[2])
-    S_src = scale(aniso_factor, 1, 1)
-    S_zoom = scale(scale_factor, scale_factor, scale_factor)
-
-    if sample_aniso:
-        S_dest = scale_inv(aniso_factor, 1, 1)
-    else:
-        S_dest = identity()
-    T_dest = translate(dest_center[0], dest_center[1], dest_center[2])
-
-    M = chain_matrices([T_dest, S_zoom, S_dest, R, S_src, T_src])
-    ksize = min(0.5, 0.5/scale_factor)
-    img_new, target_new = warp_slice(img, ps, M,
-                                     target_src=target,
-                                     target_ps=target_ps,
-                                     target_vec_ix=target_vec_ix,
-                                     target_discrete_ix=target_discrete_ix,
-                                     last_ch_max_interp=last_ch_max_interp,
-                                     ksize=ksize)
-
-    return img_new, target_new, M
-
-
 def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
                      warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
                      target_src=None, target_ps=None, target_vec_ix=None,
@@ -704,22 +528,3 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
             target = target[:,0]
 
     return inp, target
-
-
-def xyz2zxy(vol):
-    """
-    Swaps axes to ELEKTRONN convention ([X, Y, Z] -> [Z, X, Y]). If additional
-    channel axis is provided: [X, Y, Z, CH] -> [Z, X, Y, CH]
-
-    Parameters
-    ----------
-    vol : np.array [X, Y, Z]
-
-    Returns
-    -------
-    np.array [Z, X, Y]
-    """
-    assert vol.ndim >= 3
-    vol = vol.swapaxes(1, 0)  # y x z
-    vol = vol.swapaxes(0, 2)  # z x y
-    return vol
