@@ -2,6 +2,7 @@ import logging
 import os
 import traceback
 from os.path import normpath, basename
+from typing import Tuple, Dict
 
 import IPython
 import numpy as np
@@ -120,10 +121,14 @@ class StoppableTrainer:
                 self.model.train()
                 self.dataset.train()
 
-                tr_loss = 0
-                incorrect = 0
+                # Scalar training stats that should be logged and written to tensorboard later
+                stats: Dict[str, float] = {'tr_loss': 0.0}
+                # Other scalars to be logged
+                misc: Dict[str, float] = {}
+
                 numel = 0
                 target_sum = 0
+                incorrect = 0
                 timer = Timer()
                 inp, target, out = None, None, None  # Pre-assign to extend variable scope.
                 for batch in self.loader:
@@ -163,45 +168,39 @@ class StoppableTrainer:
                     # overflows when it is sum-reduced. Therefore it's
                     # necessary to cast to a LongTensor before reducing.
                     incorrect += int(maxcl.ne(target_).long().sum())
-                    floss = float(loss)
-                    tr_loss += floss
-                    print(f'{self.iterations:6d}, loss: {floss:.4f}')
-                    self.tracker.update_timeline([self.timer.t_passed, floss, target_sum / numel])
+                    stats['tr_loss'] += float(loss)
+                    print(f'{self.iterations:6d}, loss: {loss:.4f}')
+                    self.tracker.update_timeline([self.timer.t_passed, float(loss), target_sum / numel])
                     self.iterations += 1
-                tr_err = 100. * incorrect / numel
-                tr_loss /= len(self.loader)
+                stats['tr_err'] = 100. * incorrect / numel
+                stats['tr_loss'] /= len(self.loader)
                 mean_target = target_sum / numel
-                tr_speed = len(self.loader) / timer.t_passed
+                misc['tr_speed'] = len(self.loader) / timer.t_passed
 
                 # --> self.step():
-                val_loss, val_err = self.validate()
+                stats['val_loss'], stats['val_err'] = self.validate()
                 # TODO: Scheduler steps are currently tied to "epochs", whose size is user-defined.
                 #       This has the confusing effect that lr decay scales with epoch_size.
-                curr_lr = self.schedulers["lr"].get_lr()[-1]
+                misc['learning_rate'] = self.schedulers['lr'].get_lr()[-1]
                 for sched in self.schedulers.values():
                     sched.step()
                 if self.iterations // self.dataset.epoch_size > 1:
-                    tr_loss_gain = self.tracker.history[-1][2] - tr_loss
+                    tr_loss_gain = self.tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
-                self.tracker.update_history([self.iterations, self.timer.t_passed, tr_loss,
-                                            val_loss, tr_loss_gain,
-                                            tr_err, val_err, curr_lr, 0, 0])  # 0's correspond to mom and gradnet (?)
+                self.tracker.update_history([self.iterations, self.timer.t_passed, stats['tr_loss'],
+                                            stats['val_loss'], tr_loss_gain,
+                                            stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self.timer.t_passed)
                 loss_smooth = self.tracker.loss._ema
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.iterations, loss_smooth, tr_loss, tr_err)
+                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.iterations, loss_smooth, stats['tr_loss'], stats['tr_err'])
                 text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
-                    % (val_err, "%", mean_target * 100, tr_loss_gain)
-                text += "LR=%.5f, %.2f it/s, %s" % (curr_lr, tr_speed, t)
+                    % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
+                text += "LR=%.5f, %.2f it/s, %s" % (misc['learning_rate'], misc['tr_speed'], t)
                 # TODO: Log voxels/s
                 logger.info(text)
                 if self.tb:
-                    self.tb.log_scalar('stats/tr_loss', tr_loss, self.iterations)
-                    self.tb.log_scalar('stats/val_loss', val_loss, self.iterations)
-                    self.tb.log_scalar('stats/tr_err', tr_err, self.iterations)
-                    self.tb.log_scalar('stats/val_err', val_err, self.iterations)
-                    self.tb.log_scalar('misc/speed', tr_speed, self.iterations)
-                    self.tb.log_scalar('misc/learning_rate', curr_lr, self.iterations)
+                    self.log_scalars(stats, misc)
 
                     # Note that the variables inp, target and out that are used here have their
                     # values from the last training iteration.
@@ -292,7 +291,7 @@ class StoppableTrainer:
             )
             IPython.embed()
 
-    def validate(self):
+    def validate(self) -> Tuple[float, float]:
         self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
@@ -331,6 +330,13 @@ class StoppableTrainer:
         self.model.train()
 
         return val_loss, val_err
+
+    def log_scalars(self, stats, misc):
+        for key, value in stats.items():
+            self.tb.log_scalar(f'stats/{key}', value, self.iterations)
+        for key, value in misc.items():
+            self.tb.log_scalar(f'misc/{key}', value, self.iterations)
+
 
 # TODO: Move all the functions below out of trainer.py
 
