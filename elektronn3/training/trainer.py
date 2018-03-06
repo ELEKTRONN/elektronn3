@@ -144,13 +144,6 @@ class StoppableTrainer:
                     out_ = out.permute(0, 2, 3, 4, 1).contiguous()
                     out_ = out_.view(out_.numel() // 2, 2)
 
-                    if (target.max() > 1).any() or (target.min() < 0).any():  # TODO: Remove this later. Breaks if  n_classes != 2
-                        print(
-                            'Current target is out of expected value range. '
-                            ' Appending to self.invalid_targets...'
-                        )
-                        self.invalid_targets.append(target)
-                        continue
                     target_ = target.view(target.numel())
                     loss = self.criterion(out_, target_)  # TODO: Respect class weights
                     # TODO: Handle NaN losses (would it be sufficient to `continue`, skipping optimizer.step())?
