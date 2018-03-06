@@ -141,8 +141,6 @@ class StoppableTrainer:
                     inp, target = batch
                     if self.cuda_enabled:
                         inp, target = inp.cuda(), target.cuda()
-                    inp = Variable(inp, requires_grad=True)
-                    target = Variable(target)
 
                     # forward pass
                     out = self.model(inp)
