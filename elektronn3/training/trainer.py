@@ -27,6 +27,10 @@ except:
     logger.exception('Tensorboard not available.')
 
 
+class NaNException(Exception):
+    pass
+
+
 class StoppableTrainer:
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
                  save_path=None, batchsize=1, num_workers=0,
@@ -146,7 +150,9 @@ class StoppableTrainer:
 
                     target_ = target.view(target.numel())
                     loss = self.criterion(out_, target_)  # TODO: Respect class weights
-                    # TODO: Handle NaN losses (would it be sufficient to `continue`, skipping optimizer.step())?
+                    if torch.isnan(loss):
+                        logger.error('NaN loss detected! Check your hyperparams.')
+                        raise NaNException
 
                     # update step
                     self.optimizer.zero_grad()
