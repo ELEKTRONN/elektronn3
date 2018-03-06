@@ -86,7 +86,18 @@ class StoppableTrainer:
                 self.dataset, batch_size=self.batchsize, shuffle=False,
                 num_workers=self.num_workers, pin_memory=self.cuda_enabled,
             )
-        self.valid_loader = None
+        # num_workers is set to 0 for valid_loader because validation background processes sometimes
+        # fail silently and stop responding, bringing down the whole training process.
+        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355,
+        # but the deadlocks described there will only happen if timeout can't be enabled
+        # (PyTorch 0.3.0).
+        # The performance impact of disabling multiprocessing here is low in normal settings,
+        # because the validation loader doesn't perform expensive augmentations, but just reads
+        # data from hdf5s.
+        self.valid_loader = DelayedDataLoader(
+            self.dataset, self.batchsize, num_workers=0, pin_memory=False,
+            timeout=30
+        )
         self.invalid_targets = []  # For interactive debugging of invalid targets
         if self.cuda_enabled:
             self.model.cuda()
@@ -282,20 +293,6 @@ class StoppableTrainer:
             IPython.embed()
 
     def validate(self):
-        if self.valid_loader is None:
-            # num_workers is set to 0 here because background processes for validation sometimes
-            # fail silently and stop responding, bringing down the whole training process.
-            # This issue might be related to https://github.com/pytorch/pytorch/issues/1355,
-            # but the deadlocks described there will only happen if timeout can't be enabled
-            # (PyTorch 0.3.0).
-            # The performance impact of disabling multiprocessing here is low in normal settings,
-            # because the validation loader doesn't perform expensive augmentations, but just reads
-            # data from hdf5s.
-            self.valid_loader = DelayedDataLoader(
-                self.dataset, self.batchsize, num_workers=0, pin_memory=False,
-                timeout=30
-            )
-
         self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
@@ -334,7 +331,6 @@ class StoppableTrainer:
         self.model.train()
 
         return val_loss, val_err
-
 
 # TODO: Move all the functions below out of trainer.py
 
