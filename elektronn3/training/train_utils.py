@@ -8,7 +8,6 @@ from torch.utils.data.dataloader import DataLoader, DataLoaderIter
 from elektronn3.training import plotting
 from elektronn3 import floatX
 from elektronn3.data.utils import DelayedInterrupt
-from elektronn3.data.utils import pickleload, picklesave
 
 
 class HistoryTracker:
@@ -53,17 +52,6 @@ class HistoryTracker:
 
         self.regression_track[0].append(pred)
         self.regression_track[1].append(target)
-
-    def save(self, save_name):
-        file_name = save_name + '.history.pkl'
-        picklesave([self.timeline, self.history, self.debug_outputs,
-                          self.debug_output_names, self.regression_track],
-                         file_name)
-
-    def load(self, file_name):
-        (self.timeline, self.history, self.debug_outputs,
-         self.debug_output_names, self.regression_track) = pickleload(
-            file_name)
 
     def plot(self, save_name=None, autoscale=True, close=True, loss_smoothing_len=200):
         plotting.plot_hist(self.timeline, self.history, save_name,

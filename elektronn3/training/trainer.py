@@ -15,7 +15,7 @@ from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.image import write_overlayimg
-from elektronn3.data.utils import save_to_h5py
+from elektronn3.data.utils import save_to_h5
 
 logger = logging.getLogger('elektronn3log')
 
@@ -358,12 +358,12 @@ def save_to_h5(fname: str, model_output: Variable):
     raise NotImplementedError
 
     maxcl = maxclass(model_output)  # TODO: Ensure correct shape
-    save_to_h5py(
+    save_to_h5(
         [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
         fname,
         hdf5_names=["pred", "raw"]
     )
-    save_to_h5py(
+    save_to_h5(
         [np.exp(model_output.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
         fname+"prob.h5",
         hdf5_names=["prob"]
