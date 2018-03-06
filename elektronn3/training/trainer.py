@@ -283,23 +283,21 @@ class StoppableTrainer:
         for key, value in misc.items():
             self.tb.log_scalar(f'misc/{key}', value, self.iterations)
 
-    def tb_log_preview(self, z_plane=None):
+    def tb_log_preview(self, z_plane=None, group='preview_batch'):
+        """Preview from constant region of preview batch data"""
         _, out = preview_inference(self.model, self.dataset)
 
         if z_plane is None:
             z_plane = out.shape[2] // 2
         assert z_plane in range(out.shape[2])
 
-        # Preview from constant region of preview batch data
-        # TODO: Don't hardcode 2 classes
-        p0 = out[0, 0, z_plane, ...].cpu().numpy()  # class 0
-        p1 = out[0, 1, z_plane, ...].cpu().numpy()  # class 1
         mcl = maxclass(out)
-        mc = mcl[0, z_plane, ...].cpu().numpy()
+        pred = mcl[0, z_plane, ...].cpu().numpy()
 
-        self.tb.log_image('p/p0', p0, step=self.iterations)
-        self.tb.log_image('p/p1', p1, step=self.iterations)
-        self.tb.log_image('p/mc', mc, self.iterations)
+        for c in range(out.shape[1]):
+            c_out = out[0, c, z_plane, ...].cpu().numpy()
+            self.tb.log_image(f'{group}/c{c}', c_out, self.iterations)
+        self.tb.log_image(f'{group}/pred', pred, self.iterations)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
@@ -307,35 +305,31 @@ class StoppableTrainer:
             preview_inp, preview_target = self.dataset.preview_batch
             inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
             target = preview_target[0, 0, z_plane, ...].cpu().numpy()
-            self.tb.log_image('p/gt_input', inp, step=0)
+            self.tb.log_image(f'{group}/inp', inp, step=0)
             # Ground truth target for direct comparison with preview prediction
-            self.tb.log_image('p/gt_target', target, step=0)
+            self.tb.log_image(f'{group}/target', target, step=0)
             self.first_plot = False
 
-    def tb_log_training_images(self, images, z_plane=None):
+    def tb_log_training_images(self, images, z_plane=None, group='training_samples'):
         """Preview from last training sample (random region, possibly augmented)."""
 
-        inp = images['inp']
-        target = images['target']
         out = images['out']
 
         if z_plane is None:
             z_plane = out.shape[2] // 2
         assert z_plane in range(out.shape[2])
 
-        tinp = inp[0, 0, z_plane, ...].cpu().numpy()
-        ttarget = target[0, 0, z_plane].cpu().numpy()
-        # TODO: Don't hardcode 2 classes
-        tp0 = out[0, 0, z_plane, ...].cpu().numpy()
-        tp1 = out[0, 1, z_plane, ...].cpu().numpy()
-        tmcl = maxclass(out)
-        tmc = tmcl[0, z_plane, ...].cpu().numpy()
+        inp = images['inp'][0, 0, z_plane, ...].cpu().numpy()
+        target = images['target'][0, 0, z_plane].cpu().numpy()
+        mcl = maxclass(out)
+        pred = mcl[0, z_plane, ...].cpu().numpy()
 
-        self.tb.log_image('t/tinp', tinp, step=self.iterations)
-        self.tb.log_image('t/ttarget', ttarget, step=self.iterations)
-        self.tb.log_image('t/tp0', tp0, step=self.iterations)
-        self.tb.log_image('t/tp1', tp1, step=self.iterations)
-        self.tb.log_image('t/tmc', tmc, step=self.iterations)
+        self.tb.log_image(f'{group}/inp', inp, step=self.iterations)
+        self.tb.log_image(f'{group}/target', target, step=self.iterations)
+        for c in range(out.shape[1]):
+            c_out = out[0, c, z_plane, ...].cpu().numpy()
+            self.tb.log_image(f'{group}/c{c}', c_out, step=self.iterations)
+        self.tb.log_image(f'{group}/pred', pred, step=self.iterations)
 
 
 # TODO: Move all the functions below out of trainer.py
