@@ -27,7 +27,8 @@ except:
     logger.exception('Tensorboard not available.')
 
 
-class NaNException(Exception):
+class NaNException(RuntimeError):
+    """When a NaN value is detected"""
     pass
 
 
@@ -199,34 +200,13 @@ class StoppableTrainer:
                 # TODO: Log voxels/s
                 logger.info(text)
                 if self.tb:
-                    self.log_scalars(stats, misc)
+                    self.tb_log_scalars(stats, misc)
+                    self.tb_log_preview()
+
+                    # Preview from last training sample (random region, possibly augmented)
 
                     # Note that the variables inp, target and out that are used here have their
                     # values from the last training iteration.
-                    # The prefix "v" for variable names here signifies that
-                    # the content is from the (constant) decdicated preview batch.
-                    # "t" refers to training data from the last training iteration.
-
-                    # TODO: Better variable names! And clean up in general.
-
-                    _, v_out = preview_inference(self.model, self.dataset)
-
-                    # TODO: Less arbitrary slicing
-                    v_plane = v_out.shape[2] // 2
-                    t_plane = out.shape[2] // 2
-
-                    # Preview from constant region of preview batch data
-                    vp0 = v_out[0, 0, v_plane, ...].cpu().numpy()  # class 0
-                    vp1 = v_out[0, 1, v_plane, ...].cpu().numpy()  # class 1
-                    vmcl = maxclass(v_out)
-                    vmc = vmcl[0, v_plane, ...].cpu().numpy()
-
-                    self.tb.log_image('p/vp0', vp0, step=self.iterations)
-                    self.tb.log_image('p/vp1', vp1, step=self.iterations)
-                    self.tb.log_image('p/vmc', vmc, self.iterations)
-
-                    # Preview from last processed training example (random region, possibly augmented)
-
                     # inp and out come directly from the last training step,
                     # so they still have requires_grad=True.
                     # They need to be detached from the graph for conversion
@@ -235,8 +215,11 @@ class StoppableTrainer:
                     inp = inp.detach()
                     out = out.detach()
 
+                    t_plane = out.shape[2] // 2
+
                     tinp = inp[0, 0, t_plane, ...].cpu().numpy()
                     ttarget = target[0, 0, t_plane].cpu().numpy()
+                    # TODO: Don't hardcode 2 classes
                     tp0 = out[0, 0, t_plane, ...].cpu().numpy()
                     tp1 = out[0, 1, t_plane, ...].cpu().numpy()
                     tmcl = maxclass(out)
@@ -248,13 +231,7 @@ class StoppableTrainer:
                     self.tb.log_image('t/tp1', tp1, step=self.iterations)
                     self.tb.log_image('t/tmc', tmc, step=self.iterations)
 
-                    if self.first_plot:
-                        preview_inp, preview_target = self.dataset.preview_batch
-                        inp = preview_inp[0, 0, v_plane, ...].cpu().numpy()
-                        target = preview_target[0, 0, v_plane, ...].cpu().numpy()
-                        self.tb.log_image('p/gt_input', inp, step=self.iterations)
-                        self.tb.log_image('p/gt_target', target, step=self.iterations)
-                        self.first_plot = False
+
 
                     self.tb.writer.flush()
                 if self.save_path is not None:
@@ -330,11 +307,40 @@ class StoppableTrainer:
 
         return val_loss, val_err
 
-    def log_scalars(self, stats, misc):
+    def tb_log_scalars(self, stats, misc):
         for key, value in stats.items():
             self.tb.log_scalar(f'stats/{key}', value, self.iterations)
         for key, value in misc.items():
             self.tb.log_scalar(f'misc/{key}', value, self.iterations)
+
+    def tb_log_preview(self, z_plane=None):
+        _, out = preview_inference(self.model, self.dataset)
+
+        if z_plane is None:
+            z_plane = out.shape[2] // 2
+        assert z_plane in range(out.shape[2])
+
+        # Preview from constant region of preview batch data
+        # TODO: Don't hardcode 2 classes
+        p0 = out[0, 0, z_plane, ...].cpu().numpy()  # class 0
+        p1 = out[0, 1, z_plane, ...].cpu().numpy()  # class 1
+        mcl = maxclass(out)
+        mc = mcl[0, z_plane, ...].cpu().numpy()
+
+        self.tb.log_image('p/p0', p0, step=self.iterations)
+        self.tb.log_image('p/p1', p1, step=self.iterations)
+        self.tb.log_image('p/mc', mc, self.iterations)
+
+        # This is only run once per training, because the ground truth for
+        # previews is constant (always the same preview inputs/targets)
+        if self.first_plot:
+            preview_inp, preview_target = self.dataset.preview_batch
+            inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
+            target = preview_target[0, 0, z_plane, ...].cpu().numpy()
+            self.tb.log_image('p/gt_input', inp, step=0)
+            # Ground truth target for direct comparison with preview prediction
+            self.tb.log_image('p/gt_target', target, step=0)
+            self.first_plot = False
 
 
 # TODO: Move all the functions below out of trainer.py
