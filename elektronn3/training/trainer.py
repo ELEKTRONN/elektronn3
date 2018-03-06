@@ -130,12 +130,13 @@ class StoppableTrainer:
                 stats: Dict[str, float] = {'tr_loss': 0.0}
                 # Other scalars to be logged
                 misc: Dict[str, float] = {}
+                # Hold image tensors for real-time training sample visualization in tensorboard
+                images: Dict[str, Variable] = {}
 
                 numel = 0
                 target_sum = 0
                 incorrect = 0
                 timer = Timer()
-                inp, target, out = None, None, None  # Pre-assign to extend variable scope.
                 for batch in self.loader:
                     inp, target = batch
                     if self.cuda_enabled:
@@ -171,6 +172,15 @@ class StoppableTrainer:
                     stats['tr_loss'] += float(loss)
                     print(f'{self.iterations:6d}, loss: {loss:.4f}')
                     self.tracker.update_timeline([self.timer.t_passed, float(loss), target_sum / numel])
+
+                    # Preserve training batch and network output for later
+                    # visualization (detached from the implicit autograd
+                    # graph, so operations on them are not recorded and
+                    # differentiated).
+                    images['inp'] = inp.detach()
+                    images['target'] = target.detach()
+                    images['out'] = out.detach()
+
                     self.iterations += 1
                 stats['tr_err'] = 100. * incorrect / numel
                 stats['tr_loss'] /= len(self.loader)
@@ -202,37 +212,7 @@ class StoppableTrainer:
                 if self.tb:
                     self.tb_log_scalars(stats, misc)
                     self.tb_log_preview()
-
-                    # Preview from last training sample (random region, possibly augmented)
-
-                    # Note that the variables inp, target and out that are used here have their
-                    # values from the last training iteration.
-                    # inp and out come directly from the last training step,
-                    # so they still have requires_grad=True.
-                    # They need to be detached from the graph for conversion
-                    # to numpy (this is safe because gradients have already
-                    # been computed and the actual training step is over).
-                    inp = inp.detach()
-                    out = out.detach()
-
-                    t_plane = out.shape[2] // 2
-
-                    tinp = inp[0, 0, t_plane, ...].cpu().numpy()
-                    ttarget = target[0, 0, t_plane].cpu().numpy()
-                    # TODO: Don't hardcode 2 classes
-                    tp0 = out[0, 0, t_plane, ...].cpu().numpy()
-                    tp1 = out[0, 1, t_plane, ...].cpu().numpy()
-                    tmcl = maxclass(out)
-                    tmc = tmcl[0, t_plane, ...].cpu().numpy()
-
-                    self.tb.log_image('t/tinp', tinp, step=self.iterations)
-                    self.tb.log_image('t/ttarget', ttarget, step=self.iterations)
-                    self.tb.log_image('t/tp0', tp0, step=self.iterations)
-                    self.tb.log_image('t/tp1', tp1, step=self.iterations)
-                    self.tb.log_image('t/tmc', tmc, step=self.iterations)
-
-
-
+                    self.tb_log_training_images(images)
                     self.tb.writer.flush()
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
@@ -258,14 +238,6 @@ class StoppableTrainer:
                 else:
                     raise e
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
-        if self.invalid_targets:
-            print(
-                f'{len(self.invalid_targets)} invalid targets have been '
-                'encountered during training.\n'
-                'Entering IPython for inspection... '
-                '(see self.invalid_targets)\n\n'
-            )
-            IPython.embed()
 
     def validate(self) -> Tuple[float, float]:
         self.dataset.validate()  # Switch dataset to validation sources
@@ -341,6 +313,31 @@ class StoppableTrainer:
             # Ground truth target for direct comparison with preview prediction
             self.tb.log_image('p/gt_target', target, step=0)
             self.first_plot = False
+
+    def tb_log_training_images(self, images, z_plane=None):
+        """Preview from last training sample (random region, possibly augmented)."""
+
+        inp = images['inp']
+        target = images['target']
+        out = images['out']
+
+        if z_plane is None:
+            z_plane = out.shape[2] // 2
+        assert z_plane in range(out.shape[2])
+
+        tinp = inp[0, 0, z_plane, ...].cpu().numpy()
+        ttarget = target[0, 0, z_plane].cpu().numpy()
+        # TODO: Don't hardcode 2 classes
+        tp0 = out[0, 0, z_plane, ...].cpu().numpy()
+        tp1 = out[0, 1, z_plane, ...].cpu().numpy()
+        tmcl = maxclass(out)
+        tmc = tmcl[0, z_plane, ...].cpu().numpy()
+
+        self.tb.log_image('t/tinp', tinp, step=self.iterations)
+        self.tb.log_image('t/ttarget', ttarget, step=self.iterations)
+        self.tb.log_image('t/tp0', tp0, step=self.iterations)
+        self.tb.log_image('t/tp1', tp1, step=self.iterations)
+        self.tb.log_image('t/tmc', tmc, step=self.iterations)
 
 
 # TODO: Move all the functions below out of trainer.py
