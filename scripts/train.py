@@ -21,6 +21,7 @@ from elektronn3.models.vnet import VNet
 from elektronn3.models.fcn import fcn32s
 from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
 from elektronn3.models.unet import UNet
+from elektronn3.models.fcdensenet import FCDenseNet57
 
 
 logger = logging.getLogger('elektronn3log')
@@ -83,6 +84,8 @@ elif model_name == 'n3d':
     model = N3DNet()
 elif model_name == 'unet':
     model = UNet(depth=3, start_filts=32)
+elif model_name == 'dense57':
+    model = FCDenseNet57()
 else:
     raise ValueError('model not found.')
 
@@ -112,6 +115,7 @@ if data_config == 'local':
         'aniso_factor': 2,
         'source': 'train',
         'patch_shape': (96, 96, 96),
+        # 'patch_shape': (32, 64, 64),
         'preview_shape': (64, 144, 144),
         'valid_cube_indices': [2],
         'grey_augment_channels': [],
