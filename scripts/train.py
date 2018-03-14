@@ -82,7 +82,7 @@ elif model_name == 'extended':
 elif model_name == 'n3d':
     model = N3DNet()
 elif model_name == 'unet':
-    model = UNet(n_blocks=3, start_filts=32)
+    model = UNet(n_blocks=3, start_filts=32, planar_blocks=())
 else:
     raise ValueError('model not found.')
 

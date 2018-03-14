@@ -3,14 +3,14 @@
 
 # TODO: Proper attribution to jaxony and paper authors
 # TODO: Update docstrings and comments for 3d
-# TODO: Fix planar_blocks (for mixed 2D/3D arch) and choose a reasonable default
+# TODO: Find a reasonable default for planar_blocks
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import init
 
-DEBUG = True
+DEBUG = False
 if DEBUG:
     _print = print
 else:
@@ -192,6 +192,9 @@ class UNet(nn.Module):
         """
         super(UNet, self).__init__()
 
+        if n_blocks < 1:
+            raise ValueError('n_blocks must be > 1.')
+
         if up_mode in ('transpose', 'upsample'):
             self.up_mode = up_mode
         else:
@@ -233,6 +236,7 @@ class UNet(nn.Module):
             outs = self.start_filts * (2**i)
             pooling = True if i < n_blocks - 1 else False
             planar = i in self.planar_blocks
+            _print(f'D{i}: planar = {planar}')
 
             down_conv = DownConv(ins, outs, pooling=pooling, planar=planar)
             self.down_convs.append(down_conv)
@@ -242,7 +246,8 @@ class UNet(nn.Module):
         for i in range(n_blocks - 1):
             ins = outs
             outs = ins // 2
-            planar = n_blocks - 1 - i in self.planar_blocks  # TODO: Fix this
+            planar = n_blocks - 2 - i in self.planar_blocks
+            _print(f'U{i}: planar = {planar}')
 
             up_conv = UpConv(ins, outs, up_mode=up_mode, merge_mode=merge_mode, planar=planar)
             self.up_convs.append(up_conv)
@@ -292,16 +297,14 @@ class UNet(nn.Module):
         return x
 
 
-if __name__ == '__main__':
-
-    # Model hyperparams
-    batch_size = 1
-    in_channels = 1
-    out_channels = 2
-    n_blocks = 3
-    planar_blocks = ()
-    merge_mode = 'concat'
-
+def test_model(
+    batch_size=1,
+    in_channels=1,
+    out_channels=2,
+    n_blocks=3,
+    planar_blocks=(),
+    merge_mode='concat'
+):
     model = UNet(
         in_channels=in_channels,
         out_channels=out_channels,
@@ -318,8 +321,8 @@ if __name__ == '__main__':
         batch_size,
         in_channels,
         2 ** n_blocks // (2 ** len(planar_blocks)),
-        2 ** n_blocks,
-        2 ** n_blocks
+        2 ** (n_blocks - 1),
+        2 ** (n_blocks - 1)
     )
     if torch.cuda.is_available():
         model.cuda()
@@ -333,6 +336,24 @@ if __name__ == '__main__':
         batch_size,
         out_channels,
         2 ** n_blocks // (2 ** len(planar_blocks)),
-        2 ** n_blocks,
-        2 ** n_blocks
+        2 ** (n_blocks - 1),
+        2 ** (n_blocks - 1)
     )
+
+
+def test_planar_configs(max_n_blocks=4):
+    import itertools
+
+    for n_blocks in range(1, max_n_blocks + 1):
+        planar_combinations = itertools.chain(*[
+            list(itertools.combinations(range(n_blocks), i))
+            for i in range(n_blocks + 1)
+        ])  # [(), (0,), (1,), ..., (0, 1), ..., (0, 1, 2, ..., n_blocks - 1)]
+
+        for p in planar_combinations:
+            print(f'Testing n_blocks = {n_blocks}, planar_blocks = {p}...')
+            test_model(n_blocks=n_blocks, planar_blocks=p)
+
+
+if __name__ == '__main__':
+    test_planar_configs(5)
