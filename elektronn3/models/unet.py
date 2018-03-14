@@ -3,66 +3,80 @@
 
 # TODO: Proper attribution to jaxony and paper authors
 # TODO: Update docstrings and comments for 3d
-# TODO: Tune architecture for 3d (in its current form, it's far too heavy) and update defaults
-# TODO: Especially consider data anisotropy and reduce some of the convolution kernel sizes
-#       in the D dimension
-# TODO: Create a variant that matches the unet3d_lite architecture from ELEKTRONN2 examples
-#       so we can compare ELEKTRONN2 to elektronn3.
-#       -> https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/unet3d_lite.py
-# TODO: Remove 2d support? (for a 2d version, you can just use the original
-#       https://github.com/jaxony/unet-pytorch/blob/master/model.py)
+# TODO: Fix planar_blocks (for mixed 2D/3D arch) and choose a reasonable default
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 from torch.nn import init
-import numpy as np
+
+DEBUG = True
+if DEBUG:
+    _print = print
+else:
+    def _print(*args, **kwargs):
+        pass
 
 
-n = 3
-
-if n == 3:
-    Conv = nn.Conv3d
-    ConvTranspose = nn.ConvTranspose3d
-    MaxPool = nn.MaxPool3d
-elif n == 2:
-    Conv = nn.Conv2d
-    ConvTranspose = nn.ConvTranspose2d
-    MaxPool = nn.MaxPool2d
+def planar_kernel(x):
+    if isinstance(x, int):
+        return (1, x, x)
+    else:
+        return x
 
 
-def conv3x3(in_channels, out_channels, stride=1,
-            padding=1, bias=True, groups=1):
-    return Conv(
+def planar_pad(x):
+    if isinstance(x, int):
+        return (0, x, x)
+    else:
+        return x
+
+
+def _conv3(in_channels, out_channels, kernel_size=3, stride=1,
+           padding=1, bias=True, planar=False):
+    if planar:
+        stride = planar_kernel(stride)
+        padding = planar_pad(padding)
+        kernel_size = planar_kernel(kernel_size)
+    return nn.Conv3d(
         in_channels,
         out_channels,
-        kernel_size=3,
+        kernel_size=kernel_size,
         stride=stride,
         padding=padding,
-        bias=bias,
-        groups=groups)
+        bias=bias
+    )
 
-def upconv2x2(in_channels, out_channels, mode='transpose'):
+
+def _upconv2(in_channels, out_channels, mode='transpose', planar=False):
+    kernel_size = 2
+    stride = 2
+    scale_factor = 2
+    if planar:
+        kernel_size = planar_kernel(kernel_size)
+        stride = planar_kernel(stride)
+        scale_factor = planar_kernel(scale_factor)
     if mode == 'transpose':
-        return ConvTranspose(
+        return nn.ConvTranspose3d(
             in_channels,
             out_channels,
-            kernel_size=2,
-            stride=2)
+            kernel_size=kernel_size,
+            stride=stride
+        )
     else:
         # out_channels is always going to be the same
         # as in_channels
         return nn.Sequential(
-            nn.Upsample(mode='bilinear', scale_factor=2),
-            conv1x1(in_channels, out_channels))
+            nn.Upsample(mode='bilinear', scale_factor=scale_factor),
+            _conv1(in_channels, out_channels)
+        )
 
-def conv1x1(in_channels, out_channels, groups=1):
-    return Conv(
+
+def _conv1(in_channels, out_channels):
+    return nn.Conv3d(
         in_channels,
         out_channels,
         kernel_size=1,
-        groups=groups,
         stride=1)
 
 
@@ -71,18 +85,21 @@ class DownConv(nn.Module):
     A helper Module that performs 2 convolutions and 1 MaxPool.
     A ReLU activation follows each convolution.
     """
-    def __init__(self, in_channels, out_channels, pooling=True):
+    def __init__(self, in_channels, out_channels, pooling=True, planar=False):
         super(DownConv, self).__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
 
-        self.conv1 = conv3x3(self.in_channels, self.out_channels)
-        self.conv2 = conv3x3(self.out_channels, self.out_channels)
+        self.conv1 = _conv3(self.in_channels, self.out_channels, planar=planar)
+        self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar)
 
         if self.pooling:
-            self.pool = MaxPool(kernel_size=2, stride=2)
+            kernel_size = 2
+            if planar:
+                kernel_size = planar_kernel(kernel_size)
+            self.pool = nn.MaxPool3d(kernel_size=kernel_size)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -99,7 +116,7 @@ class UpConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels,
-                 merge_mode='concat', up_mode='transpose'):
+                 merge_mode='concat', up_mode='transpose', planar=False):
         super(UpConv, self).__init__()
 
         self.in_channels = in_channels
@@ -107,17 +124,18 @@ class UpConv(nn.Module):
         self.merge_mode = merge_mode
         self.up_mode = up_mode
 
-        self.upconv = upconv2x2(self.in_channels, self.out_channels,
-            mode=self.up_mode)
+        self.upconv = _upconv2(self.in_channels, self.out_channels,
+            mode=self.up_mode, planar=planar
+        )
 
         if self.merge_mode == 'concat':
-            self.conv1 = conv3x3(
-                2*self.out_channels, self.out_channels)
+            self.conv1 = _conv3(
+                2*self.out_channels, self.out_channels, planar=planar
+            )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = conv3x3(self.out_channels, self.out_channels)
-        self.conv2 = conv3x3(self.out_channels, self.out_channels)
-
+            self.conv1 = _conv3(self.out_channels, self.out_channels, planar=planar)
+        self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar)
 
     def forward(self, from_down, from_up):
         """ Forward pass
@@ -158,14 +176,14 @@ class UNet(nn.Module):
         the tranpose convolution (specified by upmode='transpose')
     """
 
-    def __init__(self, num_classes=2, in_channels=1, depth=5,
+    def __init__(self, out_channels=2, in_channels=1, n_blocks=5,
                  start_filts=64, up_mode='transpose',
-                 merge_mode='concat'):
+                 merge_mode='concat', planar_blocks=()):
         """
         Arguments:
             in_channels: int, number of channels in the input tensor.
                 Default is 3 for RGB images.
-            depth: int, number of MaxPools in the U-Net.
+            n_blocks: int, number of MaxPools in the U-Net.
             start_filts: int, number of convolutional filters for the
                 first conv.
             up_mode: string, type of upconvolution. Choices: 'transpose'
@@ -195,35 +213,41 @@ class UNet(nn.Module):
                              "with merge_mode \"add\" at the moment "
                              "because it doesn't make sense to use "
                              "nearest neighbour to reduce "
-                             "depth channels (by half).")
+                             "n_blocks channels (by half).")
 
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         self.in_channels = in_channels
         self.start_filts = start_filts
-        self.depth = depth
+        self.depth = n_blocks
 
         self.down_convs = []
         self.up_convs = []
 
-        # create the encoder pathway and add to a list
-        for i in range(depth):
-            ins = self.in_channels if i == 0 else outs
-            outs = self.start_filts*(2**i)
-            pooling = True if i < depth-1 else False
+        # Indices of blocks that should operate in 2D instead of 3D mode,
+        # to save resources
+        self.planar_blocks = planar_blocks
 
-            down_conv = DownConv(ins, outs, pooling=pooling)
+        # create the encoder pathway and add to a list
+        for i in range(n_blocks):
+            ins = self.in_channels if i == 0 else outs
+            outs = self.start_filts * (2**i)
+            pooling = True if i < n_blocks - 1 else False
+            planar = i in self.planar_blocks
+
+            down_conv = DownConv(ins, outs, pooling=pooling, planar=planar)
             self.down_convs.append(down_conv)
 
         # create the decoder pathway and add to a list
-        # - careful! decoding only requires depth-1 blocks
-        for i in range(depth-1):
+        # - careful! decoding only requires n_blocks-1 blocks
+        for i in range(n_blocks - 1):
             ins = outs
             outs = ins // 2
-            up_conv = UpConv(ins, outs, up_mode=up_mode,
-                merge_mode=merge_mode)
+            planar = n_blocks - 1 - i in self.planar_blocks  # TODO: Fix this
+
+            up_conv = UpConv(ins, outs, up_mode=up_mode, merge_mode=merge_mode, planar=planar)
             self.up_convs.append(up_conv)
 
-        self.conv_final = conv1x1(outs, self.num_classes)
+        self.conv_final = _conv1(outs, self.out_channels)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
@@ -233,27 +257,33 @@ class UNet(nn.Module):
 
     @staticmethod
     def weight_init(m):
-        if isinstance(m, Conv):
+        if isinstance(m, nn.Conv3d):
             init.xavier_normal(m.weight)
             init.constant(m.bias, 0)
-
 
     def reset_params(self):
         for i, m in enumerate(self.modules()):
             self.weight_init(m)
 
-
     def forward(self, x):
         encoder_outs = []
 
-        # encoder pathway, save outputs for merging
+        # Encoder pathway, save outputs for merging
         for i, module in enumerate(self.down_convs):
+            _print(f'D{i}: {module}')
             x, before_pool = module(x)
+            _print(before_pool.shape)
             encoder_outs.append(before_pool)
 
+        # Decoding by UpConv and merging with saved outputs of encoder
         for i, module in enumerate(self.up_convs):
+            _print(f'U{i}: {module}')
+            # import IPython; IPython.embed()
+
             before_pool = encoder_outs[-(i+2)]
+            _print(f'In: {before_pool.shape}')
             x = module(before_pool, x)
+            _print(f'Out: {x.shape}')
 
         # No softmax is used. This means you need to use
         # nn.CrossEntropyLoss is your training script,
@@ -261,12 +291,48 @@ class UNet(nn.Module):
         x = self.conv_final(x)
         return x
 
-if __name__ == "__main__":
-    """
-    testing
-    """
-    model = UNet(3, depth=5, merge_mode='concat')
-    x = Variable(torch.FloatTensor(np.random.random((1, 3, 320, 320))))
+
+if __name__ == '__main__':
+
+    # Model hyperparams
+    batch_size = 1
+    in_channels = 1
+    out_channels = 2
+    n_blocks = 3
+    planar_blocks = ()
+    merge_mode = 'concat'
+
+    model = UNet(
+        in_channels=in_channels,
+        out_channels=out_channels,
+        n_blocks=n_blocks,
+        planar_blocks=planar_blocks,
+        merge_mode=merge_mode
+    )
+
+    # Minimal test input
+    # Each block in the encoder pathway ends with 2x2x2 downsampling, except
+    # planar blocks, which only do 1x2x2 downsampling, so the input has to
+    # be larger when using more blocks.
+    x = torch.randn(
+        batch_size,
+        in_channels,
+        2 ** n_blocks // (2 ** len(planar_blocks)),
+        2 ** n_blocks,
+        2 ** n_blocks
+    )
+    if torch.cuda.is_available():
+        model.cuda()
+        x = x.cuda()
+
+    # Test forward, autograd, and backward pass with test input
     out = model(x)
     loss = torch.sum(out)
     loss.backward()
+    assert out.shape == (
+        batch_size,
+        out_channels,
+        2 ** n_blocks // (2 ** len(planar_blocks)),
+        2 ** n_blocks,
+        2 ** n_blocks
+    )
