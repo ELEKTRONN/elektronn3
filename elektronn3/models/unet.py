@@ -1,7 +1,35 @@
-# Based on https://github.com/jaxony/unet-pytorch
-# Modified to support 3d convolutions.
+"""
+This is a modified version of the U-Net CNN architecture for biomedical
+image segmentation. U-Net was originally published in
+https://arxiv.org/abs/1505.04597 by Ronneberger et al.
 
-# TODO: Proper attribution to jaxony and paper authors
+A pure-3D variant of U-Net has been proposed by Çiçek et al.
+in https://arxiv.org/abs/1606.06650, but the below implementation
+is based on the original U-Net paper, with several improvements.
+
+This code is based on https://github.com/jaxony/unet-pytorch
+(c) 2017 Jackson Huang, released under MIT License,
+which implements (2D) U-Net with user-defined network depth
+and a few other improvements of the original architecture.
+
+Major differences of this version from Huang's code:
+- Operates on 3D image data (5D tensors) instead of 2D data
+- Each network block pair (the two corresponding submodules in the
+  encoder and decoder pathways) can be configured to either work
+  in 3D or 2D mode (3D/2D convolution, pooling etc.)
+  with the `planar_blocks` parameter.
+  This is helpful for dealing with data anisotropy (commonly the
+  depth axis has lower resolution in SBEM data sets, so it is not
+  as important for convolution/pooling) and can reduce the complexity of
+  models (parameter counts, speed, memory usage etc.).
+  Note: If planar blocks are used, the input patch size should be adapted
+  by reducing depth and increasing height and width of inputs.
+- Improved tests (see the bottom of the file)
+- Cleaned up parameter/variable names and formatting, changed default params
+- Updated for PyTorch 0.4.0 and Python 3.6 (earlier versions unsupported)
+- (Optional DEBUG mode for optional printing of debug information)
+"""
+
 # TODO: Update docstrings and comments for 3d
 # TODO: Find a reasonable default for planar_blocks
 
@@ -9,6 +37,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import init
+
 
 DEBUG = False
 if DEBUG:
@@ -182,7 +211,7 @@ class UNet(nn.Module):
         """
         Arguments:
             in_channels: int, number of channels in the input tensor.
-                Default is 3 for RGB images.
+                Default is 1.
             n_blocks: int, number of MaxPools in the U-Net.
             start_filts: int, number of convolutional filters for the
                 first conv.
@@ -356,4 +385,4 @@ def test_planar_configs(max_n_blocks=4):
 
 
 if __name__ == '__main__':
-    test_planar_configs(5)
+    test_planar_configs()
