@@ -14,24 +14,22 @@ and a few other improvements of the original architecture.
 
 Major differences of this version from Huang's code:
 - Operates on 3D image data (5D tensors) instead of 2D data
-- Each network block pair (the two corresponding submodules in the
-  encoder and decoder pathways) can be configured to either work
-  in 3D or 2D mode (3D/2D convolution, pooling etc.)
-  with the `planar_blocks` parameter.
-  This is helpful for dealing with data anisotropy (commonly the
-  depth axis has lower resolution in SBEM data sets, so it is not
-  as important for convolution/pooling) and can reduce the complexity of
-  models (parameter counts, speed, memory usage etc.).
-  Note: If planar blocks are used, the input patch size should be adapted
-  by reducing depth and increasing height and width of inputs.
+- planar_blocks architecture parameter for mixed 2D/3D convnets
+  (see UNet class docstring for details)
 - Improved tests (see the bottom of the file)
 - Cleaned up parameter/variable names and formatting, changed default params
 - Updated for PyTorch 0.4.0 and Python 3.6 (earlier versions unsupported)
 - (Optional DEBUG mode for optional printing of debug information)
+- Extended documentation
 """
 
-# TODO: Update docstrings and comments for 3d
 # TODO: Find a reasonable default for planar_blocks
+
+__all__ = ['UNet']
+
+import itertools
+
+from typing import Sequence
 
 import torch
 import torch.nn as nn
@@ -191,34 +189,93 @@ class UNet(nn.Module):
     information representing the localization of details
     (from the encoding, compressive pathway).
 
-    Modifications to the original paper:
-    (1) padding is used in 3x3 convolutions to prevent loss
-        of border pixels
-    (2) merging outputs does not require cropping due to (1)
-    (3) residual connections can be used by specifying
-        UNet(merge_mode='add')
-    (4) if non-parametric upsampling is used in the decoder
+    Modifications to the original paper (@jaxony):
+    (1) Padding is used in size-3-convolutions to prevent loss
+        of border pixels.
+    (2) Merging outputs does not require cropping due to (1).
+    (3) Residual connections can be used by specifying
+        UNet(merge_mode='add').
+    (4) If non-parametric upsampling is used in the decoder
         pathway (specified by upmode='upsample'), then an
-        additional 1x1 2d convolution occurs after upsampling
+        additional 1x1 convolution occurs after upsampling
         to reduce channel dimensionality by a factor of 2.
         This channel halving happens with the convolution in
-        the tranpose convolution (specified by upmode='transpose')
+        the tranpose convolution (specified by upmode='transpose').
+
+    Additional modifications (@mdraw):
+    (5) Operates on 3D image data (5D tensors) instead of 2D data
+    (6) Each network block pair (the two corresponding submodules in the
+        encoder and decoder pathways) can be configured to either work
+        in 3D or 2D mode (3D/2D convolution, pooling etc.)
+        with the `planar_blocks` parameter.
+        This is helpful for dealing with data anisotropy (commonly the
+        depth axis has lower resolution in SBEM data sets, so it is not
+        as important for convolution/pooling) and can reduce the complexity of
+        models (parameter counts, speed, memory usage etc.).
+        Note: If planar blocks are used, the input patch size should be
+        adapted by reducing depth and increasing height and width of inputs.
+
+    Args:
+        in_channels: Number of input channels
+            (e.g. 1 for single-grayscale inputs, 3 for RGB images)
+            Default: 1
+        out_channels: Number of output channels (number of classes).
+            Default: 2
+        n_blocks: Number of downsampling/convolution blocks (max-pooling)
+            in the encoder pathway. The decoder (upsampling/upconvolution)
+            pathway will consist of `n_blocks - 1` blocks.
+            Increasing `n_blocks` has two major effects:
+            - The network will be deeper
+              (n + 1 -> 4 additional convolution layers)
+            - Since each block causes one additional downsampling, more
+              contextual information will be available for the network,
+              enhancing the effective visual receptive field.
+              (n + 1 -> receptive field is approximately doubled in each
+                  dimension, except in planar blocks, in which it is only
+                  doubled in the H and W image dimensions)
+        start_filts: Number of filters for the first convolution layer.
+            Note: The filter counts of the later layers depend on the
+            choice of `merge_mode`.
+        up_mode: Upsampling method in the decoder pathway.
+            Choices:
+            - 'transpose': Use transposed convolution ("Upconvolution")
+            - 'upsample': Use nearest neighbour upsampling.
+        merge_mode: How the features from the encoder pathway should
+            be combined with the decoder features.
+            Choices:
+            - 'concat' (default): Concatenate feature maps along the
+              `C` axis, doubling the number of filters each block.
+            - 'add': Directly add feature maps (like in ResNets).
+              The number of filters thus stays constant in each block.
+            Note: According to https://arxiv.org/abs/1701.03056, feature
+            concatenation ('concat') generally leads to better model
+            accuracy than 'add' in typical medical image segmentation
+            tasks.
+        planar_blocks: Each number i in this sequence leads to the i-th
+            block being a "planar" block. This means that all image
+            operations performed in the i-th block in the encoder pathway
+            and its corresponding decoder counterpart disregard the depth
+            (`D`) axis and only operate in 2D (`H`, `W`).
+            This is helpful for dealing with data anisotropy (commonly the
+            depth axis has lower resolution in SBEM data sets, so it is
+            not as important for convolution/pooling) and can reduce the
+            complexity of models (parameter counts, speed, memory usage
+            etc.).
+            Note: If planar blocks are used, the input patch size should
+            be adapted by reducing depth and increasing height and
+            width of inputs.
     """
 
-    def __init__(self, out_channels=2, in_channels=1, n_blocks=5,
-                 start_filts=64, up_mode='transpose',
-                 merge_mode='concat', planar_blocks=()):
-        """
-        Arguments:
-            in_channels: int, number of channels in the input tensor.
-                Default is 1.
-            n_blocks: int, number of MaxPools in the U-Net.
-            start_filts: int, number of convolutional filters for the
-                first conv.
-            up_mode: string, type of upconvolution. Choices: 'transpose'
-                for transpose convolution or 'upsample' for nearest neighbour
-                upsampling.
-        """
+    def __init__(
+            self,
+            in_channels: int = 1,
+            out_channels: int = 2,
+            n_blocks: int = 3,
+            start_filts: int = 64,
+            up_mode: str = 'transpose',
+            merge_mode: str = 'concat',
+            planar_blocks: Sequence = ()
+    ):
         super(UNet, self).__init__()
 
         if n_blocks < 1:
@@ -246,6 +303,14 @@ class UNet(nn.Module):
                              "because it doesn't make sense to use "
                              "nearest neighbour to reduce "
                              "n_blocks channels (by half).")
+
+        if len(planar_blocks) > n_blocks:
+            raise ValueError('planar_blocks can\'t be longer than n_blocks.')
+        if planar_blocks and (max(planar_blocks) >= n_blocks or min(planar_blocks) < 0):
+            raise ValueError(
+                'planar_blocks has invalid value range. All values have to be'
+                'block indices, meaning integers between 0 and (n_blocks - 1).'
+            )
 
         self.out_channels = out_channels
         self.in_channels = in_channels
@@ -371,8 +436,6 @@ def test_model(
 
 
 def test_planar_configs(max_n_blocks=4):
-    import itertools
-
     for n_blocks in range(1, max_n_blocks + 1):
         planar_combinations = itertools.chain(*[
             list(itertools.combinations(range(n_blocks), i))
