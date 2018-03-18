@@ -14,6 +14,7 @@ and a few other improvements of the original architecture.
 
 Major differences of this version from Huang's code:
 - Operates on 3D image data (5D tensors) instead of 2D data
+- Uses 3D convolution, 3D pooling etc. by default
 - planar_blocks architecture parameter for mixed 2D/3D convnets
   (see UNet class docstring for details)
 - Improved tests (see the bottom of the file)
@@ -181,13 +182,16 @@ class UpConv(nn.Module):
 
 
 class UNet(nn.Module):
-    """ `UNet` class is based on https://arxiv.org/abs/1505.04597
+    """Modified version of U-Net, adapted for 3D biomedical image segmentation
 
     The U-Net is a convolutional encoder-decoder neural network.
-    Contextual spatial information (from the decoding,
-    expansive pathway) about an input tensor is merged with
-    information representing the localization of details
-    (from the encoding, compressive pathway).
+    Contextual spatial information (from the decoding, expansive pathway)
+    about an input tensor is merged with information representing the
+    localization of details (from the encoding, compressive pathway).
+
+    - Original paper: https://arxiv.org/abs/1505.04597
+    - Base implementation: https://github.com/jaxony/unet-pytorch
+
 
     Modifications to the original paper (@jaxony):
     (1) Padding is used in size-3-convolutions to prevent loss
@@ -204,6 +208,7 @@ class UNet(nn.Module):
 
     Additional modifications (@mdraw):
     (5) Operates on 3D image data (5D tensors) instead of 2D data
+    (6) Uses 3D convolution, 3D pooling etc. by default
     (6) Each network block pair (the two corresponding submodules in the
         encoder and decoder pathways) can be configured to either work
         in 3D or 2D mode (3D/2D convolution, pooling etc.)
