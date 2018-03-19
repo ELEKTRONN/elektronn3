@@ -34,7 +34,6 @@ from typing import Sequence
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn import init
 
 
@@ -108,12 +107,24 @@ def _conv1(in_channels, out_channels):
         stride=1)
 
 
+# TODO: How to deal with activation hyperparameters? Esp. leakiness
+def _get_activation(name):
+    if name == 'relu':
+        return nn.ReLU()
+    elif name == 'leaky':
+        return nn.LeakyReLU(negative_slope=0.1)
+    elif name == 'prelu':
+        return nn.PReLU(num_parameters=1)
+    elif name == 'rrelu':
+        return nn.RReLU()
+
+
 class DownConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 MaxPool.
     A ReLU activation follows each convolution.
     """
-    def __init__(self, in_channels, out_channels, pooling=True, planar=False):
+    def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu'):
         super(DownConv, self).__init__()
 
         self.in_channels = in_channels
@@ -129,9 +140,12 @@ class DownConv(nn.Module):
                 kernel_size = planar_kernel(kernel_size)
             self.pool = nn.MaxPool3d(kernel_size=kernel_size)
 
+        self.act1 = _get_activation(activation)
+        self.act2 = _get_activation(activation)
+
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
+        x = self.act1(self.conv1(x))
+        x = self.act2(self.conv2(x))
         before_pool = x
         if self.pooling:
             x = self.pool(x)
@@ -144,7 +158,8 @@ class UpConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels,
-                 merge_mode='concat', up_mode='transpose', planar=False):
+                 merge_mode='concat', up_mode='transpose', planar=False,
+                 activation='relu'):
         super(UpConv, self).__init__()
 
         self.in_channels = in_channels
@@ -165,6 +180,9 @@ class UpConv(nn.Module):
             self.conv1 = _conv3(self.out_channels, self.out_channels, planar=planar)
         self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar)
 
+        self.act1 = _get_activation(activation)
+        self.act2 = _get_activation(activation)
+
     def forward(self, from_down, from_up):
         """ Forward pass
         Arguments:
@@ -176,8 +194,8 @@ class UpConv(nn.Module):
             x = torch.cat((from_up, from_down), 1)
         else:
             x = from_up + from_down
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
+        x = self.act1(self.conv1(x))
+        x = self.act2(self.conv2(x))
         return x
 
 
@@ -209,7 +227,7 @@ class UNet(nn.Module):
     Additional modifications (@mdraw):
     (5) Operates on 3D image data (5D tensors) instead of 2D data
     (6) Uses 3D convolution, 3D pooling etc. by default
-    (6) Each network block pair (the two corresponding submodules in the
+    (7) Each network block pair (the two corresponding submodules in the
         encoder and decoder pathways) can be configured to either work
         in 3D or 2D mode (3D/2D convolution, pooling etc.)
         with the `planar_blocks` parameter.
@@ -219,6 +237,7 @@ class UNet(nn.Module):
         models (parameter counts, speed, memory usage etc.).
         Note: If planar blocks are used, the input patch size should be
         adapted by reducing depth and increasing height and width of inputs.
+    (8) Configurable activation function.
 
     Args:
         in_channels: Number of input channels
@@ -269,6 +288,16 @@ class UNet(nn.Module):
             Note: If planar blocks are used, the input patch size should
             be adapted by reducing depth and increasing height and
             width of inputs.
+        activation: Name of the non-linear activation function that should be
+            applied after each network layer.
+            Choices (see https://arxiv.org/abs/1505.00853 for details):
+            - 'relu' (default)
+            - 'leaky': Leaky ReLU (slope 0.1)
+            - 'prelu': Parametrized ReLU. Best for training accuracy, but
+                tends to increase overfitting.
+            - 'rrelu': Can improve generalization at the cost of training
+                accuracy.
+
     """
 
     def __init__(
@@ -279,7 +308,8 @@ class UNet(nn.Module):
             start_filts: int = 64,
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
-            planar_blocks: Sequence = ()
+            planar_blocks: Sequence = (),
+            activation: str = 'relu'
     ):
         super(UNet, self).__init__()
 
@@ -337,7 +367,13 @@ class UNet(nn.Module):
             planar = i in self.planar_blocks
             _print(f'D{i}: planar = {planar}')
 
-            down_conv = DownConv(ins, outs, pooling=pooling, planar=planar)
+            down_conv = DownConv(
+                ins,
+                outs,
+                pooling=pooling,
+                planar=planar,
+                activation=activation
+            )
             self.down_convs.append(down_conv)
 
         # create the decoder pathway and add to a list
@@ -348,7 +384,14 @@ class UNet(nn.Module):
             planar = n_blocks - 2 - i in self.planar_blocks
             _print(f'U{i}: planar = {planar}')
 
-            up_conv = UpConv(ins, outs, up_mode=up_mode, merge_mode=merge_mode, planar=planar)
+            up_conv = UpConv(
+                ins,
+                outs,
+                up_mode=up_mode,
+                merge_mode=merge_mode,
+                planar=planar,
+                activation=activation
+            )
             self.up_convs.append(up_conv)
 
         self.conv_final = _conv1(outs, self.out_channels)
