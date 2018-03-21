@@ -180,6 +180,8 @@ class UpConv(nn.Module):
             self.conv1 = _conv3(self.out_channels, self.out_channels, planar=planar)
         self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar)
 
+        if self.up_mode == 'transpose':
+            self.act0 = _get_activation(activation)
         self.act1 = _get_activation(activation)
         self.act2 = _get_activation(activation)
 
@@ -190,6 +192,10 @@ class UpConv(nn.Module):
             from_up: upconv'd tensor from the decoder pathway
         """
         from_up = self.upconv(from_up)
+        if self.up_mode == 'transpose':
+            # Only for transposed convolution.
+            # (In case of bilinear upsampling we omit activation)
+            from_up = self.act0(from_up)
         if self.merge_mode == 'concat':
             x = torch.cat((from_up, from_down), 1)
         else:
