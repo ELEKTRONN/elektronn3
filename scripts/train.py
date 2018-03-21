@@ -66,7 +66,7 @@ save_path = os.path.join(path_prefix, save_name)
 nIters = int(500000)
 wd = 0.5e-4
 lr = 0.0004
-opt = 'adam'
+opt = 'amsgrad'
 # lr_dec = 0.999
 batch_size = 1
 epoch_size = args.epoch_size
@@ -82,7 +82,13 @@ elif model_name == 'extended':
 elif model_name == 'n3d':
     model = N3DNet()
 elif model_name == 'unet':
-    model = UNet(n_blocks=3, start_filts=32, planar_blocks=())
+    model = UNet(
+        n_blocks=4,
+        start_filts=32,
+        planar_blocks=(0,),
+        activation='relu',
+        batch_norm=True
+    )
 else:
     raise ValueError('model not found.')
 
@@ -111,7 +117,7 @@ if data_config == 'local':
         'std': 41.812504,
         'aniso_factor': 2,
         'source': 'train',
-        'patch_shape': (96, 96, 96),
+        'patch_shape': (48, 96, 96),
         'preview_shape': (64, 144, 144),
         'valid_cube_indices': [2],
         'grey_augment_channels': [],
@@ -163,6 +169,8 @@ if opt == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
 elif opt == 'adam':
     optimizer = optim.Adam(model.parameters(), weight_decay=wd, lr=lr)
+elif opt == 'amsgrad':
+    optimizer = optim.Adam(model.parameters(), weight_decay=wd, lr=lr, amsgrad=True)
 elif opt == 'rmsprop':
     optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
 
