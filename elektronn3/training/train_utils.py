@@ -3,7 +3,13 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
-from torch.utils.data.dataloader import DataLoader, DataLoaderIter
+from torch.utils.data.dataloader import DataLoader
+
+# TODO: Clean up
+try:
+    from torch.utils.data.dataloader import _DataLoaderIter as DataLoaderIter
+except ImportError:
+    from torch.utils.data.dataloader import DataLoaderIter
 
 from elektronn3.training import plotting
 from elektronn3 import floatX
