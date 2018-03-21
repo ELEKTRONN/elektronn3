@@ -104,7 +104,7 @@ def _conv1(in_channels, out_channels):
         in_channels,
         out_channels,
         kernel_size=1,
-        stride=1)
+    )
 
 
 # TODO: How to deal with activation hyperparameters? Esp. leakiness
@@ -124,12 +124,14 @@ class DownConv(nn.Module):
     A helper Module that performs 2 convolutions and 1 MaxPool.
     A ReLU activation follows each convolution.
     """
-    def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu'):
+    def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
+                 batch_norm=False):
         super(DownConv, self).__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
+        self.batch_norm = batch_norm
 
         self.conv1 = _conv3(self.in_channels, self.out_channels, planar=planar)
         self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar)
@@ -143,9 +145,17 @@ class DownConv(nn.Module):
         self.act1 = _get_activation(activation)
         self.act2 = _get_activation(activation)
 
+        if self.batch_norm:
+            self.bn1 = nn.BatchNorm3d(self.out_channels)
+            self.bn2 = nn.BatchNorm3d(self.out_channels)
+
     def forward(self, x):
         x = self.act1(self.conv1(x))
+        if self.batch_norm:
+            x = self.bn1(x)
         x = self.act2(self.conv2(x))
+        if self.batch_norm:
+            x = self.bn2(x)
         before_pool = x
         if self.pooling:
             x = self.pool(x)
@@ -159,13 +169,14 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu'):
+                 activation='relu', batch_norm=False):
         super(UpConv, self).__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.merge_mode = merge_mode
         self.up_mode = up_mode
+        self.batch_norm = batch_norm
 
         self.upconv = _upconv2(self.in_channels, self.out_channels,
             mode=self.up_mode, planar=planar
@@ -185,6 +196,11 @@ class UpConv(nn.Module):
         self.act1 = _get_activation(activation)
         self.act2 = _get_activation(activation)
 
+        if self.batch_norm:
+            self.bn0 = nn.BatchNorm3d(self.out_channels)
+            self.bn1 = nn.BatchNorm3d(self.out_channels)
+            self.bn2 = nn.BatchNorm3d(self.out_channels)
+
     def forward(self, from_down, from_up):
         """ Forward pass
         Arguments:
@@ -194,14 +210,20 @@ class UpConv(nn.Module):
         from_up = self.upconv(from_up)
         if self.up_mode == 'transpose':
             # Only for transposed convolution.
-            # (In case of bilinear upsampling we omit activation)
+            # (In case of bilinear upsampling we omit activation and BN)
             from_up = self.act0(from_up)
+            if self.batch_norm:
+                from_up = self.bn0(from_up)
         if self.merge_mode == 'concat':
             x = torch.cat((from_up, from_down), 1)
         else:
             x = from_up + from_down
         x = self.act1(self.conv1(x))
+        if self.batch_norm:
+            x = self.bn1(x)
         x = self.act2(self.conv2(x))
+        if self.batch_norm:
+            x = self.bn2(x)
         return x
 
 
@@ -244,6 +266,7 @@ class UNet(nn.Module):
         Note: If planar blocks are used, the input patch size should be
         adapted by reducing depth and increasing height and width of inputs.
     (8) Configurable activation function.
+    (9) Optional batch normalization
 
     Args:
         in_channels: Number of input channels
@@ -303,7 +326,11 @@ class UNet(nn.Module):
                 tends to increase overfitting.
             - 'rrelu': Can improve generalization at the cost of training
                 accuracy.
-
+        batch_norm: If batch normalization should be applied after each
+            layer. Note that BN is applied after the activated conv layers,
+            not before the activation. This scheme differs from the original
+            batch normalization paper and the BN scheme of 3D U-Net, but it
+            delivers better results this way (see https://redd.it/67gonq).
     """
 
     def __init__(
@@ -315,7 +342,8 @@ class UNet(nn.Module):
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
             planar_blocks: Sequence = (),
-            activation: str = 'relu'
+            activation: str = 'relu',
+            batch_norm: bool = False
     ):
         super(UNet, self).__init__()
 
@@ -357,6 +385,7 @@ class UNet(nn.Module):
         self.in_channels = in_channels
         self.start_filts = start_filts
         self.depth = n_blocks
+        self.batch_norm = batch_norm
 
         self.down_convs = []
         self.up_convs = []
@@ -378,7 +407,8 @@ class UNet(nn.Module):
                 outs,
                 pooling=pooling,
                 planar=planar,
-                activation=activation
+                activation=activation,
+                batch_norm=batch_norm
             )
             self.down_convs.append(down_conv)
 
@@ -396,7 +426,8 @@ class UNet(nn.Module):
                 up_mode=up_mode,
                 merge_mode=merge_mode,
                 planar=planar,
-                activation=activation
+                activation=activation,
+                batch_norm=batch_norm
             )
             self.up_convs.append(up_conv)
 
