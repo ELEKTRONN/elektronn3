@@ -170,14 +170,14 @@ class StoppableTrainer:
                     # get training performance
                     numel += int(target_.numel())
                     target_sum += int(target_.sum())
-                    vx_size += int(np.prod(np.array(inp.size())))
+                    vx_size += inp.numel()
                     maxcl = maxclass(out_)
                     # .ne() creates a ByteTensor, which leads to integer
                     # overflows when it is sum-reduced. Therefore it's
                     # necessary to cast to a LongTensor before reducing.
                     incorrect += int(maxcl.ne(target_).long().sum())
                     stats['tr_loss'] += float(loss)
-                    # print(f'{self.iterations:6d}, loss: {loss:.4f}')
+                    print(f'{self.iterations:6d}, loss: {loss:.4f}', end='\r')
                     self.tracker.update_timeline([self.timer.t_passed, float(loss), target_sum / numel])
 
                     # Preserve training batch and network output for later
