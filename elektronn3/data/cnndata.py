@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch, Philipp Schubert
+
 __all__ = ['PatchCreator']
 
 import logging

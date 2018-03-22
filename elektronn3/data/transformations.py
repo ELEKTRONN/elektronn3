@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
-# ELEKTRONN3 Toolkit
-# Copyright (c) 2015 Philipp Schubert, Martin Drawitsch, Marius Killinger
-# All rights reserved
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
+
 
 __all__ = ['warp_slice', 'get_warped_slice', 'WarpingOOBError']
 
@@ -37,7 +40,6 @@ def grey_augment(d, channels, rng):
         d[channels] = np.clip(d[channels], 0, 1)
         d[channels] = d[channels] ** gamma[:,None,None]
     return d
-
 
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],

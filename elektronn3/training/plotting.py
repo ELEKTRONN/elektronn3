@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-# ELEKTRONN2 - Neural Network Toolkit
+# ELEKTRONN3 - Neural Network Toolkit
 #
-# Copyright (c) 2014 - now
-# Max-Planck-Institute for Medical Research, Heidelberg, Germany
-# Authors: Marius Killinger, Philipp Schubert
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch, Philipp Schubert
 
 import logging
 import os

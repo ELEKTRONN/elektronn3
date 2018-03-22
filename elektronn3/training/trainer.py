@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch, Philipp Schubert
+
 import logging
 import os
 import traceback
@@ -186,7 +193,7 @@ class StoppableTrainer:
                 stats['tr_loss'] /= len(self.loader)
                 mean_target = target_sum / numel
                 misc['tr_speed'] = len(self.loader) / timer.t_passed
-                misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MV
+                misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
 
                 # --> self.step():
                 stats['val_loss'], stats['val_err'] = self.validate()

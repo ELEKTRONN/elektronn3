@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
-# ELEKTRONN2 Toolkit
-# Copyright (c) 2015 Marius Killinger
-# All rights reserved
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
+
 
 import numpy as np
 from PIL import Image
