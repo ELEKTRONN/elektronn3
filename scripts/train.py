@@ -10,19 +10,8 @@ import torch
 from torch import nn
 from torch import optim
 
-# Don't move this stuff, it needs to be run this early to work
-import elektronn3
-mpl_backend = 'agg'  # TODO: Make this a CLI option
-elektronn3.select_mpl_backend(mpl_backend)
-
-from elektronn3.data.cnndata import PatchCreator
-from elektronn3.training.trainer import StoppableTrainer
-from elektronn3.models.vnet import VNet
-from elektronn3.models.fcn import fcn32s
-from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
-from elektronn3.models.unet import UNet
-
-
+# setup logging before importing elektronn3 parts because mpl_backend
+# has to be defined first
 logger = logging.getLogger('elektronn3log')
 
 parser = argparse.ArgumentParser(description='Train a network.')
@@ -43,6 +32,11 @@ parser.add_argument(
     help='How many training steps to perform between '
          'validation/preview/extended-stat calculation phases.'
 )
+parser.add_argument(
+    '--mpl_backend', type=str, default='agg',
+    help='How many training steps to perform between '
+         'validation/preview/extended-stat calculation phases.'
+)
 args = parser.parse_args()
 
 model_name = args.model_name
@@ -50,6 +44,19 @@ data_config = args.data_config
 cuda_enabled = not args.disable_cuda and torch.cuda.is_available()
 
 logger.info('Cuda enabled' if cuda_enabled else 'Cuda disabled')
+
+# Don't move this stuff, it needs to be run this early to work
+import elektronn3
+mpl_backend = args.mpl_backend
+elektronn3.select_mpl_backend(mpl_backend)
+
+from elektronn3.data.cnndata import PatchCreator
+from elektronn3.training.trainer import StoppableTrainer
+from elektronn3.models.vnet import VNet
+from elektronn3.models.fcn import fcn32s
+from elektronn3.models.simple import Simple3DNet, Extended3DNet, N3DNet
+from elektronn3.models.unet import UNet
+
 
 # USER PATHS
 path_prefix = os.path.expanduser('~/e3training/')
@@ -67,7 +74,8 @@ nIters = int(500000)
 wd = 0.5e-4
 lr = 0.0004
 opt = 'amsgrad'
-# lr_dec = 0.999
+lr_stepsize = 1000
+lr_dec = 0.99
 batch_size = 1
 epoch_size = args.epoch_size
 
@@ -173,15 +181,17 @@ elif opt == 'amsgrad':
     optimizer = optim.Adam(model.parameters(), weight_decay=wd, lr=lr, amsgrad=True)
 elif opt == 'rmsprop':
     optimizer = optim.RMSprop(model.parameters(), weight_decay=wd, lr=lr)
+else:
+    raise NotImplementedError("Optimizer needs to be specified.")
 
-# lr_sched = optim.lr_scheduler.ExponentialLR(optimizer, lr_dec)
+lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
                       dataset=dataset, batchsize=batch_size, num_workers=2,
                       save_path=save_path,
-                      # schedulers={"lr": lr_sched},
+                      schedulers={"lr": lr_sched},
                       cuda_enabled=cuda_enabled,
                       ignore_errors=args.ignore_errors,
                       ipython_on_error=not args.disable_ipython_on_error)

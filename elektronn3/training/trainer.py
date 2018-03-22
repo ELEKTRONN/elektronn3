@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from scipy.misc import imsave
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
@@ -67,7 +67,7 @@ class StoppableTrainer:
         self.tracker = HistoryTracker()
         self.timer = Timer()
         if schedulers is None:
-            schedulers = {"lr": ExponentialLR(optimizer, 1)}
+            schedulers = {"lr": StepLR(optimizer, 1000, 1)}
         else:
             assert type(schedulers) == dict
         self.schedulers = schedulers
@@ -177,7 +177,7 @@ class StoppableTrainer:
                     # necessary to cast to a LongTensor before reducing.
                     incorrect += int(maxcl.ne(target_).long().sum())
                     stats['tr_loss'] += float(loss)
-                    print(f'{self.iterations:6d}, loss: {loss:.4f}')
+                    # print(f'{self.iterations:6d}, loss: {loss:.4f}')
                     self.tracker.update_timeline([self.timer.t_passed, float(loss), target_sum / numel])
 
                     # Preserve training batch and network output for later
@@ -187,7 +187,10 @@ class StoppableTrainer:
                     images['inp'] = inp.detach()
                     images['target'] = target.detach()
                     images['out'] = out.detach()
-
+                    misc['learning_rate'] = self.schedulers['lr'].get_lr()[-1]
+                    # update schedules
+                    for sched in self.schedulers.values():
+                        sched.step()
                     self.iterations += 1
                 stats['tr_err'] = 100. * incorrect / numel
                 stats['tr_loss'] /= len(self.loader)
@@ -197,11 +200,7 @@ class StoppableTrainer:
 
                 # --> self.step():
                 stats['val_loss'], stats['val_err'] = self.validate()
-                # TODO: Scheduler steps are currently tied to "epochs", whose size is user-defined.
-                #       This has the confusing effect that lr decay scales with epoch_size.
-                misc['learning_rate'] = self.schedulers['lr'].get_lr()[-1]
-                for sched in self.schedulers.values():
-                    sched.step()
+
                 if self.iterations // self.dataset.epoch_size > 1:
                     tr_loss_gain = self.tracker.history[-1][2] - stats['tr_loss']
                 else:
@@ -216,7 +215,7 @@ class StoppableTrainer:
                         stats['tr_err'])
                 text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
                     % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
-                text += "LR=%.5f, %.2f it/s, %.2f MVx/s, %s" \
+                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" \
                         % (misc['learning_rate'], misc['tr_speed'],
                            misc['tr_speed_vx'], t)
                 # TODO: Log voxels/s
