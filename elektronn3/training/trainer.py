@@ -136,6 +136,7 @@ class StoppableTrainer:
                 numel = 0
                 target_sum = 0
                 incorrect = 0
+                vx_size = 0
                 timer = Timer()
                 for batch in self.loader:
                     inp, target = batch
@@ -162,6 +163,7 @@ class StoppableTrainer:
                     # get training performance
                     numel += int(target_.numel())
                     target_sum += int(target_.sum())
+                    vx_size += int(np.prod(np.array(inp.size())))
                     maxcl = maxclass(out_)
                     # .ne() creates a ByteTensor, which leads to integer
                     # overflows when it is sum-reduced. Therefore it's
@@ -184,6 +186,7 @@ class StoppableTrainer:
                 stats['tr_loss'] /= len(self.loader)
                 mean_target = target_sum / numel
                 misc['tr_speed'] = len(self.loader) / timer.t_passed
+                misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MV
 
                 # --> self.step():
                 stats['val_loss'], stats['val_err'] = self.validate()
@@ -201,10 +204,14 @@ class StoppableTrainer:
                                             stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self.timer.t_passed)
                 loss_smooth = self.tracker.loss._ema
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.iterations, loss_smooth, stats['tr_loss'], stats['tr_err'])
+                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % \
+                       (self.iterations, loss_smooth, stats['tr_loss'],
+                        stats['tr_err'])
                 text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
                     % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
-                text += "LR=%.5f, %.2f it/s, %s" % (misc['learning_rate'], misc['tr_speed'], t)
+                text += "LR=%.5f, %.2f it/s, %.2f MVx/s, %s" \
+                        % (misc['learning_rate'], misc['tr_speed'],
+                           misc['tr_speed_vx'], t)
                 # TODO: Log voxels/s
                 logger.info(text)
                 if self.tb:
