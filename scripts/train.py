@@ -93,7 +93,7 @@ elif model_name == 'unet':
     model = UNet(
         n_blocks=4,
         start_filts=32,
-        planar_blocks=(0,),
+        planar_blocks=(1,),
         activation='relu',
         block_norm=True
     )
