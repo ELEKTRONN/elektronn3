@@ -266,7 +266,7 @@ class StoppableTrainer:
                 out = out.view(out.numel() // 2, 2)
                 target = target.view(target.numel())
                 numel += int(target.numel())
-                val_loss += float(self.criterion(out, target))  # TODO: Respect class weights
+                val_loss += float(self.criterion(out, target))  # TODO: Respect class weights # This is done already during initialization of criterion if class_weights were enabled in the training script!
                 maxcl = maxclass(out)  # get the index of the max log-probability
                 incorrect += int(maxcl.ne(target).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size

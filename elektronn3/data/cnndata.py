@@ -79,7 +79,7 @@ class PatchCreator(data.Dataset):
         self.offsets = np.array([0, 0, 0], dtype=np.int) #np.array(target_node.shape.offsets, dtype=np.int)
         self.target_ps = self.patch_shape - self.offsets * 2
         self.target_dtype = np.int64
-        self.mode = 'img-img'
+        self.mode = 'img-img'  # TODO: what would change for img-scalar? Is that even neccessary?
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
         self.c_input = None  # Number of input channels
@@ -125,7 +125,7 @@ class PatchCreator(data.Dataset):
             # and reading doesn't have to be done by each background worker process separately.
             _ = self.preview_batch
         if class_weights:
-            # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param.
+            # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param. # Not quite sure what you mean, this is done once only anyway
             target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight

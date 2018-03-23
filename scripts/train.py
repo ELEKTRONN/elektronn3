@@ -69,7 +69,7 @@ else:
     save_name = args.save_name  # TODO: Warn if directory already exists
 save_path = os.path.join(path_prefix, save_name)
 
-
+# potential candidates for CLI arguments
 nIters = int(500000)
 wd = 0.5e-4
 lr = 0.0004
@@ -170,6 +170,8 @@ if batch_size >= 4 and cuda_enabled:
     model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 if cuda_enabled:
     model = model.cuda()
+# TODO: make weight init a general parameter, e.g. add support for various existing weight initializations (https://github.com/pytorch/pytorch/blob/master/torch/nn/init.py#L211)
+# TODO: For biases it's probably okay to initially set them to 0
 if model_name == 'vnet':
     model.apply(weights_init)
 
