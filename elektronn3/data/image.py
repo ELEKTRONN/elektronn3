@@ -111,11 +111,19 @@ def create_prob_overlay_img(label_prob_dict, save_path, background=None,
     else:
         background = np.array(background, dtype=np.float)
 
+
+
     comp = imgs[0]
+
+    #normalizing the arrays
+    comp = normalise(comp)
+    background = normalise(background)
+
     for img in imgs[1:]:
         comp = alpha_composite(comp, img)
 
     comp = alpha_composite(comp, background)
+
 
     if save_path is not None:
         imsave(save_path, comp)
@@ -130,14 +138,12 @@ def alpha_composite(src, dst):
     Return the alpha composite of src and dst.
     Sven Dorkenwald
     Parameters:
-    src -- PIL RGBA Image object
-    dst -- PIL RGBA Image object
+    src -- 0 to 255 normalised image array
+    dst -- 0 to 255 normalised image array
 
     The algorithm comes from http://en.wikipedia.org/wiki/Alpha_compositing
     '''
-    # http://stackoverflow.com/a/3375291/190597
-    src = np.asarray(src)
-    dst = np.asarray(dst)
+
     out = np.empty(src.shape, dtype = 'float')
     alpha = np.index_exp[:, :, 3:]
     rgb = np.index_exp[:, :, :3]
@@ -149,7 +155,28 @@ def alpha_composite(src, dst):
     np.seterr(**old_setting)
     out[alpha] *= 255
     np.clip(out,0,255)
-    # astype('uint8') maps np.nan (and np.inf) to 0
     out = out.astype('uint8')
     out = Image.fromarray(out, 'RGBA')
     return out
+
+
+
+def normalise(src):
+    """
+    Normalizes the arrays from 0 to 255, uint8 for senseful png
+
+    Parameters
+    ----------
+    src: np_array to be normalized
+
+    Returns
+    -------
+    normalized src
+    """
+    #scaling to 0
+    src = src - np.min(src)
+
+    #normalising from 0 to 255
+    src = np.array(src * 255 / src.max(), dtype='uint8')
+
+    return src
