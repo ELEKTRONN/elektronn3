@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 # from https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/models/fcn.py
 # FCN32s
-
+#In every layer few steps have been commented because of Memory constraints (please uncomment them acc to the resources)
 
 class fcn32s(nn.Module):
 
@@ -14,51 +14,51 @@ class fcn32s(nn.Module):
         self.conv_block1 = nn.Sequential(
             nn.Conv3d(1, 64 // red_fac, 3, padding=100),
             nn.ReLU(inplace=True),
-            nn.Conv3d(64 // red_fac, 64 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(64 // red_fac, 64 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block2 = nn.Sequential(
             nn.Conv3d(64 // red_fac, 128 // red_fac, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(128 // red_fac, 128 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(128 // red_fac, 128 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block3 = nn.Sequential(
             nn.Conv3d(128 // red_fac, 256 // red_fac, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(256 // red_fac, 256 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(256 // red_fac, 256 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(256 // red_fac, 256 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(256 // red_fac, 256 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block4 = nn.Sequential(
             nn.Conv3d(256 // red_fac, 512 // red_fac, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block5 = nn.Sequential(
             nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(512 // red_fac, 512 // red_fac, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.classifier = nn.Sequential(
             nn.Conv3d(512 // red_fac, 4096 // red_fac, 7),
             nn.ReLU(inplace=True),
             nn.Dropout3d(),
-            nn.Conv3d(4096 // red_fac, 4096 // red_fac, 1),
-            nn.ReLU(inplace=True),
-            nn.Dropout3d(),
+            # nn.Conv3d(4096 // red_fac, 4096 // red_fac, 1),
+            # nn.ReLU(inplace=True),
+            # nn.Dropout3d(),
             nn.Conv3d(4096 // red_fac, self.n_classes, 1),)
 
         # TODO: Add support for learned upsampling
@@ -123,51 +123,51 @@ class fcn16s(nn.Module):
         self.conv_block1 = nn.Sequential(
             nn.Conv3d(1, 64, 3, padding=100),
             nn.ReLU(inplace=True),
-            nn.Conv3d(64, 64, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(64, 64, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block2 = nn.Sequential(
             nn.Conv3d(64, 128, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(128, 128, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(128, 128, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block3 = nn.Sequential(
             nn.Conv3d(128, 256, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(256, 256, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(256, 256, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(256, 256, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(256, 256, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block4 = nn.Sequential(
             nn.Conv3d(256, 512, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block5 = nn.Sequential(
             nn.Conv3d(512, 512, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.classifier = nn.Sequential(
             nn.Conv3d(512, 4096, 7),
             nn.ReLU(inplace=True),
             nn.Dropout3d(),
-            nn.Conv3d(4096, 4096, 1),
-            nn.ReLU(inplace=True),
-            nn.Dropout3d(),
+            # nn.Conv3d(4096, 4096, 1),
+            # nn.ReLU(inplace=True),
+            # nn.Dropout3d(),
             nn.Conv3d(4096, self.n_classes, 1),)
 
         self.score_pool4 = nn.Conv3d(512, self.n_classes, 1)
@@ -237,51 +237,51 @@ class fcn8s(nn.Module):
         self.conv_block1 = nn.Sequential(
             nn.Conv3d(1, 64, 3, padding=100),
             nn.ReLU(inplace=True),
-            nn.Conv3d(64, 64, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(64, 64, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block2 = nn.Sequential(
             nn.Conv3d(64, 128, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(128, 128, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(128, 128, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block3 = nn.Sequential(
             nn.Conv3d(128, 256, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(256, 256, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(256, 256, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(256, 256, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(256, 256, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block4 = nn.Sequential(
             nn.Conv3d(256, 512, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.conv_block5 = nn.Sequential(
             nn.Conv3d(512, 512, 3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(512, 512, 3, padding=1),
-            nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
+            # nn.Conv3d(512, 512, 3, padding=1),
+            # nn.ReLU(inplace=True),
             nn.MaxPool3d(2, stride=2, ceil_mode=True),)
 
         self.classifier = nn.Sequential(
             nn.Conv3d(512, 4096, 7),
             nn.ReLU(inplace=True),
             nn.Dropout3d(),
-            nn.Conv3d(4096, 4096, 1),
-            nn.ReLU(inplace=True),
-            nn.Dropout3d(),
+            # nn.Conv3d(4096, 4096, 1),
+            # nn.ReLU(inplace=True),
+            # nn.Dropout3d(),
             nn.Conv3d(4096, self.n_classes, 1),)
 
         self.score_pool4 = nn.Conv3d(512, self.n_classes, 1)
