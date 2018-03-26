@@ -79,7 +79,7 @@ lr_dec = 0.99
 batch_size = 1
 epoch_size = args.epoch_size
 
-if model_name == 'fcn32s':
+if model_name == 'fcn32s': # Reduce the patch size in case of memory constraints (to eg. (12, 48, 48))
     model = fcn32s(learned_billinear=False)
 elif model_name == 'vnet':
     model = VNet(relu=False)
