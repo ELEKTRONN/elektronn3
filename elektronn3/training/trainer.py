@@ -8,7 +8,9 @@
 import logging
 import os
 import traceback
+
 from os.path import normpath, basename
+from textwrap import dedent
 from typing import Tuple, Dict
 
 import IPython
@@ -56,6 +58,10 @@ class StoppableTrainer:
         self.criterion = criterion
         self.optimizer = optimizer
         self.dataset = dataset
+        self._shell_info = dedent("""
+            Entering IPython training shell. To continue, hit Ctrl-D twice.
+            To terminate, set self.terminate = True and then hit Ctrl-D twice.
+        """).strip()
         self.terminate = False
         self.iterations = 0
         self.first_plot = True
@@ -230,9 +236,9 @@ class StoppableTrainer:
                 if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
                     # preview_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
-            except KeyboardInterrupt as e:
-                IPython.embed()
-                if self.terminate:  # TODO: Somehow make this behavior more obvious
+            except KeyboardInterrupt:
+                IPython.embed(header=self._shell_info)
+                if self.terminate:
                     return
             except Exception as e:
                 traceback.print_exc()
@@ -243,8 +249,8 @@ class StoppableTrainer:
                 elif self.ipython_on_error:
                     print("\nEntering Command line such that Exception can be "
                           "further inspected by user.\n\n")
-                    IPython.embed()
-                    if self.terminate:  # TODO: Somehow make this behavior more obvious
+                    IPython.embed(header=self._shell_info)
+                    if self.terminate:
                         return
                 else:
                     raise e
