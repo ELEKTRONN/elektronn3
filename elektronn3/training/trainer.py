@@ -12,7 +12,7 @@ import traceback
 from os.path import normpath, basename
 from textwrap import dedent
 from typing import Tuple, Dict
-
+import inspect
 import IPython
 import numpy as np
 import torch
@@ -163,7 +163,7 @@ class StoppableTrainer:
                     out_ = out_.view(out_.numel() // 2, 2)
 
                     target_ = target.view(target.numel())
-                    loss = self.criterion(out_, target_)  # TODO: Respect class weights
+                    loss = self.criterion(out_, target_)  # TODO: Respect class weights # This is done already during initialization of criterion if class_weights were enabled in the training script!
                     if torch.isnan(loss):
                         logger.error('NaN loss detected! Check your hyperparams.')
                         raise NaNException
@@ -193,10 +193,16 @@ class StoppableTrainer:
                     images['inp'] = inp.detach()
                     images['target'] = target.detach()
                     images['out'] = out.detach()
-                    misc['learning_rate'] = self.schedulers['lr'].get_lr()[-1]
+                    # this was changed to support ReduceLROnPlateau which does not implement get_lr
+                    misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
                     # update schedules
                     for sched in self.schedulers.values():
-                        sched.step()
+                        # support ReduceLROnPlateau; doc. uses validation loss instead
+                        # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
+                        if "metrics" in inspect.signature(sched.step).parameters:
+                            sched.step(metrics=float(loss))
+                        else:
+                            sched.step()
                     self.iterations += 1
                 stats['tr_err'] = 100. * incorrect / numel
                 stats['tr_loss'] /= len(self.loader)

@@ -172,8 +172,6 @@ if cuda_enabled:
     model = model.cuda()
 # TODO: make weight init a general parameter, e.g. add support for various existing weight initializations (https://github.com/pytorch/pytorch/blob/master/torch/nn/init.py#L211)
 # TODO: For biases it's probably okay to initially set them to 0
-if model_name == 'vnet':
-    model.apply(weights_init)
 
 if opt == 'sgd':
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
@@ -187,6 +185,9 @@ else:
     raise NotImplementedError("Optimizer needs to be specified.")
 
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
+# Reduce LR after loss stagnates on plateau for 10 batches (patience=10)
+# lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10,
+#                                                 factor=0.5)
 
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 
