@@ -1,6 +1,6 @@
 # python>=3.6
+# torch==0.4.0a0+7b33ef4  # Manually install from source
 
-# torch>=0.3.0  # currently broken, see https://github.com/pytorch/pytorch/issues/566
 numpy
 scipy
 h5py
