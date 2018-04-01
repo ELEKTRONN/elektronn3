@@ -282,8 +282,11 @@ class UNet(nn.Module):
             choice of `merge_mode`.
         up_mode: Upsampling method in the decoder pathway.
             Choices:
-            - 'transpose': Use transposed convolution ("Upconvolution")
+            - 'transpose' (default): Use transposed convolution
+              ("Upconvolution")
             - 'upsample': Use nearest neighbour upsampling.
+            For a detailed empirical evaluation of this option (in 2D U-Net),
+            see https://ai.intel.com/biomedical-image-segmentation-u-net/
         merge_mode: How the features from the encoder pathway should
             be combined with the decoder features.
             Choices:

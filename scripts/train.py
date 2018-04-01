@@ -190,6 +190,7 @@ lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 #                                                 factor=0.5)
 
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
+# TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
 st = StoppableTrainer(model, criterion=criterion, optimizer=optimizer,
                       dataset=dataset, batchsize=batch_size, num_workers=2,
