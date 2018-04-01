@@ -80,7 +80,7 @@ class StoppableTrainer:
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False
             logger.warning('Tensorboard is not available, so it has to be disabled.')
-        self.tb = None  # TensorboardX SummaryWriter
+        self.tb = None  # Tensorboard handler
         if enable_tensorboard:
             # tb_dir = os.path.join(save_path, 'tb')
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
@@ -163,7 +163,7 @@ class StoppableTrainer:
                     out_ = out_.view(out_.numel() // 2, 2)
 
                     target_ = target.view(target.numel())
-                    loss = self.criterion(out_, target_)  # TODO: Respect class weights # This is done already during initialization of criterion if class_weights were enabled in the training script!
+                    loss = self.criterion(out_, target_)
                     if torch.isnan(loss):
                         logger.error('NaN loss detected! Check your hyperparams.')
                         raise NaNException

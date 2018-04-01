@@ -95,7 +95,7 @@ elif model_name == 'unet':
         start_filts=32,
         planar_blocks=(1,),
         activation='relu',
-        block_norm=True
+        batch_norm=True
     )
 else:
     raise ValueError('model not found.')
