@@ -1,3 +1,9 @@
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Philipp Schubert, Marius Killinger
+
 import torch.nn as nn
 import numpy as np
 import tqdm
@@ -15,6 +21,7 @@ class BaseModule(nn.Module):
         predict_dense(raw, self.__call__)
 
 
+# TODO: This needs some work
 def predict_dense(raw_img, pred_func, as_uint8=False, pad_raw=True,
                   offset=(0, 0, 0), strides=(1, 1, 1), n_lab=2, patch_size=(16, 128, 128)):
     # TODO: Infer offset, strides, n_lab, patch_shape from neural class. best: add functionality to BaseModule and
@@ -53,6 +60,7 @@ def predict_dense(raw_img, pred_func, as_uint8=False, pad_raw=True,
     #     return None
 
     if np.any(np.less(offset, 0)):
+        # TODO: This shouldn't apply to elektronn3 anymore.
         raise ValueError("Cannot predict dense because the CNN contains "
                          "UpConvs which cause unknown FOVs. If you use "
                          "UpConvs you should not need predict dense anyway!")

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ELEKTRONN3 - Neural Network Toolkit
 #
 # Copyright (c) 2017 - now

@@ -3,7 +3,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert
+# Authors: Marius Killinger, Martin Drawitsch, Philipp Schubert
 
 import logging
 import os

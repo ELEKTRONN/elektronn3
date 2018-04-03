@@ -3,7 +3,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
+# Authors: Marius Killinger, Philipp Schubert, Martin Drawitsch
 
 import signal
 import time

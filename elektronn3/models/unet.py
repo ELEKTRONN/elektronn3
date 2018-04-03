@@ -1,3 +1,9 @@
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Author: Martin Drawitsch
+
 """
 This is a modified version of the U-Net CNN architecture for biomedical
 image segmentation. U-Net was originally published in
@@ -23,8 +29,6 @@ Major differences of this version from Huang's code:
 - (Optional DEBUG mode for optional printing of debug information)
 - Extended documentation
 """
-
-# TODO: Find a reasonable default for planar_blocks
 
 __all__ = ['UNet']
 

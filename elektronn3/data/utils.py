@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ELEKTRONN3 - Neural Network Toolkit
 #
 # Copyright (c) 2017 - now
@@ -6,15 +5,10 @@
 # Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
 
 
-import gzip
 import logging
 import os
-import pickle as pkl
 import signal
-import sys
-import time
 import traceback
-from functools import wraps
 from typing import Sequence
 
 import h5py

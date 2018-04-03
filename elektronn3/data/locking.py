@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
-# ELEKTRONN2 Toolkit
-# Copyright (c) 2015 Marius Killinger
-# All rights reserved
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Author: Martin Drawitsch
 #
 # The following code is copied (with only marginal changes) from
 # https://github.com/ilastik/lazyflow/blob/f8b4658c9894fc1fd54f36dedcf5c0bf324fccc1/lazyflow/utility/fileLock.py
@@ -29,7 +30,7 @@
 # See the files LICENSE.lgpl2 and LICENSE.lgpl3 for full text of the
 # GNU Lesser General Public License version 2.1 and 3 respectively.
 # This information is also available on the ilastik web site at:
-#		   http://ilastik.org/license/
+# http://ilastik.org/license/
 ###############################################################################
 """
 Implementation of a simple cross-platform file locking mechanism.
