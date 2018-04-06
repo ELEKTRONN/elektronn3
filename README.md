@@ -1,13 +1,15 @@
 # elektronn3
 
-A PyTorch-based library that provides common functionality for 3D
-convolutional neural networks, like data loading/augmentation,
-training and model evaluation.
+A PyTorch-based library for research on
+convolutional neural networks for 3D semantic segmentation.
+Its focus is on HDF5 data loading/augmentation, training, monitoring
+and model evaluation.
 
 **It is currently in a very early stage of development** and will
 undergo major breaking changes in the next weeks, so we don't
 recommend using it yet if you are not already familiar with the code.
 
+For a roadmap of planned features, see the ["enhancement" issues on the tracker](https://github.com/ELEKTRONN/elektronn3/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement).
 
 # Requirements
 
@@ -37,16 +39,10 @@ in the expected path:
     wget https://github.com/ELEKTRONN/elektronn.github.io/releases/download/neuro_data_cdhw/neuro_data_cdhw.zip
     unzip neuro_data_cdhw.zip -d ~/neuro_data_cdhw
 
-To test training with an extremely small model and **elektronn3**,
+To test training with our custom U-Net-derived architecture in **elektronn3**,
 you can run:
 
-    python3 scripts/train.py simple
-
-You can replace `simple` by `n3d`, `vnet` or ``fcn32s`` to try other
-integrated network models.
-
-(Note: We will add support for supplying your own models in separate files
-soon.)
+    python3 train_unet_neurodata.py
 
 
 ## Training shell
