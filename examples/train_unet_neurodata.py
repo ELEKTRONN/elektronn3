@@ -13,6 +13,10 @@ import os
 import torch
 from torch import nn
 from torch import optim
+from elektronn3.data.data_erasing import check_data_erasing_config
+from elektronn3.data.data_erasing import ScheduledVariable
+from elektronn3.data.data_erasing import IncorrectLimits, IncorrectType
+
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -104,6 +108,22 @@ lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
+
+threshold = ScheduledVariable(value=0.1,
+                              max_value=0.5,
+                              interval=max_steps,
+                              steps_per_report=None)
+
+erasing_config = {"probability" : 0.75,
+                  "threshold": threshold,
+                  "lim_blob_depth": [5, 15],
+                  "lim_blob_width": [5, 15],
+                  "lim_blob_height": [5, 15],
+                  "lim_gauss_diffusion": [1, 6],
+                  "verbose": False,
+                  "save_path": "../../trash_bin/",
+                  "num_steps_save": 11}
+
 st = StoppableTrainer(
     model,
     criterion=criterion,
@@ -113,6 +133,20 @@ st = StoppableTrainer(
     num_workers=2,
     save_path=save_path,
     schedulers={"lr": lr_sched},
-    cuda_enabled=cuda_enabled
+    cuda_enabled=cuda_enabled,
+    data_erasing_config = erasing_config
 )
+
+iterator = st.loader.__iter__()
+test_batch, test_target = iterator.__next__()
+
+try:
+    check_data_erasing_config(test_batch.numpy()[0], **erasing_config)
+except (IncorrectLimits, IncorrectType, OSError) as internal_error:
+    print(internal_error)
+    raise Exception
+except Exception:
+    print("an expected error happened during data erasing config check")
+    raise Exception
+
 st.train(max_steps)
