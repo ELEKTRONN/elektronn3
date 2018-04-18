@@ -19,12 +19,14 @@ import torch
 from scipy.misc import imsave
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
+from copy import deepcopy
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.image import write_overlayimg
 from elektronn3.data.utils import save_to_h5
+from elektronn3.data.data_erasing import apply_data_erasing
 
 logger = logging.getLogger('elektronn3log')
 
@@ -46,7 +48,8 @@ class StoppableTrainer:
                  save_path=None, batchsize=1, num_workers=0,
                  schedulers=None,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
-                 cuda_enabled='auto', ignore_errors=False, ipython_on_error=True):
+                 cuda_enabled='auto', ignore_errors=False, ipython_on_error=True,
+                 data_erasing_config=None):
         if cuda_enabled == 'auto':
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
@@ -122,6 +125,8 @@ class StoppableTrainer:
             self.model.cuda()
             self.criterion.cuda()
 
+        self.data_erasing_config = data_erasing_config
+
     @property
     def save_name(self):
         return basename(normpath(self.save_path)) if self.save_path is not None else None
@@ -151,8 +156,18 @@ class StoppableTrainer:
                 incorrect = 0
                 vx_size = 0
                 timer = Timer()
+
                 for batch in self.loader:
                     inp, target = batch
+
+                    # copy raw data batch to another location
+                    # to avoid messing up samples within the data loader
+                    # WARNING: possible it slows down the performance
+                    # since the new raw data batch is not pinned
+                    inp = deepcopy(inp)
+
+                    apply_data_erasing(batch=inp.numpy()[0], **self.data_erasing_config)
+
                     if self.cuda_enabled:
                         inp, target = inp.cuda(), target.cuda()
 
