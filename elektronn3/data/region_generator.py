@@ -6,31 +6,28 @@
 
 import numpy as np
 
-class BlobGenerator:
+class RegionGenerator:
     """ A class instance generates blobs with arbitrary
-    spacial size and location within specified domain.
-    The domain size is usually the special size of the batch.
-    The user is responsible to pass correct parameters.
-
+    spatial size and location within the specified coordinate bounds.
+    The the size coordinate bounds is usually the spatial size of
+    the input sample.
     """
-    def __init__(self, domain, lim_depth, lim_width, lim_height):
+    def __init__(self, coord_bounds, lim_depth, lim_width, lim_height):
         """
-        The construcure initializes all necessary class attributes
-        and prepare an instance to generate blobs
         Parameters
         ----------
-        domain - numpy array of integers
+        coord_bounds - np.ndarray of int
             with the format: [ depth, width, height ]
-        lim_depth - numpy array of integers
+        lim_depth - np.ndarray of int
             with the format: [min_depth, max_depth]
-        lim_width - numpy array of integers
+        lim_width - np.ndarray of int
             with the format: [min_width, max_width]
         lim_height - numpy array of integers
             with the format: [min_height, max_height]
         """
-        self.domain_depth = domain[0]
-        self.domain_width = domain[1]
-        self.domain_height = domain[2]
+        self.sample_depth = coord_bounds[0]
+        self.sample_width = coord_bounds[1]
+        self.sample_height = coord_bounds[2]
 
         self.depth_min = lim_depth[0]
         self.depth_max = lim_depth[1]
@@ -41,9 +38,8 @@ class BlobGenerator:
         self.height_min = lim_height[0]
         self.height_max = lim_height[1]
 
-    def create_blob(self):
-        """
-        The function generates a blob with arbitrary spacial size
+    def create_region(self):
+        """ Generates a blob with arbitrary spatial size
         and location according to the parameters passed by the user
         to the constructor
         Returns
@@ -52,28 +48,22 @@ class BlobGenerator:
         """
 
         depth = np.random.randint(low=self.depth_min,
-                                  high=self.depth_max,
-                                  dtype=np.uint32)
+                                  high=self.depth_max)
 
         width = np.random.randint(low=self.width_min,
-                                  high=self.width_max,
-                                  dtype=np.uint32)
+                                  high=self.width_max)
 
         height = np.random.randint(low=self.height_min,
-                                   high=self.height_max,
-                                   dtype=np.uint32)
+                                   high=self.height_max)
 
         z_min = np.random.randint(low=0,
-                                  high=self.domain_depth - depth,
-                                  dtype=np.uint32)
+                                  high=self.sample_depth - depth)
 
         x_min = np.random.randint(low=0,
-                                  high=self.domain_width - width,
-                                  dtype=np.uint32)
+                                  high=self.sample_width - width)
 
         y_min = np.random.randint(low=0,
-                                  high=self.domain_height - height,
-                                  dtype=np.uint32)
+                                  high=self.sample_height - height)
 
         z_max = z_min + depth
 
@@ -81,18 +71,15 @@ class BlobGenerator:
 
         y_max = y_min + height
 
-        return Blob(z_min, z_max, x_min, x_max, y_min, y_max)
+        return Region(z_min, z_max, x_min, x_max, y_min, y_max)
 
 
-class Blob:
-    """
-    The class is a container that holds spacial coordinates
+class Region:
+    """ Is a container that holds spatial coordinates
     of the blob
     """
     def __init__(self, z_min, z_max, x_min, x_max, y_min, y_max):
         """
-        The constructor initializes the attributes and
-        computes the depth, width and height of a blob instance
         Parameters
         ----------
         z_min - int
