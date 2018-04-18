@@ -13,6 +13,8 @@ import os
 import torch
 from torch import nn
 from torch import optim
+from elektronn3.data.random_blurring import ScheduledParameter
+
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -69,6 +71,22 @@ else:
     save_name = args.save_name  # TODO: Warn if directory already exists
 save_path = os.path.join(path_prefix, save_name)
 
+
+threshold = ScheduledParameter(value=0.1,
+                               max_value=0.5,
+                               growth_type="lin",
+                               interval=max_steps,
+                               steps_per_report=1000)
+
+
+random_blurring_config = {"probability" : 0.5,
+                          "threshold": threshold,
+                          "lower_lim_region_size": [3, 6, 6],
+                          "upper_lim_region_size": [8, 16, 16],
+                          "verbose": False,
+                          "save_path": save_path,
+                          "num_steps_save": 1000}
+
 data_init_kwargs = {
     'input_path': data_path,
     'target_path': data_path,
@@ -82,6 +100,7 @@ data_init_kwargs = {
     'preview_shape': (64, 144, 144),
     'valid_cube_indices': [2],
     'grey_augment_channels': [],
+    'random_blurring_config': random_blurring_config,
     'epoch_size': args.epoch_size,
     'warp': 0.5,
     'class_weights': True,
@@ -115,4 +134,5 @@ st = StoppableTrainer(
     schedulers={"lr": lr_sched},
     cuda_enabled=cuda_enabled
 )
+
 st.train(max_steps)
