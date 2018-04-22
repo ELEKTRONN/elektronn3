@@ -26,7 +26,7 @@ from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.image import write_overlayimg
 from elektronn3.data.utils import save_to_h5
-from elektronn3.data.data_erasing import apply_data_erasing
+from elektronn3.data.data_erasing import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 
@@ -48,8 +48,7 @@ class StoppableTrainer:
                  save_path=None, batchsize=1, num_workers=0,
                  schedulers=None,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
-                 cuda_enabled='auto', ignore_errors=False, ipython_on_error=True,
-                 data_erasing_config=None):
+                 cuda_enabled='auto', ignore_errors=False, ipython_on_error=True):
         if cuda_enabled == 'auto':
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
@@ -125,7 +124,6 @@ class StoppableTrainer:
             self.model.cuda()
             self.criterion.cuda()
 
-        self.data_erasing_config = data_erasing_config
 
     @property
     def save_name(self):
@@ -160,13 +158,11 @@ class StoppableTrainer:
                 for batch in self.loader:
                     inp, target = batch
 
-                    # copy raw data batch to another location
-                    # to avoid messing up samples within the data loader
-                    # WARNING: possible it slows down the performance
-                    # since the new raw data batch is not pinned
-                    inp = deepcopy(inp)
-
-                    apply_data_erasing(batch=inp.numpy()[0], **self.data_erasing_config)
+                    # TODO: move data augmentation from the training process
+                    if self.dataset.random_blurring_config:
+                        inp = inp.clone()
+                        apply_random_blurring(inp_sample=inp.numpy()[0],
+                                              **self.dataset.random_blurring_config)
 
                     if self.cuda_enabled:
                         inp, target = inp.cuda(), target.cuda()

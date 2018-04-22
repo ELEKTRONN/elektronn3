@@ -6,106 +6,75 @@
 
 import numpy as np
 
-class RegionGenerator:
-    """ A class instance generates blobs with arbitrary
-    spatial size and location within the specified coordinate bounds.
-    The the size coordinate bounds is usually the spatial size of
-    the input sample.
+
+class Region:
+    """ Is a container that holds spatial coordinates
+    of the region
     """
-    def __init__(self, coord_bounds, lim_depth, lim_width, lim_height):
+    def __init__(self,
+                 coords_lo: list,
+                 coords_hi: list,
+                 size: list = None):
         """
         Parameters
         ----------
-        coord_bounds - np.ndarray of int
-            with the format: [ depth, width, height ]
-        lim_depth - np.ndarray of int
-            with the format: [min_depth, max_depth]
-        lim_width - np.ndarray of int
-            with the format: [min_width, max_width]
-        lim_height - numpy array of integers
-            with the format: [min_height, max_height]
+        coords_lo - the lowest region coordinates along each axis
+        coords_hi - the highest region coordinates along each axis
+        size - spatial sizes of the region along each axis
         """
-        self.sample_depth = coord_bounds[0]
-        self.sample_width = coord_bounds[1]
-        self.sample_height = coord_bounds[2]
 
-        self.depth_min = lim_depth[0]
-        self.depth_max = lim_depth[1]
+        self.coords_lo = coords_lo
+        self.coords_hi = coords_hi
 
-        self.width_min = lim_width[0]
-        self.width_max = lim_width[1]
+        if size:
+            self.size = size
+        else:
+            self.size = [high - low for high, low in zip(coords_hi, coords_lo)]
 
-        self.height_min = lim_height[0]
-        self.height_max = lim_height[1]
 
-    def create_region(self):
-        """ Generates a blob with arbitrary spatial size
+class RegionGenerator:
+    """ A class instance generates regions with arbitrary
+    spatial size and location within the specified coordinate bounds.
+    The coordinate bounds are usually the spatial size of
+    the input sample.
+    """
+    def __init__(self,
+                 coord_bounds: list,
+                 lower_lim_region_size: list,
+                 upper_lim_region_size: list):
+        """
+        Parameters
+        ----------
+        coord_bounds - coordinate bounds of a sample
+            with the format: [depth, width, height]
+        lower_lim_region_size - region minimal size along each axis
+            with the format: [min_depth, min_width, min_height]
+        upper_lim_region_size - region maximal size along each axis
+            with the format: [max_depth, max_width, max_height]
+        """
+
+        self.sample_size = coord_bounds
+        self.coords_lo_lim = lower_lim_region_size
+        self.coords_hi_lim = upper_lim_region_size
+        self.dim = len(self.sample_size)
+
+    def create_region(self) -> Region:
+        """ Generates a region with arbitrary spatial size
         and location according to the parameters passed by the user
         to the constructor
         Returns
         -------
-        Blob - instance of Blob class
+        instance of the Region class
         """
 
-        depth = np.random.randint(low=self.depth_min,
-                                  high=self.depth_max)
+        size = [np.random.randint(low=self.coords_lo_lim[i],
+                                  high=self.coords_hi_lim[i])
+                for i in range(self.dim)]
 
-        width = np.random.randint(low=self.width_min,
-                                  high=self.width_max)
+        coords_lo = [np.random.randint(low=0,
+                                       high=self.sample_size[i] - size[i])
+                     for i in range(self.dim)]
 
-        height = np.random.randint(low=self.height_min,
-                                   high=self.height_max)
+        coords_hi = [coords_lo[i] + size[i] for i in range(self.dim)]
 
-        z_min = np.random.randint(low=0,
-                                  high=self.sample_depth - depth)
-
-        x_min = np.random.randint(low=0,
-                                  high=self.sample_width - width)
-
-        y_min = np.random.randint(low=0,
-                                  high=self.sample_height - height)
-
-        z_max = z_min + depth
-
-        x_max = x_min + width
-
-        y_max = y_min + height
-
-        return Region(z_min, z_max, x_min, x_max, y_min, y_max)
-
-
-class Region:
-    """ Is a container that holds spatial coordinates
-    of the blob
-    """
-    def __init__(self, z_min, z_max, x_min, x_max, y_min, y_max):
-        """
-        Parameters
-        ----------
-        z_min - int
-        z_max - int
-        x_min - int
-        x_max - int
-        y_min - int
-        y_max - int
-        """
-        self.z_min = z_min
-        self.z_max = z_max
-
-        self.x_min = x_min
-        self.x_max = x_max
-
-        self.y_min = y_min
-        self.y_max = y_max
-
-        self.depth = z_max - z_min
-        self.width = x_max - x_min
-        self.height = y_max - y_min
-
-    def __str__(self):
-        return "z_min = %i; z_max = %i; x_min = %i;" \
-               "x_max = %i; y_min = %i; y_max = %i; " \
-               "depth = %i; width = %i; height = %i" \
-               % (self.z_min, self.z_max,self.x_min,
-                  self.x_max, self.y_min, self.y_max,
-                  self.depth, self.width, self.height)
+        return Region(coords_lo, coords_hi, size)

@@ -21,6 +21,7 @@ from torch.utils import data
 
 from elektronn3.data import transformations
 from elektronn3.data.utils import slice_h5
+from elektronn3.data.data_erasing import check_random_data_blurring_config
 
 logger = logging.getLogger('elektronn3log')
 
@@ -33,7 +34,8 @@ class PatchCreator(data.Dataset):
                  source='train', patch_shape=None, preview_shape=None,
                  grey_augment_channels=None, warp=False, warp_args=None,
                  ignore_thresh=False, force_dense=False, class_weights=False,
-                 epoch_size=100, eager_init=True, cuda_enabled='auto'):
+                 epoch_size=100, eager_init=True, cuda_enabled='auto',
+                 random_blurring_config=None):
         assert (input_path and target_path and input_h5data and target_h5data)
         if len(input_h5data)!=len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
@@ -134,6 +136,11 @@ class PatchCreator(data.Dataset):
                 self.class_weights = self.class_weights.cuda()
         else:
             self.class_weights = None
+
+        self.random_blurring_config = random_blurring_config
+        if self.random_blurring_config:
+            check_random_data_blurring_config(patch_shape,
+                                              **self.random_blurring_config)
 
     def __getitem__(self, index):
         # use index just as counter, subvolumes will be chosen randomly
