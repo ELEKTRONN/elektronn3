@@ -21,9 +21,10 @@ def write_overlayimg(dest_path, raw, pred, fname, nb_of_slices, thresh=0.1):
     if nb_of_slices is not None:
         ixs = ixs[:nb_of_slices]
     for i in ixs:
-        create_label_overlay_img(pred[i], dest_path + "/%s_%d.png" % (fname, i),
+        comp = create_label_overlay_img(pred[i], dest_path + "/%s_%d.png" % (fname, i),
                                  background=raw[i] * 255,
                                  save_raw_img=False)
+    return comp
 
 
 def create_label_overlay_img(labels, save_path, background=None, cvals=None,
@@ -53,9 +54,10 @@ def create_label_overlay_img(labels, save_path, background=None, cvals=None,
     if len(label_prob_dict) == 0:
         print("No labels detected! No overlay image created")
     else:
-        create_prob_overlay_img(label_prob_dict, save_path,
+        comp = create_prob_overlay_img(label_prob_dict, save_path,
                                 background=background, cvals=cvals,
                                 save_raw_img=save_raw_img)
+        return comp
 
 
 def create_prob_overlay_img(label_prob_dict, save_path, background=None,
@@ -130,6 +132,8 @@ def create_prob_overlay_img(label_prob_dict, save_path, background=None,
     if save_raw_img and background is not None:
         raw_save_path = "".join(save_path.split(".")[:-1]) + "_raw." + save_path.split(".")[-1]
         imsave(raw_save_path, background)
+
+    return comp
 
 
 def alpha_composite(src, dst):

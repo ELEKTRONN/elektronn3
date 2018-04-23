@@ -211,7 +211,7 @@ class StoppableTrainer:
                 misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
 
                 # --> self.step():
-                stats['val_loss'], stats['val_err'] = self.validate()
+                stats['val_loss'], stats['val_err'] = self.validate(images)
 
                 if self.iterations // self.dataset.epoch_size > 1:
                     tr_loss_gain = self.tracker.history[-1][2] - stats['tr_loss']
@@ -262,7 +262,7 @@ class StoppableTrainer:
                     raise e
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 
-    def validate(self) -> Tuple[float, float]:
+    def validate(self, images) -> Tuple[float, float]:
         self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
@@ -284,7 +284,7 @@ class StoppableTrainer:
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
         if self.save_path is not None:
-            write_overlayimg(
+            comp = write_overlayimg(
                 "%s/" % (self.save_path),
                 inp.view(inp.size())[0, 0].cpu().numpy(),
                 maxcl.view(inp.size())[0, 0].cpu().numpy(),
@@ -295,6 +295,8 @@ class StoppableTrainer:
                 "%s/%d_target.png" % (self.save_path, self.iterations),
                 target.view(inp.size())[0, 0, 8].cpu().numpy()
             )
+            images['overlay'] = np.array(comp)
+
 
         # Reset dataset and model to training mode
         self.dataset.train()
@@ -351,6 +353,11 @@ class StoppableTrainer:
 
         self.tb.log_image(f'{group}/inp', inp, step=self.iterations)
         self.tb.log_image(f'{group}/target', target, step=self.iterations)
+
+        if 'overlay' in images:
+            overlay = images['overlay']
+            self.tb.log_image(f'{group}/overlay', overlay, step=self.iterations)
+
         for c in range(out.shape[1]):
             c_out = out[0, c, z_plane, ...].cpu().numpy()
             self.tb.log_image(f'{group}/c{c}', c_out, step=self.iterations)
