@@ -16,15 +16,14 @@ import inspect
 import IPython
 import numpy as np
 import torch
-from scipy.misc import imsave
+from skimage.color import label2rgb
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
-from elektronn3.data.image import write_overlayimg
-from elektronn3.data.utils import save_to_h5
+from elektronn3.data.utils import save_to_h5, squash01
 
 logger = logging.getLogger('elektronn3log')
 
@@ -44,7 +43,7 @@ class NaNException(RuntimeError):
 class StoppableTrainer:
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
                  save_path=None, batchsize=1, num_workers=0,
-                 schedulers=None,
+                 schedulers=None, overlay_alpha=0.2,
                  enable_tensorboard=True, tensorboard_root_path='~/tb/',
                  cuda_enabled='auto', ignore_errors=False, ipython_on_error=True):
         if cuda_enabled == 'auto':
@@ -58,6 +57,7 @@ class StoppableTrainer:
         self.criterion = criterion
         self.optimizer = optimizer
         self.dataset = dataset
+        self.overlay_alpha = overlay_alpha
         self._shell_info = dedent("""
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
@@ -211,7 +211,7 @@ class StoppableTrainer:
                 misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
 
                 # --> self.step():
-                stats['val_loss'], stats['val_err'] = self.validate(images)
+                stats['val_loss'], stats['val_err'] = self.validate()
 
                 if self.iterations // self.dataset.epoch_size > 1:
                     tr_loss_gain = self.tracker.history[-1][2] - stats['tr_loss']
@@ -235,7 +235,7 @@ class StoppableTrainer:
                 if self.tb:
                     self.tb_log_scalars(stats, misc)
                     self.tb_log_preview()
-                    self.tb_log_training_images(images)
+                    self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
                 if self.save_path is not None:
                     self.tracker.plot(self.save_path + "/" + self.save_name)
@@ -262,7 +262,7 @@ class StoppableTrainer:
                     raise e
         torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
 
-    def validate(self, images) -> Tuple[float, float]:
+    def validate(self) -> Tuple[float, float]:
         self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
@@ -274,28 +274,21 @@ class StoppableTrainer:
                 inp, target = inp.cuda(), target.cuda()
             with torch.no_grad():
                 out = self.model(inp)
-                out = out.permute(0, 2, 3, 4, 1).contiguous()
-                out = out.view(out.numel() // 2, 2)
-                target = target.view(target.numel())
-                numel += int(target.numel())
-                val_loss += float(self.criterion(out, target))  # TODO: Respect class weights # This is done already during initialization of criterion if class_weights were enabled in the training script!
-                maxcl = maxclass(out)  # get the index of the max log-probability
-                incorrect += int(maxcl.ne(target).long().sum())
+                out_ = out.permute(0, 2, 3, 4, 1).contiguous()
+                out_ = out_.view(out_.numel() // 2, 2)
+                target_ = target.view(target.numel())
+                numel += int(target_.numel())
+                val_loss += float(self.criterion(out_, target_))
+                maxcl = maxclass(out_)  # get the index of the max log-probability
+                incorrect += int(maxcl.ne(target_).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
-        if self.save_path is not None:
-            comp = write_overlayimg(
-                "%s/" % (self.save_path),
-                inp.view(inp.size())[0, 0].cpu().numpy(),
-                maxcl.view(inp.size())[0, 0].cpu().numpy(),
-                fname="%d_overlay" % self.iterations,
-                nb_of_slices=2
-            )
-            imsave(
-                "%s/%d_target.png" % (self.save_path, self.iterations),
-                target.view(inp.size())[0, 0, 8].cpu().numpy()
-            )
-            images['overlay'] = np.array(comp)
+        # TODO: Plot some validation images (inp, pred, target, overlay)
+        #       See tb_log_sample_images
+        self.tb_log_sample_images(
+            {'inp': inp, 'out': out, 'target': target},
+            group='val_samples'
+        )
 
 
         # Reset dataset and model to training mode
@@ -337,8 +330,15 @@ class StoppableTrainer:
             self.tb.log_image(f'{group}/target', target, step=0)
             self.first_plot = False
 
-    def tb_log_training_images(self, images, z_plane=None, group='training_samples'):
-        """Preview from last training sample (random region, possibly augmented)."""
+    def tb_log_sample_images(self, images, z_plane=None, group='sample'):
+        """Preview from last training/validation sample
+
+        Since the images are chosen randomly from the training/validation set
+        they come from random regions in the data set.
+
+        Note: Training images are possibly augmented, so the plots may look
+            distorted/weirdly colored.
+        """
 
         out = images['out']
 
@@ -354,17 +354,23 @@ class StoppableTrainer:
         self.tb.log_image(f'{group}/inp', inp, step=self.iterations)
         self.tb.log_image(f'{group}/target', target, step=self.iterations)
 
-        if 'overlay' in images:
-            overlay = images['overlay']
-            self.tb.log_image(f'{group}/overlay', overlay, step=self.iterations)
-
         for c in range(out.shape[1]):
             c_out = out[0, c, z_plane, ...].cpu().numpy()
             self.tb.log_image(f'{group}/c{c}', c_out, step=self.iterations)
         self.tb.log_image(f'{group}/pred', pred, step=self.iterations)
 
+        inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
+        target_ov = label2rgb(target, inp01, bg_label=0, alpha=self.overlay_alpha)
+        pred_ov = label2rgb(pred, inp01, bg_label=0, alpha=self.overlay_alpha)
+        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.iterations)
+        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.iterations)
+        # TODO: When plotting overlay images, they appear darker than they should.
+        #       This normalization issue gets worse with higher alpha values
+        #       (i.e. with more contribution of the overlayed label map).
+        #       Don't know how to fix this currently.
 
 # TODO: Move all the functions below out of trainer.py
+
 
 def maxclass(class_predictions: Variable):
     """For each point in a tensor, determine the class with max. probability.

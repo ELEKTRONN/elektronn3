@@ -5,6 +5,11 @@
 # Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
 
 
+# TODO: Most or all of this module can probably be removed after careful
+#       review. If some of it is indeed useful, it needs to be rewritten.
+#       Basic overlay images can instead be generated with
+#       skimage.color.label2rgb()
+
 import numpy as np
 from PIL import Image
 from scipy.misc import imsave
@@ -161,7 +166,6 @@ def alpha_composite(src, dst):
     out = out.astype('uint8')
     out = Image.fromarray(out, 'RGBA')
     return out
-
 
 
 def normalise(src):

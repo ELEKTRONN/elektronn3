@@ -137,6 +137,17 @@ def as_floatX(x):
     return np.ascontiguousarray(x, dtype=floatX)
 
 
+def squash01(img: np.ndarray) -> np.ndarray:
+    """Squash image array to the value range [0, 1] (no clipping).
+
+    This can be used to prepare network outputs or normalized inputs
+    for plotting and generic image processing functions.
+    """
+    img = img.astype(np.float32)
+    squashed = (img - np.min(img)) / np.ptp(img)
+    return squashed
+
+
 # https://gist.github.com/tcwalther/ae058c64d5d9078a9f333913718bba95
 # class based on: http://stackoverflow.com/a/21919644/487556
 class DelayedInterrupt:
