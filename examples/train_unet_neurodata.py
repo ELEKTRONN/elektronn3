@@ -48,7 +48,7 @@ lr_dec = 0.995
 batch_size = 1
 
 model = UNet(
-    n_blocks=4,
+    n_blocks=3,
     start_filts=32,
     planar_blocks=(1,),
     activation='relu',
