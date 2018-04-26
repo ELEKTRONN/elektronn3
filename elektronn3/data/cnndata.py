@@ -195,9 +195,20 @@ class PatchCreator(data.Dataset):
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
-        # Final modification of targets: striding and replacing nan
         if not (self.force_dense or np.all(self.strides == 1)):
             target = self._stridedtargets(target)
+
+        # target is now of shape (K, D, H, W), where K is the number of
+        #  target channels (not to be confused with the number of classes
+        #  for the classification problem, C. Since there is no support for
+        #  K > 1, the K dimension will be removed. See help(torch.nn.NLLLoss).
+        #  (What kind of data set would require K > 1? Partial support for it
+        #   exists in warp_slice() (see n_f_t), so I am not sure if it
+        #   can just be completely be removed...)
+        target = target.squeeze(0)  # (K, (D,) H, W) -> ((D,) H, W)
+        # TODO: Don't even create this dimension in the first place?
+        # TODO: Make this more robust. Ensure everything works if the supplied
+        #       data set has no K dimension in target arrays.
 
         return inp, target
 
@@ -300,6 +311,12 @@ class PatchCreator(data.Dataset):
         if self.cuda_enabled:
             inp = inp.cuda()
             target = target.cuda()
+
+        # See comments at the end of PatchCreator.__getitem__()
+        # Note that here it's the dimension index 1 that we're squeezing,
+        #  because index 0 is the batch dimension.
+        target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, D, H, W)
+
         return inp, target
 
     # In this implementation the preview batch is always kept in GPU memory.
@@ -421,7 +438,7 @@ class PatchCreator(data.Dataset):
         return inp_source, target_source
 
     def _stridedtargets(self, target):
-        return target[:, :, ::self.strides[0], ::self.strides[1], ::self.strides[2]]
+        return target[::self.strides[0], ::self.strides[1], ::self.strides[2]]
 
     def load_data(self):
         inp_files, target_files = self.open_files()

@@ -158,12 +158,7 @@ class StoppableTrainer:
 
                     # forward pass
                     out = self.model(inp)
-                    # make channels the last axis and flatten
-                    out_ = out.permute(0, 2, 3, 4, 1).contiguous()
-                    out_ = out_.view(out_.numel() // 2, 2)
-
-                    target_ = target.view(target.numel())
-                    loss = self.criterion(out_, target_)
+                    loss = self.criterion(out, target)
                     if torch.isnan(loss):
                         logger.error('NaN loss detected! Check your hyperparams.')
                         raise NaNException
@@ -174,14 +169,14 @@ class StoppableTrainer:
                     self.optimizer.step()
 
                     # get training performance
-                    numel += int(target_.numel())
-                    target_sum += int(target_.sum())
+                    numel += int(target.numel())
+                    target_sum += int(target.sum())
                     vx_size += inp.numel()
-                    maxcl = maxclass(out_)
+                    maxcl = maxclass(out)
                     # .ne() creates a ByteTensor, which leads to integer
                     # overflows when it is sum-reduced. Therefore it's
                     # necessary to cast to a LongTensor before reducing.
-                    incorrect += int(maxcl.ne(target_).long().sum())
+                    incorrect += int(maxcl.ne(target).long().sum())
                     stats['tr_loss'] += float(loss)
                     print(f'{self.iterations:6d}, loss: {loss:.4f}', end='\r')
                     self.tracker.update_timeline([self.timer.t_passed, float(loss), target_sum / numel])
@@ -274,13 +269,10 @@ class StoppableTrainer:
                 inp, target = inp.cuda(), target.cuda()
             with torch.no_grad():
                 out = self.model(inp)
-                out_ = out.permute(0, 2, 3, 4, 1).contiguous()
-                out_ = out_.view(out_.numel() // 2, 2)
-                target_ = target.view(target.numel())
-                numel += int(target_.numel())
-                val_loss += float(self.criterion(out_, target_))
-                maxcl = maxclass(out_)  # get the index of the max log-probability
-                incorrect += int(maxcl.ne(target_).long().sum())
+                numel += int(target.numel())
+                val_loss += float(self.criterion(out, target))
+                maxcl = maxclass(out)  # get the index of the max log-probability
+                incorrect += int(maxcl.ne(target).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
         # TODO: Plot some validation images (inp, pred, target, overlay)
@@ -324,7 +316,7 @@ class StoppableTrainer:
         if self.first_plot:
             preview_inp, preview_target = self.dataset.preview_batch
             inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
-            target = preview_target[0, 0, z_plane, ...].cpu().numpy()
+            target = preview_target[0, z_plane, ...].cpu().numpy()
             self.tb.log_image(f'{group}/inp', inp, step=0)
             # Ground truth target for direct comparison with preview prediction
             self.tb.log_image(f'{group}/target', target, step=0)
@@ -347,7 +339,7 @@ class StoppableTrainer:
         assert z_plane in range(out.shape[2])
 
         inp = images['inp'][0, 0, z_plane, ...].cpu().numpy()
-        target = images['target'][0, 0, z_plane].cpu().numpy()
+        target = images['target'][0, z_plane].cpu().numpy()
         mcl = maxclass(out)
         pred = mcl[0, z_plane, ...].cpu().numpy()
 
