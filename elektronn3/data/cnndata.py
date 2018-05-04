@@ -26,6 +26,113 @@ logger = logging.getLogger('elektronn3log')
 
 
 class PatchCreator(data.Dataset):
+    """Dataset iterator class that creates 3D image patches from HDF5 files.
+
+    It implements the PyTorch ``Dataset`` interface and is meant to be used
+    with a PyTorch ``DataLoader`` (or the modified
+    :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader``, if it is
+    used with :py:class:`elektronn3.training.trainer.StoppableTrainer``).
+
+    The main idea of this class is to automate input and target patch creation
+    for training convnets for semantic image segmentation. Patches are sliced
+    from random locations in the supplied HDF5 files (``input_h5data``,
+    ``target_h5data``).
+    Optionally, the source coordinates from which patches
+    are sliced are obtained by random warping with affine or perspective
+    transformations for efficient augmentation and avoiding border artifacts
+    (see ``warp``, ``warp_args``).
+    Note that whereas other warping-based image augmentation systems usually
+    warp images themselves, elektronn3 performs warping transformations on
+    the **coordinates** from which image patches are sliced and obtains voxel
+    values by interpolating between actual image voxels at the warped source
+    locations (which are not confined to the original image's discrete
+    coordinate grid).
+    (TODO: A visualization would be very helpful here to make this more clear)
+    For more information about this warping mechanism see
+    :py:meth:`elektronn3.data.cnndata.warp_slice()`.
+
+    Currently, only 3-dimensional image data sets are supported, but 2D
+    support is also planned.
+
+    Args:
+        input_path: Path to the folder containing input files.
+        target_path: Path to the folder containing target files.
+        input_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
+            each item specifies the filename relative to input_path and
+            the HDF5 dataset key under which the input data is stored.
+        target_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
+            each item specifies the filename relative to target_path and
+            the HDF5 dataset key under which the target data is stored.
+        cube_prios: List of per-cube priorities, where a higher priority
+            means that it is more likely that a sample comes from this cube.
+        valid_cube_indices:
+        border_mode: (To be removed)
+        aniso_factor: Depth-anisotropy factor of the data set. E.g.
+            if your data set has half resolution in the depth dimension,
+            set ``aniso_factor=2``. If all dimensions have the same
+            resolution, set ``aniso_factor=1``.
+        target_vec_ix:
+        target_discrete_ix:
+        mean: Mean of input data (if not set, it is automatically
+            estimated on the training data during initialization).
+        std: Standard deviation of input data (if not set, it is automatically
+            estimated on the training data during initialization).
+        normalize: If ``True``, input data is normalized to approx. zero mean
+            and unit standard deviation ("std"). If ``mean`` and/or ``std``
+            are not supplied, they are automatically estimated on the training
+            data on initialization.
+        source: Determines if samples should come from training or validation
+            data.
+            If ``source='train'``, training data is returned.
+            If ``source='valid'``, validation data is returned.
+        patch_shape: Desired spatial shape of the samples that the iterator
+            delivers by slicing from the data set files.
+            Since this determines the size of input samples that are fed
+            into the neural network, this is a very important value to tune.
+            Making it too large can result in slow training and excessive
+            memory consumption, but if it is too small, it can hinder the
+            perceptive ability of the neural network because the samples it
+            "sees" get too small to extract meaningful features.
+            Adequate values for ``patch_shape`` are highly dependent on the
+            data set ("How large are typical ROIs? How large does an image
+            patch need to be so you can understand the input?") and also
+            depend on the neural network architecture to be used (If the
+            effective receptive field of the network is small, larger patch
+            sizes won't help much).
+        preview_shape: Desired spatial shape of the dedicated preview batch.
+            The preview batch is obtained by slicing a patch of this
+            shape out of the center of the preview cube.
+        grey_augment_channels: Determines on which of the training input
+            channels gray value augmentations should be applied on.
+            E.g. ``grey_augment_channels=[0]`` means that only channel 0
+            should be grey-augmented. Only specify channels which contain
+            gray values.
+            (Currently ignored, because gray value augm. are broken)
+        warp: ratio of training samples that should be obtained using
+            geometric warping augmentations.
+        warp_args: kwargs that are passed through to
+            :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
+            See the docs of this function for information on kwargs options.
+            Can be empty.
+        ignore_thresh: (To be removed)
+        force_dense: (To be removed)
+        class_weights: If ``True``, target class weights (for the loss
+            function) are calculated on the available training targets
+            when the class is instantiated.
+        epoch_size: Determines the length (``__len__``) of the ``Dataset``
+            iterator. ``epoch_size`` can be set to an arbitrary value and
+            doesn't have any effect on the content of produced training
+            samples. It is recommended to set it to a suitable value for
+            one "training phase", so after each ``epoch_size`` batches,
+            validation/logging/plotting are performed by the training loop
+            that uses this data set (e.g.
+            ``elektronn3.training.trainer.StoppableTrainer``).
+        eager_init: If ``False``, some parts of the class initialization
+            are lazily performed only when they are needed.
+            It's not recommended to change this option.
+        cuda_enabled: Determine if cuda should be used.
+            This option will be removed. Don't use it.
+    """
     def __init__(self, input_path=None, target_path=None,
                  input_h5data=None, target_h5data=None, cube_prios=None, valid_cube_indices=None,
                  border_mode='crop', aniso_factor=2, target_vec_ix=None,
@@ -43,10 +150,10 @@ class PatchCreator(data.Dataset):
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
             logger.info(f'Using {device}.')
-        self.cuda_enabled = cuda_enabled
+        self.cuda_enabled = cuda_enabled  # TODO: Replace with new device semantics
         # batch properties
         self.source = source
-        self.grey_augment_channels = grey_augment_channels
+        self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_args = warp_args
         self.ignore_thresh = ignore_thresh
@@ -125,6 +232,7 @@ class PatchCreator(data.Dataset):
             _ = self.preview_batch
         if class_weights:
             # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param. # Not quite sure what you mean, this is done once only anyway
+            # TODO: This assumes a binary segmentation problem (background/foreground). Support more classes?
             target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
