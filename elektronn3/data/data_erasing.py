@@ -299,7 +299,7 @@ def apply_random_blurring(inp_sample: np.ndarray,
             for k, i, j in product(range(region.coords_lo[0], region.coords_hi[0] + 1),
                                    range(region.coords_lo[1], region.coords_hi[1] + 1),
                                    range(region.coords_lo[2], region.coords_hi[2] + 1)):
-                        intersection.add((k, i, j))
+                intersection.add((k, i, j))
 
             snippet = inp_sample[sample_indx,
                                  region.coords_lo[0]:region.coords_hi[0] + 1,
