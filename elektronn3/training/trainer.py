@@ -26,7 +26,6 @@ from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.image import write_overlayimg
 from elektronn3.data.utils import save_to_h5
-from elektronn3.data.data_erasing import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 
@@ -157,12 +156,6 @@ class StoppableTrainer:
 
                 for batch in self.loader:
                     inp, target = batch
-
-                    # TODO: move data augmentation from the training process
-                    if self.dataset.random_blurring_config:
-                        inp = inp.clone()
-                        apply_random_blurring(inp_sample=inp.numpy()[0],
-                                              **self.dataset.random_blurring_config)
 
                     if self.cuda_enabled:
                         inp, target = inp.cuda(), target.cuda()

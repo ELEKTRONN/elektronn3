@@ -22,6 +22,7 @@ from torch.utils import data
 from elektronn3.data import transformations
 from elektronn3.data.utils import slice_h5
 from elektronn3.data.data_erasing import check_random_data_blurring_config
+from elektronn3.data.data_erasing import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 
@@ -198,6 +199,9 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp += 1
             if self.normalize:
                 inp = (inp - self.mean) / self.std
+            if self.random_blurring_config and self.source == "train":
+                apply_random_blurring(inp_sample=inp,
+                                      **self.random_blurring_config)
             if self.grey_augment_channels and self.source == "train":  # grey augmentation only for training
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break

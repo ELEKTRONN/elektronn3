@@ -13,7 +13,7 @@ import os
 import torch
 from torch import nn
 from torch import optim
-from elektronn3.data.data_erasing import ScheduledParameter
+from elektronn3.data.data_erasing import ScalarScheduler
 
 
 parser = argparse.ArgumentParser(description='Train a network.')
@@ -72,11 +72,11 @@ else:
 save_path = os.path.join(path_prefix, save_name)
 
 
-threshold = ScheduledParameter(value=0.1,
-                               max_value=0.5,
-                               growth_type="lin",
-                               interval=max_steps,
-                               steps_per_report=1000)
+threshold = ScalarScheduler(value=0.1,
+                            max_value=0.5,
+                            growth_type="lin",
+                            interval=max_steps,
+                            steps_per_report=1000)
 
 
 random_blurring_config = {"probability" : 0.5,

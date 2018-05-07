@@ -5,12 +5,14 @@
 # Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
 
 import numpy as np
+from itertools import product
 from scipy import ndimage
 import os
 from elektronn3.data.utils import save_to_h5
 from elektronn3.data.region_generator import RegionGenerator
 import logging
 
+logger = logging.getLogger('elektronn3log')
 
 class IncorrectLimits(Exception):
     pass
@@ -32,19 +34,17 @@ class FunctionCallsCounter():
     counter = 0
 
 
-class ScheduledParameter(object):
-    """ The class is responsible for a parameter scheduling along an iterative
-    process according to either the linear or exponential growth. The user
-    specifies the initial value, the target one, growth type and the number
-    of steps along which the parameter has to be gradually scaled.
+class ScalarScheduler(object):
+    """ The class is scheduler for a scalar value within an iterative
+    process according to either linear or exponential growth. The user
+    specifies the initial value, the maximum one, growth type and the number
+    of steps within which the scalar value has to be gradually scaled.
     At each iteration the user has to explicitly call step() to
-    update and modify the parameter
-    If the user doesn't specify the target value or the interval,
-    the parameter works as a constant
+    update and modify the scalar value
+    If the user doesn't specify the maximum value or the interval,
+    the scalar value works as a constant
     """
-
-    logger = logging.getLogger('elektronn3log')
-
+    
     def __init__(self,
                  value: float,
                  max_value: float = None,
@@ -53,16 +53,18 @@ class ScheduledParameter(object):
                  steps_per_report: int = None):
         """
         Initializes all necessary variables and checks that
-        the initial value is less than the target one and
+        the initial value is less than the maximum one and
         growth type is chosen correctly
         Parameters
         ----------
-        value - the parameter value at the beginning of an scheduled process
-        max_value - the parameter value at the end of an scheduled process
+        value - a scalar value at the beginning of an scheduled process
+        max_value - the scalar value at the end of an scheduled process
         growth_type - type of growth: "lin" - linear; "exp" - exponential
-        interval - number of steps along which the parameter value has to be
+        interval - number of steps within which the scalar value has to be
             increased from the initial value to the maximal one
-        steps_per_report - number of step between information update on the screen
+        steps_per_report - number of steps between information is updated on the screen
+            and written to a log file. The default value is None which means that
+            information won't be displayed and written to a log file
         """
 
         if max_value and (value > max_value):
@@ -78,12 +80,12 @@ class ScheduledParameter(object):
 
             if growth_type == "lin":
                 self.update_function = self.lin_update
-                self.base = float(max_value - value) / self.interval
+                self.base = (max_value - value) / self.interval
             elif growth_type == "exp":
                 self.update_function = self.exp_update
                 self.base = np.power((self.max_value / self.value), 1.0 / self.interval)
             else:
-                raise IncorrectValue(f'ERROR: ScheduledParameter class can only '
+                raise IncorrectValue(f'ERROR: ScalarScheduler class can only '
                                      f'take \"growth_type\" parameter with values '
                                      f'either \"lin\" or \"exp\". Value \"{growth_type}\" '
                                      'has been passed instead')
@@ -95,80 +97,67 @@ class ScheduledParameter(object):
         self.counter = 0
 
     def step(self) -> float:
-        """ Preforms an update of the scheduled parameter
-        according to the growth type chosen by the user
+        """ Performs an update of the scheduled value
+        according to the growth type parameter chosen by the user
         Returns
         -------
-        the current parameter value
+        the current scalar value
         """
-
         self.update_function()
         self._print_report()
 
         return self.value
 
     def lin_update(self) -> None:
-        """ Preforms an update of the scheduled parameter
+        """ Performs an update of the scheduled value
         according to the linear growth
         Returns
         -------
         """
-
         self.value += self.base
-        self.check_max_limit()
+        self.value = min(self.value, self.max_value)
 
     def exp_update(self) -> None:
-        """ Preforms an update of the scheduled parameter
+        """ Performs an update of the scheduled value
         according to the exponential growth
         Returns
         -------
         """
         self.value *= self.base
-        self.check_max_limit()
+        self.value = min(self.value, self.max_value)
 
     def idle_update(self) -> None:
-        """ Was designed to keep step() function uniform across different types
-        of growths. The function is called if a class instance is used as
-        a constant variable within an iterative process
+        """ No-op function (keeps the scheduled value constant)
         Returns
         -------
         """
         pass
 
-    def check_max_limit(self) -> None:
-        """ Checks whether the current parameter value is less
-        than the maximum value specified by the user. If the value exceeds
-        it the parameter variable will be assigned to the maximum one.
-        Returns
-        -------
-        """
-        if self.value > self.max_value:
-            self.value = self.max_value
-
     def _print_report(self) -> None:
-        """ Prints the current parameter value on the screen
-        during an iterative process. The function counts number of
-        step() calls and prints information each time when the number
-        of the calls is even with respect to steps_per_report
+        """ Prints the current scalar value on the screen
+        and writes it to a log file during an iterative process.
+        The function counts the number of step() calls and prints
+        information each time when the number of the calls
+        is divisible by 'steps_per_report'.
 
-        If the used doesn't pass the number of steps_per_report the function
+        If the user doesn't pass the number of steps_per_report the function
         doesn't print the information
         Returns
         -------
         """
-        if self.steps_per_report:
+        if self.steps_per_report is not None:
 
             if (self.counter % self.steps_per_report) == 0:
-                ScheduledParameter.logger.info(f'ScheduledVariable: '
-                                               f'value: {self.value}, '
-                                               f'counter: {self.counter}')
+                logger.info(f'ScalarScheduler: '
+                            f'value: {self.value}, '
+                            f'counter: {self.counter}')
 
             self.counter += 1
 
 
 def check_random_data_blurring_config(patch_shape: list,
                                       probability: float,
-                                      threshold: ScheduledParameter,
+                                      threshold: ScalarScheduler,
                                       lower_lim_region_size: list,
                                       upper_lim_region_size: list,
                                       verbose: bool = False,
@@ -177,7 +166,7 @@ def check_random_data_blurring_config(patch_shape: list,
     """ Checks random data blurring parameters and ensures the user
     that all parameters won't cause problems during apply_random_blurring
     function calls. The function throws exceptions if a conflict is
-    detected. Use this function before training procedure to be sure the config
+    detected. Use this function before a training procedure to be sure the config
     fulfills the requirements posed by the apply_random_blurring function
 
     patch_shape - sizes of input sample along each axis: [depth, width, height]
@@ -221,13 +210,13 @@ def check_random_data_blurring_config(patch_shape: list,
                                   f'region size = {upper_lim_region_size[i]}\n'
                                   f'sample size = {patch_shape[i]}\n')
 
-    # Check the data type of  the threshold parameter
-    # The threshold must have its type of ScheduledParameter
-    if not isinstance(threshold, ScheduledParameter):
-        raise IncorrectType(f'ERROR: threshold type is not type of ScheduledParameter\n'
+    # Check the data type of the threshold parameter
+    # The threshold must have its type of ScalarScheduler
+    if not isinstance(threshold, ScalarScheduler):
+        raise IncorrectType(f'ERROR: threshold type is not type of ScalarScheduler\n'
                             f'instead, it has its type of: {type(threshold)}')
 
-    # Check whether the theshold value specified by the user
+    # Check whether the threshold value specified by the user
     # is within the range [0.0, 1.0]
     if threshold.value < 0.0 or threshold.value > 1.0:
         raise IncorrectLimits(f'ERROR: threshold of random data blurring is out '
@@ -249,7 +238,7 @@ def check_random_data_blurring_config(patch_shape: list,
 
 def apply_random_blurring(inp_sample: np.ndarray,
                           probability: float,
-                          threshold: ScheduledParameter,
+                          threshold: ScalarScheduler,
                           lower_lim_region_size: list,
                           upper_lim_region_size: list,
                           verbose: bool = False,
@@ -307,9 +296,9 @@ def apply_random_blurring(inp_sample: np.ndarray,
 
             region = generator.create_region()
 
-            for k in range(region.coords_lo[0], region.coords_hi[0] + 1):
-                for i in range(region.coords_lo[1], region.coords_hi[1] + 1):
-                    for j in range(region.coords_lo[2], region.coords_hi[2] + 1):
+            for k, i, j in product(range(region.coords_lo[0], region.coords_hi[0] + 1),
+                                   range(region.coords_lo[1], region.coords_hi[1] + 1),
+                                   range(region.coords_lo[2], region.coords_hi[2] + 1)):
                         intersection.add((k, i, j))
 
             snippet = inp_sample[sample_indx,
@@ -329,7 +318,6 @@ def apply_random_blurring(inp_sample: np.ndarray,
             blurring_percentage = erased_volume / sample_volume
 
         if verbose:
-            logger = logging.getLogger('elektronn3log')
             logger.info(f'erased percentage for channel {sample_indx}: {blurring_percentage}')
 
     if save_path and num_steps_save:
