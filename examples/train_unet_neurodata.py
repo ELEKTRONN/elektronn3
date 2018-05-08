@@ -24,8 +24,12 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-cuda_enabled = not args.disable_cuda and torch.cuda.is_available()
-print('Cuda enabled' if cuda_enabled else 'Cuda disabled')
+if not args.disable_cuda and torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+
+print(f'Running on device: {device}')
 
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3
@@ -53,14 +57,12 @@ model = UNet(
     planar_blocks=(1,),
     activation='relu',
     batch_norm=True
-)
+).to(device)
 # Note that DataParallel only makes sense with batch_size >= 2
 # model = nn.parallel.DataParallel(model, device_ids=[0, 1])
 torch.manual_seed(0)
-if cuda_enabled:
+if device.type == 'cuda':
     torch.cuda.manual_seed(0)
-if cuda_enabled:
-    model = model.cuda()
 
 if args.save_name is None:
     timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
@@ -90,7 +92,7 @@ data_init_kwargs = {
         'perspective': True
     }
 }
-dataset = PatchCreator(**data_init_kwargs, cuda_enabled=cuda_enabled)
+dataset = PatchCreator(**data_init_kwargs, device=device)
 
 optimizer = optim.Adam(
     model.parameters(),
@@ -101,7 +103,7 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-criterion = nn.CrossEntropyLoss(weight=dataset.class_weights)
+criterion = nn.CrossEntropyLoss(weight=dataset.class_weights).to(device)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
 st = StoppableTrainer(
@@ -113,6 +115,6 @@ st = StoppableTrainer(
     num_workers=2,
     save_path=save_path,
     schedulers={"lr": lr_sched},
-    cuda_enabled=cuda_enabled
+    device=device
 )
 st.train(max_steps)

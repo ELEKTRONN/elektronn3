@@ -128,8 +128,7 @@ class PatchCreator(data.Dataset):
         eager_init: If ``False``, some parts of the class initialization
             are lazily performed only when they are needed.
             It's not recommended to change this option.
-        cuda_enabled: Determine if cuda should be used.
-            This option will be removed.
+        device: The device on which to allocate data.
     """
     def __init__(
             self,
@@ -138,6 +137,7 @@ class PatchCreator(data.Dataset):
             input_h5data: Dict[str, str],
             target_h5data: Dict[str, str],
             patch_shape: Sequence[int],
+            device,
             cube_prios: Optional[Sequence[float]] = None,
             valid_cube_indices: Optional[Sequence[int]] = None,
             border_mode='crop',
@@ -154,19 +154,14 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             class_weights: bool = False,
             epoch_size: int = 100,
-            eager_init: bool = True,
-            cuda_enabled: Union[bool, str] = 'auto'
+            eager_init: bool = True
     ):
         assert (input_path and target_path and input_h5data and target_h5data)
         if len(input_h5data)!=len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         input_path = os.path.expanduser(input_path)
         target_path = os.path.expanduser(target_path)
-        if cuda_enabled == 'auto':
-            cuda_enabled = torch.cuda.is_available()
-            device = 'GPU' if cuda_enabled else 'CPU'
-            logger.info(f'Using {device}.')
-        self.cuda_enabled = cuda_enabled  # TODO: Replace with new device semantics
+        self.device = device
         # batch properties
         self.source = source
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
@@ -257,8 +252,7 @@ class PatchCreator(data.Dataset):
             fg_weight = 1. - bg_weight
             self.class_weights = torch.tensor([bg_weight, fg_weight])
             logger.info(f'Calculated class weights: {[bg_weight, fg_weight]}')
-            if self.cuda_enabled:
-                self.class_weights = self.class_weights.cuda()
+            self.class_weights = self.class_weights.to(self.device)
         else:
             self.class_weights = None
 
@@ -429,11 +423,8 @@ class PatchCreator(data.Dataset):
         if self.normalize:
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
 
-        inp = torch.from_numpy(inp_np)
-        target = torch.from_numpy(target_np)
-        if self.cuda_enabled:
-            inp = inp.cuda()
-            target = target.cuda()
+        inp = torch.from_numpy(inp_np).to(self.device)
+        target = torch.from_numpy(target_np).to(self.device)
 
         # See comments at the end of PatchCreator.__getitem__()
         # Note that here it's the dimension index 1 that we're squeezing,

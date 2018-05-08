@@ -94,8 +94,7 @@ class StoppableTrainer:
             tensorboard log directories are created. Log ("event") files are
             written to a subdirectory that has the same name as the
             ``save_name``.
-        cuda_enabled: Determine if cuda should be used.
-            This option will be removed.
+        device: The device on which the network shall be trained.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -131,25 +130,21 @@ class StoppableTrainer:
             optimizer: torch.optim.Optimizer,
             dataset: PatchCreator,
             save_path: str,
+            device,  # torch.Device type is not available
             batchsize: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,  # TODO: Define a Scheduler protocol. This needs typing_extensions.
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
             tensorboard_root_path: str = '~/tb/',
-            cuda_enabled: Union[bool, str] = 'auto',
             ignore_errors: bool = False,
             ipython_on_error: bool = True
     ):
-        if cuda_enabled == 'auto':
-            cuda_enabled = torch.cuda.is_available()
-            device = 'GPU' if cuda_enabled else 'CPU'
-            logger.info(f'Using {device}.')
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
-        self.cuda_enabled = cuda_enabled
-        self.model = model
-        self.criterion = criterion
+        self.device = device
+        self.model = model.to(device)
+        self.criterion = criterion.to(device)
         self.optimizer = optimizer
         self.dataset = dataset
         self.overlay_alpha = overlay_alpha
@@ -188,7 +183,7 @@ class StoppableTrainer:
 
         self.train_loader = DelayedDataLoader(
             self.dataset, batch_size=self.batchsize, shuffle=False,
-            num_workers=self.num_workers, pin_memory=self.cuda_enabled,
+            num_workers=self.num_workers, pin_memory=True,
             timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
@@ -201,9 +196,6 @@ class StoppableTrainer:
             self.dataset, self.batchsize, num_workers=0, pin_memory=False,
             timeout=30
         )
-        if self.cuda_enabled:
-            self.model.cuda()
-            self.criterion.cuda()
 
     # Yeah I know this is an abomination, but this monolithic function makes
     # it possible to access all important locals from within the
@@ -230,10 +222,8 @@ class StoppableTrainer:
                 incorrect = 0
                 vx_size = 0
                 timer = Timer()
-                for batch in self.train_loader:
-                    inp, target = batch
-                    if self.cuda_enabled:
-                        inp, target = inp.cuda(), target.cuda()
+                for inp, target in self.train_loader:
+                    inp, target = inp.to(self.device), target.to(self.device)
 
                     # forward pass
                     out = self.model(inp)
@@ -344,8 +334,7 @@ class StoppableTrainer:
         incorrect = 0
         numel = 0
         for inp, target in self.valid_loader:
-            if self.cuda_enabled:
-                inp, target = inp.cuda(), target.cuda()
+            inp, target = inp.to(self.device), target.to(self.device)
             with torch.no_grad():
                 out = self.model(inp)
                 numel += int(target.numel())
@@ -384,7 +373,7 @@ class StoppableTrainer:
             group: str = 'preview_batch'
     ) -> None:
         """Preview from constant region of preview batch data"""
-        _, out = preview_inference(self.model, self.dataset)
+        _, out = preview_inference(self.model, device=self.device, dataset=self.dataset)
 
         if z_plane is None:
             z_plane = out.shape[2] // 2
@@ -488,22 +477,15 @@ def save_to_h5(fname: str, model_output: torch.Tensor):
 
 def preview_inference(
         model: torch.nn.Module,
-        dataset: Optional[torch.utils.data.Dataset] = None,
-        cuda_enabled: Union[bool, str] = 'auto'
+        device,
+        dataset: Optional[PatchCreator] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     model.eval()  # Set dropout and batchnorm to eval mode
-    # logger.info("Starting preview prediction")
-    if cuda_enabled == 'auto':
-        cuda_enabled = torch.cuda.is_available()
-        # device = 'GPU' if cuda_enabled else 'CPU'
-        # logger.info(f'Using {device}.')
-    # Attention: Inference on Variables with unexpected shapes can lead to errors!
+    # Attention: Inference on Tensors with unexpected shapes can lead to errors!
     # Staying with multiples of 16 for lengths seems to work.
     if dataset is None:
         d, h, w = dataset.preview_shape
-        inp = torch.rand(1, dataset.c_input, d, h, w)
-        if cuda_enabled:
-            inp = inp.cuda()
+        inp = torch.rand(1, dataset.c_input, d, h, w, device=device)
     else:
         inp = dataset.preview_batch[0]
     with torch.no_grad():

@@ -483,13 +483,14 @@ def test_model(
     planar_blocks=(),
     merge_mode='concat'
 ):
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     model = UNet(
         in_channels=in_channels,
         out_channels=out_channels,
         n_blocks=n_blocks,
         planar_blocks=planar_blocks,
         merge_mode=merge_mode
-    )
+    ).to(device)
 
     # Minimal test input
     # Each block in the encoder pathway ends with 2x2x2 downsampling, except
@@ -500,11 +501,9 @@ def test_model(
         in_channels,
         2 ** n_blocks // (2 ** len(planar_blocks)),
         2 ** (n_blocks - 1),
-        2 ** (n_blocks - 1)
+        2 ** (n_blocks - 1),
+        device=device
     )
-    if torch.cuda.is_available():
-        model.cuda()
-        x = x.cuda()
 
     # Test forward, autograd, and backward pass with test input
     out = model(x)
