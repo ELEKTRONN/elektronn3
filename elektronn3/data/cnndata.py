@@ -40,7 +40,7 @@ class PatchCreator(data.Dataset):
     Optionally, the source coordinates from which patches
     are sliced are obtained by random warping with affine or perspective
     transformations for efficient augmentation and avoiding border artifacts
-    (see ``warp``, ``warp_args``).
+    (see ``warp``, ``warp_kwargs``).
     Note that whereas other warping-based image augmentation systems usually
     warp images themselves, elektronn3 performs warping transformations on
     the **coordinates** from which image patches are sliced and obtains voxel
@@ -110,7 +110,7 @@ class PatchCreator(data.Dataset):
             (Currently ignored, because gray value augm. are broken)
         warp: ratio of training samples that should be obtained using
             geometric warping augmentations.
-        warp_args: kwargs that are passed through to
+        warp_kwargs: kwargs that are passed through to
             :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
@@ -153,7 +153,7 @@ class PatchCreator(data.Dataset):
             preview_shape: Optional[Sequence[int]] = None,
             grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
-            warp_args: Optional[Dict[str, Any]] = None,
+            warp_kwargs: Optional[Dict[str, Any]] = None,
             ignore_thresh=False,
             force_dense=False,
             class_weights: bool = False,
@@ -175,7 +175,7 @@ class PatchCreator(data.Dataset):
         self.source = source
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
-        self.warp_args = warp_args
+        self.warp_kwargs = warp_kwargs
         self.ignore_thresh = ignore_thresh
         self.force_dense = force_dense
 
@@ -273,7 +273,7 @@ class PatchCreator(data.Dataset):
         input_src, target_src = self._getcube(self.source)  # get cube randomly
         while True:
             try:
-                inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_args)
+                inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
                 # Arbitrarily choosing 100 as the threshold here, because we
                 # currently can't find out the total number of classes in the
@@ -488,7 +488,7 @@ class PatchCreator(data.Dataset):
             inp_src: h5py.Dataset,
             target_src: h5py.Dataset,
             warp: Union[float, bool],
-            warp_params: Dict[str, Any]
+            warp_kwargs: Dict[str, Any]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
@@ -512,7 +512,7 @@ class PatchCreator(data.Dataset):
             should be warped.
             E.g. 0.5 means approx. every second call to this function actually
             applies warping to the image-target pair.
-        warp_params: dict
+        warp_kwargs: dict
             kwargs that are passed through to
             :py:meth:`elektronn2.data.transformations.get_warped_slice()`.
             Can be empty.
@@ -532,8 +532,8 @@ class PatchCreator(data.Dataset):
             do_warp = False
 
         if not do_warp:
-            warp_params = dict(warp_params)
-            warp_params['warp_amount'] = 0
+            warp_kwargs = dict(warp_kwargs)
+            warp_kwargs['warp_amount'] = 0
 
         inp, target = transformations.get_warped_slice(
             inp_src,
@@ -544,7 +544,7 @@ class PatchCreator(data.Dataset):
             target_vec_ix=self.target_vec_ix,
             target_discrete_ix=self.target_discrete_ix,
             rng=self.rng,
-            **warp_params
+            **warp_kwargs
         )
 
         return inp, target

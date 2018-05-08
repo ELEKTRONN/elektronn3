@@ -85,7 +85,7 @@ data_init_kwargs = {
     'epoch_size': args.epoch_size,
     'warp': 0.5,
     'class_weights': True,
-    'warp_args': {
+    'warp_kwargs': {
         'sample_aniso': True,
         'perspective': True
     }
