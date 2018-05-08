@@ -16,7 +16,6 @@ from typing import Tuple, Dict, Optional, Union, Sequence, Any, List
 import h5py
 import numpy as np
 import torch
-from torch.autograd import Variable
 from torch.utils import data
 
 from elektronn3.data import transformations
@@ -114,7 +113,6 @@ class PatchCreator(data.Dataset):
             :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
-        ignore_thresh: (To be removed)
         force_dense: (To be removed)
         class_weights: If ``True``, target class weights (for the loss
             function) are calculated on the available training targets
@@ -154,8 +152,6 @@ class PatchCreator(data.Dataset):
             grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
-            ignore_thresh=False,
-            force_dense=False,
             class_weights: bool = False,
             epoch_size: int = 100,
             eager_init: bool = True,
@@ -176,8 +172,6 @@ class PatchCreator(data.Dataset):
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_kwargs = warp_kwargs
-        self.ignore_thresh = ignore_thresh
-        self.force_dense = force_dense
 
         # general properties
         # TODO: Merge *_path with *_h5data, i.e. *_h5data should contain tuples (<full/path/to/hdf5.h5>, <hdf5datasetkey>).
@@ -200,10 +194,15 @@ class PatchCreator(data.Dataset):
         # HACK
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
-        # TODO: Strides and offsets are currently hardcoded. Try to calculate them or at least make them configurable.
-        self.strides = np.array([1, 1, 1], dtype=np.int) #np.array(target_node.shape.strides, dtype=np.int)
-        self.offsets = np.array([0, 0, 0], dtype=np.int) #np.array(target_node.shape.offsets, dtype=np.int)
-        self.target_ps = self.patch_shape - self.offsets * 2
+        # TODO: Make strides and offsets for targets configurable
+        # self.strides = ...
+        #  strides will need to be applied *during* dataset iteration now
+        #  (-> strided reading in slice_h5()... or should strides be applied
+        #   with some fancy downscaling operator? Naively strided reading
+        #   could mess up targets in unfortunate cases:
+        #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
+        self.offsets = np.array([0, 0, 0])
+        self.target_ps = self.patch_shape  - self.offsets * 2
         self._target_dtype = np.int64
         self.mode = 'img-img'  # TODO: what would change for img-scalar? Is that even neccessary?
         # The following will be inferred when reading data
@@ -323,9 +322,6 @@ class PatchCreator(data.Dataset):
             if self.grey_augment_channels and self.source == "train":  # grey augmentation only for training
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
-
-        if not (self.force_dense or np.all(self.strides == 1)):
-            target = self._stridedtargets(target)
 
         # target is now of shape (K, D, H, W), where K is the number of
         #  target channels (not to be confused with the number of classes
