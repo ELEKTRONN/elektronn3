@@ -11,7 +11,7 @@ import os
 import sys
 import time
 import traceback
-from typing import Tuple, Dict, Optional, Union, Sequence, Any
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List
 
 import h5py
 import numpy as np
@@ -549,7 +549,7 @@ class PatchCreator(data.Dataset):
 
         return inp, target
 
-    def _getcube(self, source):
+    def _getcube(self, source: str) -> Tuple[h5py.Dataset, h5py.Dataset]:
         """
         Draw an example cube according to sampling weight on training data,
         or randomly on valid data
@@ -573,7 +573,7 @@ class PatchCreator(data.Dataset):
     def _stridedtargets(self, target):
         return target[::self.strides[0], ::self.strides[1], ::self.strides[2]]
 
-    def load_data(self):
+    def load_data(self) -> None:
         inp_files, target_files = self.open_files()
 
         prios = []
@@ -598,7 +598,7 @@ class PatchCreator(data.Dataset):
         self._training_count = len(self.train_inputs)
         self._valid_count = len(self.valid_inputs)
 
-    def check_files(self):  # TODO: Update for cdhw version
+    def check_files(self) -> None:  # TODO: Update for cdhw version
         """
         Check if all files are accessible.
         """
@@ -623,7 +623,7 @@ class PatchCreator(data.Dataset):
             sys.stdout.flush()
             sys.exit(1)
 
-    def open_files(self):
+    def open_files(self) -> Tuple[List[h5py.Dataset, List[h5py.Dataset]]]:
         self.check_files()
         inp_h5sets, target_h5sets = [], []
 
