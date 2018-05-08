@@ -25,6 +25,7 @@ from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.utils import save_to_h5, squash01
+from elektronn3.data.cnndata import PatchCreator
 
 logger = logging.getLogger('elektronn3log')
 
@@ -68,9 +69,9 @@ class StoppableTrainer:
             the behavior of the ``dataset``, e.g. that the length of
             the ``dataset`` has no special meaning except controlling how
             often validation, plotting etc. are performed during training.
-            It is recommended to use an instance of
-            :py:class:`elektronn3.data.cnndata.PatchCreator` as the
-            ``dataset``.
+            Currently only instances of
+            :py:class:`elektronn3.data.cnndata.PatchCreator` are supported as
+            the ``dataset``.
         save_path: Path where trained model checkpoints are saved.
             The last part of this path ("basename") determines the
             ``save_name`` if ``save_name`` is not explicitly specified.
@@ -111,6 +112,11 @@ class StoppableTrainer:
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
+    # TODO: Try to support dataset implementations other than PatchCreator?
+    #       (The problem is currently that the *one* dataset is expected to
+    #       handle both training and validation via the ``.train()`` and
+    #       ``.validate()`` switches and a preview batch is expected to be
+    #       present.
 
     tb: TensorBoardLogger
     terminate: bool
@@ -123,7 +129,7 @@ class StoppableTrainer:
             model: torch.nn.Module,
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
-            dataset: torch.utils.data.Dataset,
+            dataset: PatchCreator,
             save_path: str,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -284,7 +290,7 @@ class StoppableTrainer:
                 # --> self.step():
                 stats['val_loss'], stats['val_err'] = self.validate()
 
-                if self.step // self.dataset.epoch_size > 1:
+                if self.step // len(self.dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
@@ -310,7 +316,7 @@ class StoppableTrainer:
                     self.tb.writer.flush()
                 if self.save_path is not None:
                     self._tracker.plot(self.save_path + "/" + self.save_name)
-                if self.save_path is not None and (self.step // self.dataset.epoch_size) % 100 == 99:
+                if self.save_path is not None and (self.step // len(self.dataset)) % 100 == 99:
                     # preview_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
                     torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.step))
             except KeyboardInterrupt:
