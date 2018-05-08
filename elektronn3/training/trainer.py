@@ -41,6 +41,75 @@ class NaNException(RuntimeError):
 
 
 class StoppableTrainer:
+    """ Training loop abstraction with IPython and tensorboard integration.
+
+    Hitting Ctrl-C anytime during the training will drop you to the IPython
+    training shell where you can access training data and make interactive
+    changes.
+    To continue training, hit Ctrl-D twice.
+    If you want the process to terminate after leaving the shell, set
+    ``self.terminate = True`` inside it and then hit Ctrl-D twice.
+
+
+    Args:
+        model: PyTorch model (``nn.Module``) that shall be trained.
+            Please make sure that the output shape of the ``model``
+            matches the shape of targets that are delivered by the
+            ``dataset``.
+        criterion: PyTorch loss that shall be used as the optimization
+            criterion.
+        optimizer: PyTorch optimizer that shall be used to update
+            ``model`` weights according to the ``criterion`` in each
+            iteration.
+        dataset: PyTorch dataset (``data.Dataset``) which produces
+            training samples when iterated over.
+            ``StoppableTrainer`` currently has some assumptions about
+            the behavior of the ``dataset``, e.g. that the length of
+            the ``dataset`` has no special meaning except controlling how
+            often validation, plotting etc. are performed during training.
+            It is recommended to use an instance of
+            :py:class:`elektronn3.data.cnndata.PatchCreator` as the
+            ``dataset``.
+        save_path: Path where trained model checkpoints are saved.
+            The last part of this path ("basename") determines the
+            ``save_name`` if ``save_name`` is not explicitly specified.
+        batchsize: Desired batch size of training samples.
+        num_workers: Number of background processes that are used to produce
+            training samples without blocking the main training loop.
+            See :py:class:`torch.utils.data.DataLoader`
+            For normal training, you can mostly set ``num_workers=1``.
+            Only use more workers if you notice a data loader bottleneck.
+            Set ``num_workers=0`` if you want to debug the ``dataset``
+            implementation, to avoid mulitprocessing-specific issues.
+        schedulers: Dictionary of schedulers for training hyperparameters,
+            e.g. learning rate schedulers that can be found in
+            `py:mod:`torch.optim.lr_scheduler`.
+        overlay_alpha: Alpha (transparency) value for alpha-blending of
+            overlay image plots.
+        enable_tensorboard: If ``True``, tensorboard logging/plotting is
+            enabled during training.
+        tensorboard_root_path: Path to the root directory under which
+            tensorboard log directories are created. Log ("event") files are
+            written to a subdirectory that has the same name as the
+            ``save_name``.
+        cuda_enabled: Determine if cuda should be used.
+            This option will be removed.
+        ignore_errors: If ``True``, the training process tries to ignore
+            all errors and continue with the next batch if it encounters
+            an error on the current batch.
+            It's not recommended to use this. It's only helpful for certain
+            debugging scenarios.
+        ipython_on_error: If ``True``, errors during training (except
+            C-level segfaults etc.) won't crash the whole training process,
+            but drop to an IPython shell so errors can be inspected with
+            access to the current training state.
+    """
+    # TODO: Optionally make save_name configurable, just fall back to save_path basename.
+    # TODO: Consider merging tensorboard_root_path with save_path so we have everything in one place.
+    # TODO: Write logs of the text logger to a file in save_path. The file
+    #       handler should be replaced (see elektronn3.logger module).
+    # TODO: Maybe there should be an option to completely disable exception
+    #       hooks and IPython integration, so Ctrl-C directly terminates.
     def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
                  save_path=None, batchsize=1, num_workers=0,
                  schedulers=None, overlay_alpha=0.2,
@@ -132,7 +201,7 @@ class StoppableTrainer:
     # TODO: Try to modularize it as well as possible while keeping the
     #       above-mentioned requirement. E.g. the history tracking stuff can
     #       be refactored into smaller functions
-    def train(self, epochs=1):
+    def train(self, epochs=1):  # TODO: Rename epochs
         while self.iterations < epochs:
             try:
                 # --> self.train()

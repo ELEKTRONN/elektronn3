@@ -131,7 +131,7 @@ class PatchCreator(data.Dataset):
             are lazily performed only when they are needed.
             It's not recommended to change this option.
         cuda_enabled: Determine if cuda should be used.
-            This option will be removed. Don't use it.
+            This option will be removed.
     """
     def __init__(self, input_path=None, target_path=None,
                  input_h5data=None, target_h5data=None, cube_prios=None, valid_cube_indices=None,
