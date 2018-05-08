@@ -174,7 +174,7 @@ class PatchCreator(data.Dataset):
         self.target_vec_ix = target_vec_ix
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
-        self._epoch_size = epoch_size
+        self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
 
         # Infer geometric info from input/target shapes
         # HACK
@@ -373,7 +373,7 @@ class PatchCreator(data.Dataset):
 
     def train(self):
         self.source = "train"
-        self.epoch_size = self._epoch_size
+        self.epoch_size = self._orig_epoch_size
 
     def _create_preview_batch(
             self,

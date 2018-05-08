@@ -111,14 +111,12 @@ class StoppableTrainer:
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
-    # TODO: Advertise public attributes better, prefix private attributes with underscores
 
     tb: TensorBoardLogger
     terminate: bool
-    iterations: int
-    loader: torch.utils.data.DataLoader
+    step: int
+    train_loader: torch.utils.data.DataLoader
     valid_loader: torch.utils.data.DataLoader
-
 
     def __init__(
             self,
@@ -129,7 +127,7 @@ class StoppableTrainer:
             save_path: str,
             batchsize: int = 1,
             num_workers: int = 0,
-            schedulers: Optional[Dict[Any, Any]] = None,
+            schedulers: Optional[Dict[Any, Any]] = None,  # TODO: Define a Scheduler protocol. This needs typing_extensions.
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
             tensorboard_root_path: str = '~/tb/',
@@ -149,25 +147,26 @@ class StoppableTrainer:
         self.optimizer = optimizer
         self.dataset = dataset
         self.overlay_alpha = overlay_alpha
-        self._shell_info = dedent("""
-            Entering IPython training shell. To continue, hit Ctrl-D twice.
-            To terminate, set self.terminate = True and then hit Ctrl-D twice.
-        """).strip()
-        self.terminate = False
-        self.iterations = 0
-        self.first_plot = True
         self.save_path = save_path
         if save_path is not None and not os.path.isdir(save_path):
             os.makedirs(save_path)
         self.batchsize = batchsize
         self.num_workers = num_workers
-        self.tracker = HistoryTracker()
-        self.timer = Timer()
+
+        self._tracker = HistoryTracker()
+        self._timer = Timer()
+        self._first_plot = True
+        self._shell_info = dedent("""
+            Entering IPython training shell. To continue, hit Ctrl-D twice.
+            To terminate, set self.terminate = True and then hit Ctrl-D twice.
+        """).strip()
+
+        self.terminate = False
+        self.step = 0
         if schedulers is None:
-            schedulers = {"lr": StepLR(optimizer, 1000, 1)}  # No-op scheduler
-        else:
-            assert type(schedulers) == dict
+            schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
+
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False
             logger.warning('Tensorboard is not available, so it has to be disabled.')
@@ -179,28 +178,15 @@ class StoppableTrainer:
             os.makedirs(tb_dir, exist_ok=True)
             # TODO: Make always_flush user-configurable here:
             self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
-        # self.enable_tensorboard = enable_tensorboard  # Using `self.tb not None` instead to check this
-        try:
-            self.loader = DelayedDataLoader(
-                self.dataset, batch_size=self.batchsize, shuffle=False,
-                num_workers=self.num_workers, pin_memory=self.cuda_enabled,
-                timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
-            )
-        except:  # TODO: Remove this try/catch once the timeout option is in an official release
-            logger.warning(
-                'DataLoader doesn\'t support timeout option. This can lead to random freezes during training.\n'
-                'If this is an issue for you, cherry-pick\nhttps://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3\n'
-                'or use a PyTorch version newer than 0.3.0'
-            )
-            self.loader = DelayedDataLoader(
-                self.dataset, batch_size=self.batchsize, shuffle=False,
-                num_workers=self.num_workers, pin_memory=self.cuda_enabled,
-            )
+
+        self.train_loader = DelayedDataLoader(
+            self.dataset, batch_size=self.batchsize, shuffle=False,
+            num_workers=self.num_workers, pin_memory=self.cuda_enabled,
+            timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
+        )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
-        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355,
-        # but the deadlocks described there will only happen if timeout can't be enabled
-        # (PyTorch 0.3.0).
+        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355.
         # The performance impact of disabling multiprocessing here is low in normal settings,
         # because the validation loader doesn't perform expensive augmentations, but just reads
         # data from hdf5s.
@@ -208,7 +194,6 @@ class StoppableTrainer:
             self.dataset, self.batchsize, num_workers=0, pin_memory=False,
             timeout=30
         )
-        self.invalid_targets = []  # For interactive debugging of invalid targets
         if self.cuda_enabled:
             self.model.cuda()
             self.criterion.cuda()
@@ -223,8 +208,8 @@ class StoppableTrainer:
     # TODO: Try to modularize it as well as possible while keeping the
     #       above-mentioned requirement. E.g. the history tracking stuff can
     #       be refactored into smaller functions
-    def train(self, epochs: int = 1) -> None:  # TODO: Rename epochs
-        while self.iterations < epochs:
+    def train(self, max_steps: int = 1) -> None:
+        while self.step < max_steps:
             try:
                 # --> self.train()
                 self.model.train()
@@ -242,7 +227,7 @@ class StoppableTrainer:
                 incorrect = 0
                 vx_size = 0
                 timer = Timer()
-                for batch in self.loader:
+                for batch in self.train_loader:
                     inp, target = batch
                     if self.cuda_enabled:
                         inp, target = inp.cuda(), target.cuda()
@@ -269,8 +254,8 @@ class StoppableTrainer:
                     # necessary to cast to a LongTensor before reducing.
                     incorrect += int(maxcl.ne(target).long().sum())
                     stats['tr_loss'] += float(loss)
-                    print(f'{self.iterations:6d}, loss: {loss:.4f}', end='\r')
-                    self.tracker.update_timeline([self.timer.t_passed, float(loss), target_sum / numel])
+                    print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
+                    self._tracker.update_timeline([self._timer.t_passed, float(loss), target_sum / numel])
 
                     # Preserve training batch and network output for later
                     # visualization (detached from the implicit autograd
@@ -289,27 +274,27 @@ class StoppableTrainer:
                             sched.step(metrics=float(loss))
                         else:
                             sched.step()
-                    self.iterations += 1
+                    self.step += 1
                 stats['tr_err'] = 100. * incorrect / numel
-                stats['tr_loss'] /= len(self.loader)
+                stats['tr_loss'] /= len(self.train_loader)
                 mean_target = target_sum / numel
-                misc['tr_speed'] = len(self.loader) / timer.t_passed
+                misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
 
                 # --> self.step():
                 stats['val_loss'], stats['val_err'] = self.validate()
 
-                if self.iterations // self.dataset.epoch_size > 1:
-                    tr_loss_gain = self.tracker.history[-1][2] - stats['tr_loss']
+                if self.step // self.dataset.epoch_size > 1:
+                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
-                self.tracker.update_history([self.iterations, self.timer.t_passed, stats['tr_loss'],
-                                            stats['val_loss'], tr_loss_gain,
-                                            stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0])  # 0's correspond to mom and gradnet (?)
-                t = pretty_string_time(self.timer.t_passed)
-                loss_smooth = self.tracker.loss._ema
+                self._tracker.update_history([self.step, self._timer.t_passed, stats['tr_loss'],
+                                              stats['val_loss'], tr_loss_gain,
+                                              stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0])  # 0's correspond to mom and gradnet (?)
+                t = pretty_string_time(self._timer.t_passed)
+                loss_smooth = self._tracker.loss._ema
                 text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % \
-                       (self.iterations, loss_smooth, stats['tr_loss'],
+                       (self.step, loss_smooth, stats['tr_loss'],
                         stats['tr_err'])
                 text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
                     % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
@@ -324,10 +309,10 @@ class StoppableTrainer:
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
                 if self.save_path is not None:
-                    self.tracker.plot(self.save_path + "/" + self.save_name)
-                if self.save_path is not None and (self.iterations // self.dataset.epoch_size) % 100 == 99:
+                    self._tracker.plot(self.save_path + "/" + self.save_name)
+                if self.save_path is not None and (self.step // self.dataset.epoch_size) % 100 == 99:
                     # preview_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
-                    torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.iterations))
+                    torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.step))
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
@@ -386,9 +371,9 @@ class StoppableTrainer:
             misc: Dict[str, float]
     ) -> None:
         for key, value in stats.items():
-            self.tb.log_scalar(f'stats/{key}', value, self.iterations)
+            self.tb.log_scalar(f'stats/{key}', value, self.step)
         for key, value in misc.items():
-            self.tb.log_scalar(f'misc/{key}', value, self.iterations)
+            self.tb.log_scalar(f'misc/{key}', value, self.step)
 
     def tb_log_preview(
             self,
@@ -407,19 +392,19 @@ class StoppableTrainer:
 
         for c in range(out.shape[1]):
             c_out = out[0, c, z_plane, ...].cpu().numpy()
-            self.tb.log_image(f'{group}/c{c}', c_out, self.iterations)
-        self.tb.log_image(f'{group}/pred', pred, self.iterations)
+            self.tb.log_image(f'{group}/c{c}', c_out, self.step)
+        self.tb.log_image(f'{group}/pred', pred, self.step)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
-        if self.first_plot:
+        if self._first_plot:
             preview_inp, preview_target = self.dataset.preview_batch
             inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
             target = preview_target[0, z_plane, ...].cpu().numpy()
             self.tb.log_image(f'{group}/inp', inp, step=0)
             # Ground truth target for direct comparison with preview prediction
             self.tb.log_image(f'{group}/target', target, step=0)
-            self.first_plot = False
+            self._first_plot = False
 
     def tb_log_sample_images(
             self,
@@ -447,19 +432,19 @@ class StoppableTrainer:
         mcl = maxclass(out)
         pred = mcl[0, z_plane, ...].cpu().numpy()
 
-        self.tb.log_image(f'{group}/inp', inp, step=self.iterations)
-        self.tb.log_image(f'{group}/target', target, step=self.iterations)
+        self.tb.log_image(f'{group}/inp', inp, step=self.step)
+        self.tb.log_image(f'{group}/target', target, step=self.step)
 
         for c in range(out.shape[1]):
             c_out = out[0, c, z_plane, ...].cpu().numpy()
-            self.tb.log_image(f'{group}/c{c}', c_out, step=self.iterations)
-        self.tb.log_image(f'{group}/pred', pred, step=self.iterations)
+            self.tb.log_image(f'{group}/c{c}', c_out, step=self.step)
+        self.tb.log_image(f'{group}/pred', pred, step=self.step)
 
         inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
         target_ov = label2rgb(target, inp01, bg_label=0, alpha=self.overlay_alpha)
         pred_ov = label2rgb(pred, inp01, bg_label=0, alpha=self.overlay_alpha)
-        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.iterations)
-        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.iterations)
+        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.step)
+        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.step)
         # TODO: When plotting overlay images, they appear darker than they should.
         #       This normalization issue gets worse with higher alpha values
         #       (i.e. with more contribution of the overlayed label map).
