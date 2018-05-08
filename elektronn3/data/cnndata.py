@@ -255,7 +255,7 @@ class PatchCreator(data.Dataset):
             target_mean = np.mean(self.train_targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
-            self.class_weights = torch.FloatTensor([bg_weight, fg_weight])
+            self.class_weights = torch.tensor([bg_weight, fg_weight])
             logger.info(f'Calculated class weights: {[bg_weight, fg_weight]}')
             if self.cuda_enabled:
                 self.class_weights = self.class_weights.cuda()
@@ -619,7 +619,7 @@ class PatchCreator(data.Dataset):
             sys.stdout.flush()
             sys.exit(1)
 
-    def open_files(self) -> Tuple[List[h5py.Dataset, List[h5py.Dataset]]]:
+    def open_files(self) -> Tuple[List[h5py.Dataset], List[h5py.Dataset]]:
         self.check_files()
         inp_h5sets, target_h5sets = [], []
 

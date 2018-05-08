@@ -441,8 +441,8 @@ class UNet(nn.Module):
     @staticmethod
     def weight_init(m):
         if isinstance(m, nn.Conv3d):
-            init.xavier_normal(m.weight)
-            init.constant(m.bias, 0)
+            init.xavier_normal_(m.weight)
+            init.constant_(m.bias, 0)
 
     def reset_params(self):
         for i, m in enumerate(self.modules()):
