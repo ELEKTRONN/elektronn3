@@ -11,13 +11,14 @@ import traceback
 
 from os.path import normpath, basename
 from textwrap import dedent
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional, Union, Any
+
 import inspect
 import IPython
 import numpy as np
 import torch
+import torch.utils.data
 from skimage.color import label2rgb
-from torch.autograd import Variable
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
@@ -110,11 +111,32 @@ class StoppableTrainer:
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
-    def __init__(self, model=None, criterion=None, optimizer=None, dataset=None,
-                 save_path=None, batchsize=1, num_workers=0,
-                 schedulers=None, overlay_alpha=0.2,
-                 enable_tensorboard=True, tensorboard_root_path='~/tb/',
-                 cuda_enabled='auto', ignore_errors=False, ipython_on_error=True):
+    # TODO: Advertise public attributes better, prefix private attributes with underscores
+
+    tb: TensorBoardLogger
+    terminate: bool
+    iterations: int
+    loader: torch.utils.data.DataLoader
+    valid_loader: torch.utils.data.DataLoader
+
+
+    def __init__(
+            self,
+            model: torch.nn.Module,
+            criterion: torch.nn.Module,
+            optimizer: torch.optim.Optimizer,
+            dataset: torch.utils.data.Dataset,
+            save_path: str,
+            batchsize: int = 1,
+            num_workers: int = 0,
+            schedulers: Optional[Dict[Any, Any]] = None,
+            overlay_alpha: float = 0.2,
+            enable_tensorboard: bool = True,
+            tensorboard_root_path: str = '~/tb/',
+            cuda_enabled: Union[bool, str] = 'auto',
+            ignore_errors: bool = False,
+            ipython_on_error: bool = True
+    ):
         if cuda_enabled == 'auto':
             cuda_enabled = torch.cuda.is_available()
             device = 'GPU' if cuda_enabled else 'CPU'
@@ -142,7 +164,7 @@ class StoppableTrainer:
         self.tracker = HistoryTracker()
         self.timer = Timer()
         if schedulers is None:
-            schedulers = {"lr": StepLR(optimizer, 1000, 1)}
+            schedulers = {"lr": StepLR(optimizer, 1000, 1)}  # No-op scheduler
         else:
             assert type(schedulers) == dict
         self.schedulers = schedulers
@@ -201,7 +223,7 @@ class StoppableTrainer:
     # TODO: Try to modularize it as well as possible while keeping the
     #       above-mentioned requirement. E.g. the history tracking stuff can
     #       be refactored into smaller functions
-    def train(self, epochs=1):  # TODO: Rename epochs
+    def train(self, epochs: int = 1) -> None:  # TODO: Rename epochs
         while self.iterations < epochs:
             try:
                 # --> self.train()
@@ -213,7 +235,7 @@ class StoppableTrainer:
                 # Other scalars to be logged
                 misc: Dict[str, float] = {}
                 # Hold image tensors for real-time training sample visualization in tensorboard
-                images: Dict[str, Variable] = {}
+                images: Dict[str, torch.Tensor] = {}
 
                 numel = 0
                 target_sum = 0
@@ -358,13 +380,21 @@ class StoppableTrainer:
 
         return val_loss, val_err
 
-    def tb_log_scalars(self, stats, misc):
+    def tb_log_scalars(
+            self,
+            stats: Dict[str, float],
+            misc: Dict[str, float]
+    ) -> None:
         for key, value in stats.items():
             self.tb.log_scalar(f'stats/{key}', value, self.iterations)
         for key, value in misc.items():
             self.tb.log_scalar(f'misc/{key}', value, self.iterations)
 
-    def tb_log_preview(self, z_plane=None, group='preview_batch'):
+    def tb_log_preview(
+            self,
+            z_plane: Optional[int] = None,
+            group: str = 'preview_batch'
+    ) -> None:
         """Preview from constant region of preview batch data"""
         _, out = preview_inference(self.model, self.dataset)
 
@@ -391,7 +421,12 @@ class StoppableTrainer:
             self.tb.log_image(f'{group}/target', target, step=0)
             self.first_plot = False
 
-    def tb_log_sample_images(self, images, z_plane=None, group='sample'):
+    def tb_log_sample_images(
+            self,
+            images: Dict[str, torch.Tensor],
+            z_plane: Optional[int] = None,
+            group: str = 'sample'
+    ) -> None:
         """Preview from last training/validation sample
 
         Since the images are chosen randomly from the training/validation set
@@ -433,7 +468,7 @@ class StoppableTrainer:
 # TODO: Move all the functions below out of trainer.py
 
 
-def maxclass(class_predictions: Variable):
+def maxclass(class_predictions: torch.Tensor):
     """For each point in a tensor, determine the class with max. probability.
 
     Args:
@@ -447,7 +482,7 @@ def maxclass(class_predictions: Variable):
 
 
 # TODO
-def save_to_h5(fname: str, model_output: Variable):
+def save_to_h5(fname: str, model_output: torch.Tensor):
     raise NotImplementedError
 
     maxcl = maxclass(model_output)  # TODO: Ensure correct shape
@@ -463,7 +498,11 @@ def save_to_h5(fname: str, model_output: Variable):
     )
 
 
-def preview_inference(model, dataset=None, cuda_enabled='auto'):
+def preview_inference(
+        model: torch.nn.Module,
+        dataset: Optional[torch.utils.data.Dataset] = None,
+        cuda_enabled: Union[bool, str] = 'auto'
+) -> Tuple[torch.Tensor, torch.Tensor]:
     model.eval()  # Set dropout and batchnorm to eval mode
     # logger.info("Starting preview prediction")
     if cuda_enabled == 'auto':
