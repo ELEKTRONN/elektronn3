@@ -11,7 +11,7 @@ import os
 import sys
 import time
 import traceback
-from typing import Tuple
+from typing import Tuple, Dict, Optional, Union, Sequence, Any
 
 import h5py
 import numpy as np
@@ -133,14 +133,34 @@ class PatchCreator(data.Dataset):
         cuda_enabled: Determine if cuda should be used.
             This option will be removed.
     """
-    def __init__(self, input_path=None, target_path=None,
-                 input_h5data=None, target_h5data=None, cube_prios=None, valid_cube_indices=None,
-                 border_mode='crop', aniso_factor=2, target_vec_ix=None,
-                 target_discrete_ix=None, mean=None, std=None, normalize=True,
-                 source='train', patch_shape=None, preview_shape=None,
-                 grey_augment_channels=None, warp=False, warp_args=None,
-                 ignore_thresh=False, force_dense=False, class_weights=False,
-                 epoch_size=100, eager_init=True, cuda_enabled='auto'):
+    def __init__(
+            self,
+            input_path: str,
+            target_path: str,
+            input_h5data: Dict[str, str],
+            target_h5data: Dict[str, str],
+            patch_shape: Sequence[int],
+            cube_prios: Optional[Sequence[float]] = None,
+            valid_cube_indices: Optional[Sequence[int]] = None,
+            border_mode='crop',
+            aniso_factor: int = 2,
+            target_vec_ix=None,
+            target_discrete_ix=None,
+            mean: Optional[float] = None,
+            std: Optional[float] = None,
+            normalize: bool = True,
+            source: str = 'train',
+            preview_shape: Optional[Sequence[int]] = None,
+            grey_augment_channels: Optional[Sequence[int]] = None,
+            warp: Union[bool, float] = False,
+            warp_args: Optional[Dict[str, Any]] = None,
+            ignore_thresh=False,
+            force_dense=False,
+            class_weights: bool = False,
+            epoch_size: int = 100,
+            eager_init: bool = True,
+            cuda_enabled: Union[bool, str] = 'auto'
+    ):
         assert (input_path and target_path and input_h5data and target_h5data)
         if len(input_h5data)!=len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
@@ -184,7 +204,7 @@ class PatchCreator(data.Dataset):
         self.strides = np.array([1, 1, 1], dtype=np.int) #np.array(target_node.shape.strides, dtype=np.int)
         self.offsets = np.array([0, 0, 0], dtype=np.int) #np.array(target_node.shape.offsets, dtype=np.int)
         self.target_ps = self.patch_shape - self.offsets * 2
-        self.target_dtype = np.int64
+        self._target_dtype = np.int64
         self.mode = 'img-img'  # TODO: what would change for img-scalar? Is that even neccessary?
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
@@ -243,7 +263,8 @@ class PatchCreator(data.Dataset):
         else:
             self.class_weights = None
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
+        #                                      np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
         if self.grey_augment_channels is None:
@@ -253,7 +274,7 @@ class PatchCreator(data.Dataset):
         while True:
             try:
                 inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_args)
-                target = target.astype(self.target_dtype)
+                target = target.astype(self._target_dtype)
                 # Arbitrarily choosing 100 as the threshold here, because we
                 # currently can't find out the total number of classes in the
                 # data set automatically. The assumption here is that no one
@@ -310,20 +331,19 @@ class PatchCreator(data.Dataset):
         #  target channels (not to be confused with the number of classes
         #  for the classification problem, C. Since there is no support for
         #  K > 1, the K dimension will be removed. See help(torch.nn.NLLLoss).
-        #  (What kind of data set would require K > 1? Partial support for it
-        #   exists in warp_slice() (see n_f_t), so I am not sure if it
-        #   can just be completely be removed...)
         target = target.squeeze(0)  # (K, (D,) H, W) -> ((D,) H, W)
         # TODO: Don't even create this dimension in the first place?
         # TODO: Make this more robust. Ensure everything works if the supplied
         #       data set has no K dimension in target arrays.
 
+        # inp, target are still numpy arrays here. Relying on auto-conversion to
+        #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
         return inp, target
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.epoch_size
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
             "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
             "pixels."
@@ -336,7 +356,7 @@ class PatchCreator(data.Dataset):
 
     # TODO: Respect separate channels
     @property
-    def mean(self):
+    def mean(self) -> float:
         if self._mean is None:
             logger.warning(
                 'Calculating mean of training inputs. This is potentially slow. Please supply\n'
@@ -349,7 +369,7 @@ class PatchCreator(data.Dataset):
 
     # TODO: Respect separate channels
     @property
-    def std(self):
+    def std(self) -> float:
         if self._std is None:
             logger.warning(
                 'Calculating std of training inputs. This is potentially slow. Please supply\n'
@@ -367,11 +387,11 @@ class PatchCreator(data.Dataset):
             logger.info(f'std = {self._std:.6f}')
         return self._std
 
-    def validate(self):
+    def validate(self) -> None:
         self.source = "valid"
         self.epoch_size = 10
 
-    def train(self):
+    def train(self) -> None:
         self.source = "train"
         self.epoch_size = self._orig_epoch_size
 
@@ -379,8 +399,7 @@ class PatchCreator(data.Dataset):
             self,
             inp_source: h5py.Dataset,
             target_source: h5py.Dataset,
-    ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
-
+    ) -> Tuple[torch.Tensor, torch.LongTensor]:
         # Central slicing
         halfshape = np.array(self.preview_shape) // 2
         if inp_source.ndim == 4:
@@ -408,7 +427,7 @@ class PatchCreator(data.Dataset):
         inp_np = slice_h5(inp_source, inp_lo, inp_hi, prepend_batch_axis=True)
         target_np = slice_h5(
             target_source, target_lo, target_hi,
-            dtype=self.target_dtype, prepend_batch_axis=True
+            dtype=self._target_dtype, prepend_batch_axis=True
         )
 
         if self.normalize:
@@ -439,7 +458,7 @@ class PatchCreator(data.Dataset):
     # TODO: Make targets optional so we can have larger previews without ground truth targets?
 
     @property
-    def preview_batch(self) -> Tuple[Variable, Variable]:
+    def preview_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
         if self._preview_batch is None:
             inp, target = self._create_preview_batch(
                 self.valid_inputs[0], self.valid_targets[0]
@@ -449,12 +468,12 @@ class PatchCreator(data.Dataset):
         return self._preview_batch
 
     @property
-    def warp_stats(self):
+    def warp_stats(self) -> str:
         return "Warp stats: successful: %i, failed %i, quota: %.1f" %(
             self.n_successful_warp, self.n_failed_warp,
             float(self.n_successful_warp)/(self.n_failed_warp+self.n_successful_warp))
 
-    def _reseed(self):
+    def _reseed(self) -> None:
         """Reseeds the rng if the process ID has changed!"""
         current_pid = os.getpid()
         if current_pid != self.pid:
@@ -464,7 +483,13 @@ class PatchCreator(data.Dataset):
                 np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
             )
 
-    def warp_cut(self, inp_src, target_src, warp, warp_params):
+    def warp_cut(
+            self,
+            inp_src: h5py.Dataset,
+            target_src: h5py.Dataset,
+            warp: Union[float, bool],
+            warp_params: Dict[str, Any]
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
 

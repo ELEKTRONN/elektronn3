@@ -74,7 +74,7 @@ class StoppableTrainer:
             the ``dataset``.
         save_path: Path where trained model checkpoints are saved.
             The last part of this path ("basename") determines the
-            ``save_name`` if ``save_name`` is not explicitly specified.
+            ``save_name`` attribute.
         batchsize: Desired batch size of training samples.
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
@@ -106,7 +106,6 @@ class StoppableTrainer:
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
     """
-    # TODO: Optionally make save_name configurable, just fall back to save_path basename.
     # TODO: Consider merging tensorboard_root_path with save_path so we have everything in one place.
     # TODO: Write logs of the text logger to a file in save_path. The file
     #       handler should be replaced (see elektronn3.logger module).
@@ -123,6 +122,7 @@ class StoppableTrainer:
     step: int
     train_loader: torch.utils.data.DataLoader
     valid_loader: torch.utils.data.DataLoader
+    save_name: str
 
     def __init__(
             self,
@@ -154,8 +154,6 @@ class StoppableTrainer:
         self.dataset = dataset
         self.overlay_alpha = overlay_alpha
         self.save_path = save_path
-        if save_path is not None and not os.path.isdir(save_path):
-            os.makedirs(save_path)
         self.batchsize = batchsize
         self.num_workers = num_workers
 
@@ -166,6 +164,9 @@ class StoppableTrainer:
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
+
+        os.makedirs(save_path)
+        self.save_name = basename(normpath(self.save_path))
 
         self.terminate = False
         self.step = 0
@@ -203,10 +204,6 @@ class StoppableTrainer:
         if self.cuda_enabled:
             self.model.cuda()
             self.criterion.cuda()
-
-    @property
-    def save_name(self):
-        return basename(normpath(self.save_path)) if self.save_path is not None else None
 
     # Yeah I know this is an abomination, but this monolithic function makes
     # it possible to access all important locals from within the
