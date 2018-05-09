@@ -98,6 +98,8 @@ class StoppableTrainer:
             tensorboard log directories are created. Log ("event") files are
             written to a subdirectory that has the same name as the
             ``exp_name``.
+            If ``tensorboard_root_path`` is not set, tensorboard logs are
+            written to ``save_path`` (next to model checkpoints, plots etc.).
         device: The device on which the network shall be trained.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
@@ -142,7 +144,7 @@ class StoppableTrainer:
             schedulers: Optional[Dict[Any, Any]] = None,  # TODO: Define a Scheduler protocol. This needs typing_extensions.
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
-            tensorboard_root_path: str = '~/tb/',
+            tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
             ipython_on_error: bool = True
     ):
@@ -154,7 +156,7 @@ class StoppableTrainer:
         self.optimizer = optimizer
         self.dataset = dataset
         self.overlay_alpha = overlay_alpha
-        self.save_root = save_root
+        self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
         self.num_workers = num_workers
 
@@ -184,11 +186,14 @@ class StoppableTrainer:
             logger.warning('Tensorboard is not available, so it has to be disabled.')
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
-            self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
-            tb_dir = os.path.join(self.tensorboard_root_path, self.exp_name)
-            os.makedirs(tb_dir, exist_ok=True)
+            if tensorboard_root_path is None:
+                tb_path = self.save_path
+            else:
+                tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
+                tb_path = os.path.join(tensorboard_root_path, self.exp_name)
+                os.makedirs(tb_path, exist_ok=True)
             # TODO: Make always_flush user-configurable here:
-            self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
+            self.tb = TensorBoardLogger(log_dir=tb_path, always_flush=False)
 
         self.train_loader = DelayedDataLoader(
             self.dataset, batch_size=self.batchsize, shuffle=False,
