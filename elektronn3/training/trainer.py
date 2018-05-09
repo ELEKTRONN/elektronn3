@@ -319,8 +319,13 @@ class StoppableTrainer:
                 if self.save_path is not None:
                     torch.save(
                         self.model.state_dict(),
-                        os.path.join(self.save_path, f'model-{self.step:06d}.pth')
+                        # os.path.join(self.save_path, f'model-{self.step:06d}.pth')  # Saving with different file names leads to heaps of large files,
+                        os.path.join(self.save_path, 'model-checkpoint.pth')
                     )
+                    # TODO: Also save "best" model, not only the latest one, which is often overfitted.
+                    #       -> "best" in which regard? Lowest validation loss, validation error?
+                    #          We can't blindly trust these metrics and may have to calculate
+                    #          additional metrics (with focus on object boundary correctness).
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
