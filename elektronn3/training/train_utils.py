@@ -66,19 +66,19 @@ class HistoryTracker:
         self.regression_track[0].append(pred)
         self.regression_track[1].append(target)
 
-    def plot(self, save_name=None, autoscale=True, close=True, loss_smoothing_len=200):
-        plotting.plot_hist(self.timeline, self.history, save_name,
+    def plot(self, save_path=None, autoscale=True, close=True, loss_smoothing_len=200):
+        plotting.plot_hist(self.timeline, self.history, save_path,
                            loss_smoothing_len, autoscale)
 
         if self.debug_output_names and self.debug_outputs.length:
             plotting.plot_debug(self.debug_outputs, self.debug_output_names,
-                                save_name)
+                                save_path)
 
         if self.regression_track:
             plotting.plot_regression(self.regression_track[0],
-                                     self.regression_track[1], save_name)
+                                     self.regression_track[1], save_path)
             plotting.plot_kde(self.regression_track[0],
-                              self.regression_track[1], save_name)
+                              self.regression_track[1], save_path)
 
         if close:
             plt.close('all')

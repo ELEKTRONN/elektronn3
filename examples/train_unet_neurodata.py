@@ -16,7 +16,7 @@ from torch import optim
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('--save-name', default=None, help='Manually set save_name')
+parser.add_argument('--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
     '--epoch-size', type=int, default=100,
     help='How many training samples to process between '
@@ -42,8 +42,8 @@ from elektronn3.models.unet import UNet
 
 # USER PATHS
 data_path = os.path.expanduser('~/neuro_data_cdhw/')
-path_prefix = os.path.expanduser('~/e3training/')
-os.makedirs(path_prefix, exist_ok=True)
+save_root = os.path.expanduser('~/e3training/')
+os.makedirs(save_root, exist_ok=True)
 
 max_steps = 500000
 lr = 0.0004
@@ -64,12 +64,6 @@ torch.manual_seed(0)
 if device.type == 'cuda':
     torch.cuda.manual_seed(0)
 
-if args.save_name is None:
-    timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
-    save_name = model.__class__.__name__ + '__' + timestamp
-else:
-    save_name = args.save_name  # TODO: Warn if directory already exists
-save_path = os.path.join(path_prefix, save_name)
 
 data_init_kwargs = {
     'input_path': data_path,
@@ -107,14 +101,15 @@ criterion = nn.CrossEntropyLoss(weight=dataset.class_weights).to(device)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
 st = StoppableTrainer(
-    model,
+    model=model,
     criterion=criterion,
     optimizer=optimizer,
+    device=device,
     dataset=dataset,
     batchsize=batch_size,
     num_workers=2,
-    save_path=save_path,
-    schedulers={"lr": lr_sched},
-    device=device
+    save_root=save_root,
+    exp_name=args.exp_name,
+    schedulers={"lr": lr_sched}
 )
 st.train(max_steps)

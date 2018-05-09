@@ -4,12 +4,11 @@
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
-
+import datetime
 import logging
 import os
 import traceback
 
-from os.path import normpath, basename
 from textwrap import dedent
 from typing import Tuple, Dict, Optional, Union, Any
 
@@ -72,9 +71,14 @@ class StoppableTrainer:
             Currently only instances of
             :py:class:`elektronn3.data.cnndata.PatchCreator` are supported as
             the ``dataset``.
-        save_path: Path where trained model checkpoints are saved.
-            The last part of this path ("basename") determines the
-            ``save_name`` attribute.
+        save_root: Root directory where training-related files are
+            stored. Files are always written to the subdirectory
+            ``save_root/exp_name/``.
+        exp_name: Name of the training experiment. Determines the subdirectory
+            to which files are written and should uniquely identify one
+            training experiment.
+            If ``exp_name`` is not set, it is auto-generated from the model
+            name and a time stamp in the format ``'%y-%m-%d_%H-%M-%S'``.
         batchsize: Desired batch size of training samples.
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
@@ -93,7 +97,7 @@ class StoppableTrainer:
         tensorboard_root_path: Path to the root directory under which
             tensorboard log directories are created. Log ("event") files are
             written to a subdirectory that has the same name as the
-            ``save_name``.
+            ``exp_name``.
         device: The device on which the network shall be trained.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
@@ -105,8 +109,8 @@ class StoppableTrainer:
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
     """
-    # TODO: Consider merging tensorboard_root_path with save_path so we have everything in one place.
-    # TODO: Write logs of the text logger to a file in save_path. The file
+    # TODO: Consider merging tensorboard_root_path with save_root so we have everything in one place.
+    # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
@@ -121,16 +125,18 @@ class StoppableTrainer:
     step: int
     train_loader: torch.utils.data.DataLoader
     valid_loader: torch.utils.data.DataLoader
-    save_name: str
+    exp_name: str
+    save_path: str  # Full path to where training files are stored
 
     def __init__(
             self,
             model: torch.nn.Module,
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
-            dataset: PatchCreator,
-            save_path: str,
             device,  # torch.Device type is not available
+            dataset: PatchCreator,
+            save_root: str,
+            exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,  # TODO: Define a Scheduler protocol. This needs typing_extensions.
@@ -148,7 +154,7 @@ class StoppableTrainer:
         self.optimizer = optimizer
         self.dataset = dataset
         self.overlay_alpha = overlay_alpha
-        self.save_path = save_path
+        self.save_root = save_root
         self.batchsize = batchsize
         self.num_workers = num_workers
 
@@ -160,8 +166,12 @@ class StoppableTrainer:
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
 
-        os.makedirs(save_path)
-        self.save_name = basename(normpath(self.save_path))
+        if exp_name is None:  # Auto-generate a name based on model name and ISO timestamp
+            timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
+            exp_name = model.__class__.__name__ + '__' + timestamp
+        self.exp_name = exp_name
+        self.save_path = os.path.join(save_root, exp_name)
+        os.makedirs(self.save_path, exist_ok=True)  # TODO: Warn if directory already exists
 
         self.terminate = False
         self.step = 0
@@ -174,9 +184,8 @@ class StoppableTrainer:
             logger.warning('Tensorboard is not available, so it has to be disabled.')
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
-            # tb_dir = os.path.join(save_path, 'tb')
             self.tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
-            tb_dir = os.path.join(self.tensorboard_root_path, self.save_name)
+            tb_dir = os.path.join(self.tensorboard_root_path, self.exp_name)
             os.makedirs(tb_dir, exist_ok=True)
             # TODO: Make always_flush user-configurable here:
             self.tb = TensorBoardLogger(log_dir=tb_dir, always_flush=False)
@@ -274,7 +283,6 @@ class StoppableTrainer:
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
 
-                # --> self.step():
                 stats['val_loss'], stats['val_err'] = self.validate()
 
                 if self.step // len(self.dataset) > 1:
@@ -302,10 +310,12 @@ class StoppableTrainer:
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
                 if self.save_path is not None:
-                    self._tracker.plot(self.save_path + "/" + self.save_name)
-                if self.save_path is not None and (self.step // len(self.dataset)) % 100 == 99:
-                    # preview_inference(self.model, self.dataset, self.save_path + "/" + self.save_name + ".h5")
-                    torch.save(self.model.state_dict(), "%s/%s-%d-model.pkl" % (self.save_path, self.save_name, self.step))
+                    self._tracker.plot(self.save_path)
+                if self.save_path is not None:
+                    torch.save(
+                        self.model.state_dict(),
+                        os.path.join(self.save_path, f'model-{self.step:06d}.pth')
+                    )
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
@@ -324,7 +334,10 @@ class StoppableTrainer:
                         return
                 else:
                     raise e
-        torch.save(self.model.state_dict(), "%s/%s-final-model.pkl" % (self.save_path, self.save_name))
+        torch.save(
+            self.model.state_dict(),
+            os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
+        )
 
     def validate(self) -> Tuple[float, float]:
         self.dataset.validate()  # Switch dataset to validation sources
@@ -449,10 +462,10 @@ def maxclass(class_predictions: torch.Tensor):
     """For each point in a tensor, determine the class with max. probability.
 
     Args:
-        class_predictions: Tensor of shape (N, C, D, H, W)
+        class_predictions: Tensor of shape (N, C, ...)
 
     Returns:
-        Tensor of shape (N, D, H, W)
+        Tensor of shape (N, ...)
     """
     maxcl = class_predictions.max(dim=1)[1]
     return maxcl
