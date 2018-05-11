@@ -57,10 +57,10 @@ changes.
 
 ## Using Tensorboard
 
-Tensorboard logs are saved in `~/tb/` by default, so you can track training
+Tensorboard logs are saved in `~/e3training/` by default, so you can track training
 progress by running a tensorboard server there:
 
-    tensorboard --logdir ~/tb
+    tensorboard --logdir ~/e3training/
 
 Then you can view the visualizations at http://localhost:6006.
 
