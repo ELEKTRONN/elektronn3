@@ -15,7 +15,7 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 
 - Linux (support for Windows, MacOS and other systems is not planned)
 - Python 3.6 or later
-- PyTorch master 0.4.0 (unreleased, [7b33ef4](https://github.com/pytorch/pytorch/tree/7b33ef4cffed0dcd5c2506c4db1b2624736a22a3))
+- PyTorch 0.4.0
 - For other requirements see `requirements.txt`
 
 
