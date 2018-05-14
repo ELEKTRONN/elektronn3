@@ -62,10 +62,23 @@ class PatchCreator(data.Dataset):
         target_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
             each item specifies the filename relative to target_path and
             the HDF5 dataset key under which the target data is stored.
+        patch_shape: Desired spatial shape of the samples that the iterator
+            delivers by slicing from the data set files.
+            Since this determines the size of input samples that are fed
+            into the neural network, this is a very important value to tune.
+            Making it too large can result in slow training and excessive
+            memory consumption, but if it is too small, it can hinder the
+            perceptive ability of the neural network because the samples it
+            "sees" get too small to extract meaningful features.
+            Adequate values for ``patch_shape`` are highly dependent on the
+            data set ("How large are typical ROIs? How large does an image
+            patch need to be so you can understand the input?") and also
+            depend on the neural network architecture to be used (If the
+            effective receptive field of the network is small, larger patch
+            sizes won't help much).
         cube_prios: List of per-cube priorities, where a higher priority
             means that it is more likely that a sample comes from this cube.
         valid_cube_indices:
-        border_mode: (To be removed)
         aniso_factor: Depth-anisotropy factor of the data set. E.g.
             if your data set has half resolution in the depth dimension,
             set ``aniso_factor=2``. If all dimensions have the same
@@ -84,20 +97,6 @@ class PatchCreator(data.Dataset):
             data.
             If ``source='train'``, training data is returned.
             If ``source='valid'``, validation data is returned.
-        patch_shape: Desired spatial shape of the samples that the iterator
-            delivers by slicing from the data set files.
-            Since this determines the size of input samples that are fed
-            into the neural network, this is a very important value to tune.
-            Making it too large can result in slow training and excessive
-            memory consumption, but if it is too small, it can hinder the
-            perceptive ability of the neural network because the samples it
-            "sees" get too small to extract meaningful features.
-            Adequate values for ``patch_shape`` are highly dependent on the
-            data set ("How large are typical ROIs? How large does an image
-            patch need to be so you can understand the input?") and also
-            depend on the neural network architecture to be used (If the
-            effective receptive field of the network is small, larger patch
-            sizes won't help much).
         preview_shape: Desired spatial shape of the dedicated preview batch.
             The preview batch is obtained by slicing a patch of this
             shape out of the center of the preview cube.
@@ -113,7 +112,6 @@ class PatchCreator(data.Dataset):
             :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
-        force_dense: (To be removed)
         class_weights: If ``True``, target class weights (for the loss
             function) are calculated on the available training targets
             when the class is instantiated.
@@ -129,6 +127,10 @@ class PatchCreator(data.Dataset):
             are lazily performed only when they are needed.
             It's not recommended to change this option.
         device: The device on which to allocate data.
+        squeeze_target: If ``True``, target tensors will be squeezed in their
+            channel axis if it is empty. This workaround and will be removed
+            later. It is currently needed to support targets that have an
+            extra channel axis which doesn't exist in the network outputs.
     """
     def __init__(
             self,
@@ -154,7 +156,8 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             class_weights: bool = False,
             epoch_size: int = 100,
-            eager_init: bool = True
+            eager_init: bool = True,
+            squeeze_target: bool = False,
     ):
         assert (input_path and target_path and input_h5data and target_h5data)
         if len(input_h5data)!=len(target_h5data):
@@ -167,6 +170,14 @@ class PatchCreator(data.Dataset):
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_kwargs = warp_kwargs
+        self.squeeze_target = squeeze_target
+        # TODO: Instead of overly specific hacks like squeeze_target, we should
+        #       make "transformations" like this fully customizable, similar to
+        #       the `torchvision.transforms` interface.
+        #       E.g. squeeze_target could then be implemented as a
+        #       `lambda x: x.squeeze(0)` transformation that can be combined
+        #       with others. Non-geometric augmentations and normalization could
+        #       also be implemented as pluggable transformations.
 
         # general properties
         # TODO: Merge *_path with *_h5data, i.e. *_h5data should contain tuples (<full/path/to/hdf5.h5>, <hdf5datasetkey>).
@@ -319,12 +330,14 @@ class PatchCreator(data.Dataset):
 
         # target is now of shape (K, D, H, W), where K is the number of
         #  target channels (not to be confused with the number of classes
-        #  for the classification problem, C. Since there is no support for
-        #  K > 1, the K dimension will be removed. See help(torch.nn.NLLLoss).
-        target = target.squeeze(0)  # (K, (D,) H, W) -> ((D,) H, W)
-        # TODO: Don't even create this dimension in the first place?
-        # TODO: Make this more robust. Ensure everything works if the supplied
-        #       data set has no K dimension in target arrays.
+        #  for the classification problem, C.
+        if self.squeeze_target:
+            # If K == 1, K is squeezed here to match common network output
+            #  shapes (which usually lack a K axis).
+            # Make sure it's actually the channel axis we're squeezing here,
+            #  not a spatial dimension that's coincidentally of size 1:
+            assert len(self.target_ps) == target_src.ndim - 1
+            target = target.squeeze(0)  # (K, (D,) H, W) -> ((D,) H, W)
 
         # inp, target are still numpy arrays here. Relying on auto-conversion to
         #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
@@ -414,10 +427,10 @@ class PatchCreator(data.Dataset):
                 'preview_shape is too big for shape of target source.'
                 f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
             )
-        inp_np = slice_h5(inp_source, inp_lo, inp_hi, prepend_batch_axis=True)
+        inp_np = slice_h5(inp_source, inp_lo, inp_hi, prepend_empty_axis=True)
         target_np = slice_h5(
             target_source, target_lo, target_hi,
-            dtype=self._target_dtype, prepend_batch_axis=True
+            dtype=self._target_dtype, prepend_empty_axis=True
         )
 
         if self.normalize:
@@ -429,7 +442,10 @@ class PatchCreator(data.Dataset):
         # See comments at the end of PatchCreator.__getitem__()
         # Note that here it's the dimension index 1 that we're squeezing,
         #  because index 0 is the batch dimension.
-        target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, D, H, W)
+        if self.squeeze_target:
+            assert len(self.target_ps) == target_source.ndim - 1
+            target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, (D,) H, W)
+
 
         return inp, target
 

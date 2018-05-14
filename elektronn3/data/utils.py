@@ -24,7 +24,7 @@ def slice_h5(
         coords_lo: Sequence,
         coords_hi: Sequence,
         dtype: type = np.float32,
-        prepend_batch_axis: bool = False,
+        prepend_empty_axis: bool = False,
         max_retries: int = 5,
 ) -> np.ndarray:
     if max_retries <= 0:
@@ -61,7 +61,7 @@ def slice_h5(
             f'Read error. Retrying at the same location ({max_retries} attempts remaining)...'
         )
         # Try slicing from the same coordinates, but with max_retries -= 1.
-        # (Overriding prepend_batch_axis to False because the initial (outer)
+        # (Overriding prepend_empty_axis to False because the initial (outer)
         #  call will prepend the axis and propagating it to the recursive
         #  (inner) calls could lead to multiple axes being prepended.)
         cut = slice_h5(
@@ -69,12 +69,12 @@ def slice_h5(
             coords_lo=coords_lo,
             coords_hi=coords_hi,
             dtype=dtype,
-            prepend_batch_axis=False,  # See comment above
+            prepend_empty_axis=False,  # See comment above
             max_retries=(max_retries - 1)
         )
         # If the recursive call above was sucessfull, use its result `cut`
         # as if it was the immediate result of the first slice attempt.
-    if prepend_batch_axis:
+    if prepend_empty_axis:
         cut = cut[None]
         assert cut.ndim == 5
     else:

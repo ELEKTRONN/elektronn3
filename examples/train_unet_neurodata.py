@@ -84,7 +84,8 @@ data_init_kwargs = {
     'warp_kwargs': {
         'sample_aniso': True,
         'perspective': True
-    }
+    },
+    'squeeze_target': True,  # Workaround for neuro_data_cdhw
 }
 dataset = PatchCreator(**data_init_kwargs, device=device)
 
