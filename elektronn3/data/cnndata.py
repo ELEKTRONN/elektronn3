@@ -83,7 +83,6 @@ class PatchCreator(data.Dataset):
             if your data set has half resolution in the depth dimension,
             set ``aniso_factor=2``. If all dimensions have the same
             resolution, set ``aniso_factor=1``.
-        target_vec_ix:
         target_discrete_ix:
         mean: Mean of input data (if not set, it is automatically
             estimated on the training data during initialization).
@@ -144,7 +143,6 @@ class PatchCreator(data.Dataset):
             valid_cube_indices: Optional[Sequence[int]] = None,
             border_mode='crop',
             aniso_factor: int = 2,
-            target_vec_ix=None,
             target_discrete_ix=None,
             mean: Optional[float] = None,
             std: Optional[float] = None,
@@ -191,7 +189,6 @@ class PatchCreator(data.Dataset):
         self.valid_cube_indices = valid_cube_indices if valid_cube_indices is not None else []
         self.aniso_factor = aniso_factor
         self.border_mode = border_mode
-        self.target_vec_ix = target_vec_ix
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
@@ -544,7 +541,6 @@ class PatchCreator(data.Dataset):
             aniso_factor=self.aniso_factor,
             target_src=target_src,
             target_ps=self.target_ps,
-            target_vec_ix=self.target_vec_ix,
             target_discrete_ix=self.target_discrete_ix,
             rng=self.rng,
             **warp_kwargs

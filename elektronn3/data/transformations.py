@@ -76,31 +76,6 @@ def map_coordinates_linear(src, coords, lo, dest):
     dest[0] = val
 
 
-@numba.jit(nopython=True, cache=True)
-def map_coordinates_max_kernel(src, coords, lo, k, dest):
-    k = (k)
-    kz = min(0.5, k/2)
-    sh = coords.shape
-    sh_src = src.shape
-    for z in np.arange(sh[0]):
-        for x in np.arange(sh[1]):
-            for y in np.arange(sh[2]):
-                u = coords[z,x,y,0] - lo[0]
-                v = coords[z,x,y,1] - lo[1]
-                w = coords[z,x,y,2] - lo[2]
-
-                u0 = np.int32(np.round(max(0, min(sh_src[0], u - kz))))
-                u1 = np.int32(np.round(max(0, min(sh_src[0], u + kz))))
-                v0 = np.int32(np.round(max(0, min(sh_src[1], v - k))))
-                v1 = np.int32(np.round(max(0, min(sh_src[1], v + k))))
-                w0 = np.int32(np.round(max(0, min(sh_src[2], w - k))))
-                w1 = np.int32(np.round(max(0, min(sh_src[2], w + k))))
-
-                val = src[u0:u1, v0:v1, w0:w1].max()
-
-                dest[z, x, y] = val
-
-
 @lru_cache(maxsize=1)
 def identity():
     return np.eye(4, dtype=floatX)
@@ -260,8 +235,7 @@ class WarpingOOBError(ValueError):
 
 
 def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
-               target_vec_ix=None, target_discrete_ix=None,
-               last_ch_max_interp=False, ksize=0.5):
+               target_discrete_ix=None):
     """
     Cuts a warped slice out of the input image and out of the target_src image.
     Warping is applied by multiplying the original source coordinates with
@@ -292,12 +266,14 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         Optional target source array to be extracted from in the same way.
     target_ps: tuple
         Patch size for the ``target_src`` array.
-    target_vec_ix: list
-        List of triples that denote vector value parts in the target_src array.
-        E.g. [(0,1,2), (4,5,6)] denotes two vector fields, separated by a
-        scalar field in channel 3.
-    last_ch_max_interp: bool
-    ksize: float
+    target_discrete_ix: list
+        List of target channels that contain discrete values.
+        By default (``None``), every channel is is seen as discrete (this is
+        generally the case for classification tasks).
+        This information is used to decide what kind of interpolation should
+        be used for reading target data:
+        - discrete targets are obtained by nearest-neighbor interpolation
+        - non-discrete (continuous) targets are linearly interpolated.
 
     Returns
     -------
@@ -347,10 +323,7 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
     inp = np.zeros((n_f,)+ps, dtype=floatX)
     lo = lo.astype(floatX)
     for k in range(n_f):
-        if (ksize>0.5) and last_ch_max_interp and k == n_f - 1:
-            map_coordinates_max_kernel(img_cut[k], src_coords, lo, ksize, inp[k])
-        else:
-            map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
+        map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
     if target_src is not None:
         target_ps = tuple(target_ps)
         n_f_t = target_src.shape[0]
@@ -396,12 +369,6 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
             else:
                 map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
 
-        if target_vec_ix is not None: # Vectors must be transformed again
-            assert np.allclose(M[3,:3], 0.0) # no projective transform
-            M_lin = M[:3,:3]
-            for ix in target_vec_ix:
-                assert len(ix)==3
-                target[ix] = np.tensordot(M_lin, target[ix], axes=[[1],[0]])
         if np.any(target > n_target_classes):
             print(f'warp_slice: Invalid target: max = {target.max()}. Clipping target...')
             target = target.clip(0, n_target_classes)
@@ -413,7 +380,7 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
 
 def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
                      warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
-                     target_src=None, target_ps=None, target_vec_ix=None,
+                     target_src=None, target_ps=None,
                      target_discrete_ix=None, rng=None):
     """
     (Wraps :py:meth:`elektronn2.data.transformations.warp_slice()`)
@@ -448,8 +415,14 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
         Target image source (in HDF5)
     target_ps: np.array
         Target patch size
-    target_vec_ix
-    target_discrete_ix
+    target_discrete_ix:
+        List of target channels that contain discrete values.
+        By default (``None``), every channel is is seen as discrete (this is
+        generally the case for classification tasks).
+        This information is used to decide what kind of interpolation should
+        be used for reading target data:
+        - discrete targets are obtained by nearest-neighbor interpolation
+        - non-discrete (continuous) targets are linearly interpolated.
     rng: np.random.mtrand.RandomState
         Random number generator state (obtainable by
         ``np.random.RandomState()``). Passing a known state makes the random
@@ -519,7 +492,6 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
         M,
         target_src=target_src,
         target_ps=target_ps,
-        target_vec_ix=target_vec_ix,
         target_discrete_ix=target_discrete_ix
     )
 
