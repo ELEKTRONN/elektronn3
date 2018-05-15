@@ -83,7 +83,13 @@ class PatchCreator(data.Dataset):
             if your data set has half resolution in the depth dimension,
             set ``aniso_factor=2``. If all dimensions have the same
             resolution, set ``aniso_factor=1``.
-        target_discrete_ix:
+        target_discrete_ix: List of target channels that contain discrete values.
+            By default (``None``), every channel is is seen as discrete (this is
+            generally the case for classification tasks).
+            This information is used to decide what kind of interpolation should
+            be used for reading target data:
+            - discrete targets are obtained by nearest-neighbor interpolation
+            - non-discrete (continuous) targets are linearly interpolated.
         mean: Mean of input data (if not set, it is automatically
             estimated on the training data during initialization).
         std: Standard deviation of input data (if not set, it is automatically
@@ -143,7 +149,7 @@ class PatchCreator(data.Dataset):
             valid_cube_indices: Optional[Sequence[int]] = None,
             border_mode='crop',
             aniso_factor: int = 2,
-            target_discrete_ix=None,
+            target_discrete_ix: Optional[List[int]] = None,
             mean: Optional[float] = None,
             std: Optional[float] = None,
             normalize: bool = True,
