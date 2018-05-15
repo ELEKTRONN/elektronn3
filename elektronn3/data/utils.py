@@ -21,47 +21,70 @@ logger = logging.getLogger("elektronn3log")
 
 def slice_h5(
         src: h5py.Dataset,
-        coords_lo: Sequence,
-        coords_hi: Sequence,
+        coords_lo: Sequence[int],
+        coords_hi: Sequence[int],
         dtype: type = np.float32,
         prepend_empty_axis: bool = False,
         max_retries: int = 5,
 ) -> np.ndarray:
+    """ Slice a patch of image data out of a h5py dataset.
+
+    Args:
+        src: Source data set from which to read data. All non-spatial
+            dimensions (e.g. "channel" C) must first.
+            The last n dimensions must be spatial data (image pixels/voxels),
+            where n is the length of the coordinate vectors below.
+            Examples for supported shapes are:
+            - (C, D, H, W) for 3D images
+            - (C, H, W) for 2D images
+            - (C, D, H, W) for separate 2D images stacked along the D axis.
+            The C axis in the above examples is not strictly required.
+        coords_lo: Lower bound of the coordinates where data should be read
+            from in ``src``.
+        coords_hi: Upper bound of the coordinates where data should be read
+            from in ``src``.
+        dtype: NumPy ``dtype`` that the sliced array will be cast to if it
+            doesn't already have this dtype.
+        prepend_empty_axis: Prepends a new empty (1-sized) axis to the sliced
+            array before returning it.
+        max_retries: Maximum retries if a read error occurs when reading from
+            the HDF5 file.
+
+    Returns:
+        Sliced image array.
+    """
     if max_retries <= 0:
         logger.error(
             f'slice_h5(): max_retries exceeded at {coords_lo}, {coords_hi}. Aborting...'
         )
         raise ValueError
-    assert len(coords_lo) == len(coords_hi) == 3
+    # Separate spatial dimensions (..., H, W) from nonspatial dimensions (C, ...)
+    spatial_dims = len(coords_lo)  # Assuming coords_lo addresses all spatial dims
+    nonspatial_dims = src.ndim - spatial_dims  # Assuming every other dim is nonspatial
+
+    # Calculate necessary slice indices for reading the file
+    nonspatial_slice = [  # Slicing all available content in these dims.
+        slice(0, src.shape[i]) for i in range(nonspatial_dims)
+    ]
+    spatial_slice = [  # Slice only the content within the coordinate bounds
+        slice(coords_lo[i], coords_hi[i]) for i in range(spatial_dims)
+    ]
+    full_slice = nonspatial_slice + spatial_slice
+
     try:
-        if src.ndim == 4:
-            cut = src[
-                :,
-                coords_lo[0]:coords_hi[0],
-                coords_lo[1]:coords_hi[1],
-                coords_lo[2]:coords_hi[2]
-            ]
-        elif src.ndim == 3:
-            cut = src[
-                coords_lo[0]:coords_hi[0],
-                coords_lo[1]:coords_hi[1],
-                coords_lo[2]:coords_hi[2]
-            ]
-            cut = cut[None]  # Prepend a new C axis
-        else:
-            raise ValueError(  # TODO: Other (custom) exception type
-                f'src has wrong shape {src.shape}. Only 3D and 4D shapes are supported.'
-            )
+        # TODO: Use a better workaround or fix this in h5py:
+        srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
+        cut = srcv[full_slice]
     # Work around mysterious random HDF5 read errors by recursively calling
-    # this function from within itself until it works again or until
-    # max_retries is exceeded.
+    #  this function from within itself until it works again or until
+    #  max_retries is exceeded.
     except OSError:
         traceback.print_exc()
         logger.warning(
             f'Read error. Retrying at the same location ({max_retries} attempts remaining)...'
         )
         # Try slicing from the same coordinates, but with max_retries -= 1.
-        # (Overriding prepend_empty_axis to False because the initial (outer)
+        #  (Overriding prepend_empty_axis to False because the initial (outer)
         #  call will prepend the axis and propagating it to the recursive
         #  (inner) calls could lead to multiple axes being prepended.)
         cut = slice_h5(
@@ -72,13 +95,10 @@ def slice_h5(
             prepend_empty_axis=False,  # See comment above
             max_retries=(max_retries - 1)
         )
-        # If the recursive call above was sucessfull, use its result `cut`
+        # If the recursive call above was sucessful, use its result `cut`
         # as if it was the immediate result of the first slice attempt.
     if prepend_empty_axis:
         cut = cut[None]
-        assert cut.ndim == 5
-    else:
-        assert cut.ndim == 4
     if cut.dtype != dtype:
         cut = cut.astype(dtype)
     return cut
