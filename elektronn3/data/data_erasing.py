@@ -35,14 +35,14 @@ class FunctionCallsCounter():
 
 
 class ScalarScheduler(object):
-    """ The class is scheduler for a scalar value within an iterative
+    """ A scheduler for a scalar value within an iterative
     process according to either linear or exponential growth. The user
     specifies the initial value, the maximum one, growth type and the number
     of steps within which the scalar value has to be gradually scaled.
     At each iteration the user has to explicitly call step() to
     update and modify the scalar value
     If the user doesn't specify the maximum value or the interval,
-    the scalar value works as a constant
+    the scalar value works as a constant.
     """
     
     def __init__(self,
@@ -57,8 +57,8 @@ class ScalarScheduler(object):
         growth type is chosen correctly
         Parameters
         ----------
-        value - a scalar value at the beginning of an scheduled process
-        max_value - the scalar value at the end of an scheduled process
+        value - a scalar value at the beginning of a scheduled process
+        max_value - the scalar value at the end of a scheduled process
         growth_type - type of growth: "lin" - linear; "exp" - exponential
         interval - number of steps within which the scalar value has to be
             increased from the initial value to the maximal one
@@ -85,9 +85,9 @@ class ScalarScheduler(object):
                 self.update_function = self.exp_update
                 self.base = np.power((self.max_value / self.value), 1.0 / self.interval)
             else:
-                raise IncorrectValue(f'ERROR: ScalarScheduler class can only '
-                                     f'take \"growth_type\" parameter with values '
-                                     f'either \"lin\" or \"exp\". Value \"{growth_type}\" '
+                raise IncorrectValue('ERROR: ScalarScheduler class can only '
+                                     'take "growth_type" parameter with values '
+                                     f'either "lin" or "exp". Value "{growth_type}" '
                                      'has been passed instead')
 
         else:
@@ -148,7 +148,7 @@ class ScalarScheduler(object):
         if self.steps_per_report is not None:
 
             if (self.counter % self.steps_per_report) == 0:
-                logger.info(f'ScalarScheduler: '
+                logger.info('ScalarScheduler: '
                             f'value: {self.value}, '
                             f'counter: {self.counter}')
 
@@ -163,14 +163,14 @@ def check_random_data_blurring_config(patch_shape: list,
                                       verbose: bool = False,
                                       save_path: str = None,
                                       num_steps_save: int = None) -> None:
-    """ Checks random data blurring parameters and ensures the user
+    """ Checks random data blurring parameters and ensures
     that all parameters won't cause problems during apply_random_blurring
-    function calls. The function throws exceptions if a conflict is
+    function calls. The function raises exceptions if a conflict is
     detected. Use this function before a training procedure to be sure the config
     fulfills the requirements posed by the apply_random_blurring function
 
-    patch_shape - sizes of input sample along each axis: [depth, width, height]
-    probability - probability of applying the data random blurring algorithm
+    patch_shape - shape of input samples
+    probability - probability of applying the random blurring algorithm
     threshold - controls the level of data random blurring with respect to
         input sample volume
     lower_lim_region_size - min values of regions size along each axis
@@ -244,7 +244,7 @@ def apply_random_blurring(inp_sample: np.ndarray,
                           verbose: bool = False,
                           save_path: str = None,
                           num_steps_save: int = None) -> None:
-    """ Takes an input sample and applies data random blurring.
+    """ Takes an input sample and applies random blurring.
     At the beginning the function generates a random number within
     the range [0,1) and compares it with the probability value passed
     by the user. If the random number exceeds the probability value
@@ -253,18 +253,18 @@ def apply_random_blurring(inp_sample: np.ndarray,
     volume until the total accumulated region volume exceeds that value
     specified by means of the threshold parameter. The threshold denotes
     the percentage of input sample volume that has to be filled in
-    by regions. Regions have different spatial size which is randomly
+    by regions. Regions have different spatial shape which is randomly
     generated within the ranges specified by the user.
-    Moreover, the volume within a region is blurred by the Gaussian filter.
+    Moreover, the volume within a region is blurred by a Gaussian filter.
 
     Parameters
     ----------
-    inp_sample - raw data input sample with the format: [num_channels, depth, width, height]
-    probability - probability of applying the data random blurring algorithm
-    threshold - controls the level of data random blurring with respect to
+    inp_sample - input sample with the format (C, D, H, W)
+    probability - probability of applying the random blurring algorithm
+    threshold - controls the level of random blurring with respect to
         the input sample volume
-    lower_lim_region_size - min values of regions size along each axis
-    upper_lim_region_size - max values of regions size along each axis
+    lower_lim_region_size - min values of region size along each axis
+    upper_lim_region_size - max values of region size along each axis
     verbose - mode that controls text information on the screen
     save_path - path to the files that will contain modified (blurred)
         input sample in the "h5" format
