@@ -20,8 +20,8 @@ from torch.utils import data
 
 from elektronn3.data import transformations
 from elektronn3.data.utils import slice_h5
-from elektronn3.data.data_erasing import check_random_data_blurring_config
-from elektronn3.data.data_erasing import apply_random_blurring
+from elektronn3.data.random_blurring import check_random_data_blurring_config
+from elektronn3.data.random_blurring import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 

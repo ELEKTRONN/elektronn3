@@ -13,7 +13,7 @@ import os
 import torch
 from torch import nn
 from torch import optim
-from elektronn3.data.data_erasing import ScalarScheduler
+from elektronn3.data.random_blurring import ScalarScheduler
 
 
 parser = argparse.ArgumentParser(description='Train a network.')

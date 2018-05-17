@@ -314,11 +314,11 @@ def apply_random_blurring(inp_sample: np.ndarray,
                        region.coords_lo[1]:region.coords_hi[1] + 1,
                        region.coords_lo[2]:region.coords_hi[2] + 1] = snippet
 
-            erased_volume = len(intersection)
-            blurring_percentage = erased_volume / sample_volume
+            blurred_volume = len(intersection)
+            blurring_percentage = blurred_volume / sample_volume
 
         if verbose:
-            logger.info(f'erased percentage for channel {sample_indx}: {blurring_percentage}')
+            logger.info(f'blur percentage for channel {sample_indx}: {blurring_percentage}')
 
     if save_path and num_steps_save:
 
