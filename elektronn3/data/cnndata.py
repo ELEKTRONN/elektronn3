@@ -20,6 +20,8 @@ from torch.utils import data
 
 from elektronn3.data import transformations
 from elektronn3.data.utils import slice_h5
+from elektronn3.data.random_blurring import check_random_data_blurring_config
+from elektronn3.data.random_blurring import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 
@@ -117,6 +119,7 @@ class PatchCreator(data.Dataset):
             :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
+        random_blurring_config:
         class_weights: If ``True``, target class weights (for the loss
             function) are calculated on the available training targets
             when the class is instantiated.
@@ -158,6 +161,7 @@ class PatchCreator(data.Dataset):
             grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
+            random_blurring_config: Optional[Dict[str, Any]] = None,
             class_weights: bool = False,
             epoch_size: int = 100,
             eager_init: bool = True,
@@ -270,6 +274,10 @@ class PatchCreator(data.Dataset):
         else:
             self.class_weights = None
 
+        self.random_blurring_config = random_blurring_config
+        if self.random_blurring_config:
+            check_random_data_blurring_config(patch_shape, **self.random_blurring_config)
+
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
         #                                      np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
@@ -327,6 +335,9 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp += 1
             if self.normalize:
                 inp = (inp - self.mean) / self.std
+            if self.random_blurring_config and self.source == "train":
+                apply_random_blurring(inp_sample=inp,
+                                      **self.random_blurring_config)
             if self.grey_augment_channels and self.source == "train":  # grey augmentation only for training
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
