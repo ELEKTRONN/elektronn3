@@ -15,7 +15,7 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 
 - Linux (support for Windows, MacOS and other systems is not planned)
 - Python 3.6 or later
-- PyTorch master 0.4.0 (unreleased, [7b33ef4](https://github.com/pytorch/pytorch/tree/7b33ef4cffed0dcd5c2506c4db1b2624736a22a3))
+- PyTorch 0.4.0
 - For other requirements see `requirements.txt`
 
 
@@ -57,10 +57,10 @@ changes.
 
 ## Using Tensorboard
 
-Tensorboard logs are saved in `~/tb/` by default, so you can track training
+Tensorboard logs are saved in `~/e3training/` by default, so you can track training
 progress by running a tensorboard server there:
 
-    tensorboard --logdir ~/tb
+    tensorboard --logdir ~/e3training/
 
 Then you can view the visualizations at http://localhost:6006.
 

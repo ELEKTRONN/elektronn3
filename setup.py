@@ -18,7 +18,7 @@ setup(
     packages=find_packages(exclude=['scripts']),
 
     install_requires=[
-        # 'torch>=0.3.0',  # currently broken, see https://github.com/pytorch/pytorch/issues/566
+        'torch==0.4.0',
         'numpy',
         'scipy',
         'h5py',
@@ -28,8 +28,8 @@ setup(
         'pillow',
         'colorlog',
         'tqdm',
-        'tensorflow-tensorboard>=0.4.0rc3',
-        'tensorflow>=1.4.0',
+        'tensorflow-tensorboard>=1.7.0',
+        'tensorflow>=1.7.0',
     ],
 
 )

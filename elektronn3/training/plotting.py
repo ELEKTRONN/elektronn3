@@ -285,7 +285,7 @@ def add_timeticks(ax, times, steps, time_str='mins', num=5):
     ax.set_xlabel('Runtime [%s]' % time_str)  # (%s)'%("{0:,d}".format(N)))
 
 
-def plot_hist(timeline, history, save_name, loss_smoothing_length=200,
+def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
               autoscale=True):
     """Plot graphical info during Training"""
     plt.ioff()
@@ -373,7 +373,7 @@ def plot_hist(timeline, history, save_name, loss_smoothing_length=200,
 
         plt.tight_layout()
         with FileLock('plotting'):
-            plt.savefig(save_name + ".timeline.png", bbox_inches='tight')
+            plt.savefig(os.path.join(save_path, 'timeline.png'), bbox_inches='tight')
 
         ###################################################################
         ### History Loss ###
@@ -460,14 +460,14 @@ def plot_hist(timeline, history, save_name, loss_smoothing_length=200,
         plt.xlabel('Update steps %s, total runtime %s' % (N - 1, runtime))
         plt.tight_layout()
         with FileLock('plotting'):
-            plt.savefig(save_name + ".history.png", bbox_inches='tight')
+            plt.savefig(os.path.join(save_path, 'history.png'), bbox_inches='tight')
 
     except ValueError:
         # When arrays are empty
         logger.warning("An error occurred during plotting.")
 
 
-def plot_var(var, save_name):
+def plot_var(var, save_path):
     # [i, nll, nll.std, conc.mean, conc.std,]
     plt.figure(figsize=(16, 12))
     plt.subplot(211)
@@ -485,7 +485,7 @@ def plot_var(var, save_name):
     plt.title("Concentration")
 
     with FileLock('plotting'):
-        plt.savefig(save_name + ".Beta1.png", bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'beta1.png'), bbox_inches='tight')
 
     plt.figure(figsize=(12, 12))
     c = 1.0 - ((var[:, 0]).astype(floatX) / var[-1, 0])
@@ -511,10 +511,10 @@ def plot_var(var, save_name):
     plt.title("NLL vs. NLL.std")
 
     with FileLock('plotting'):
-        plt.savefig(save_name + ".Beta2.png", bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'beta2.png'), bbox_inches='tight')
 
 
-def plot_debug(var, debug_output_names, save_name):
+def plot_debug(var, debug_output_names, save_path):
     # [i, nll, other....]
     s = max((len(var) // 2000), 1)
     var = var[::s]
@@ -547,10 +547,10 @@ def plot_debug(var, debug_output_names, save_name):
     plt.grid()
 
     with FileLock('plotting'):
-        plt.savefig(save_name + ".Debug.png", bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'debug.png'), bbox_inches='tight')
 
 
-def plot_regression(pred, target, save_name, loss_smoothing_length=200,
+def plot_regression(pred, target, save_path, loss_smoothing_length=200,
                     autoscale=True):
     """Plot graphical info during Training"""
     try:
@@ -575,13 +575,13 @@ def plot_regression(pred, target, save_name, loss_smoothing_length=200,
         plt.ylabel('Target')
         plt.tight_layout()
         with FileLock('plotting'):
-            plt.savefig(save_name + ".regression.png", bbox_inches='tight')
+            plt.savefig(os.path.join(save_path, 'regression.png'), bbox_inches='tight')
     except ValueError:
         # When arrays are empty
         logger.warning("An error occurred during regression plotting.")
 
 
-def plot_kde(pred, target, save_name, limit=90, scale='same', grid=50,
+def plot_kde(pred, target, save_path, limit=90, scale='same', grid=50,
              take_last=4000):
     try:
         if take_last:
@@ -622,7 +622,7 @@ def plot_kde(pred, target, save_name, limit=90, scale='same', grid=50,
         plt.plot([mt, Mt], [mt, Mt], 'r:')
         plt.tight_layout()
         with FileLock('plotting'):
-            plt.savefig(save_name + ".regression_kde.png", bbox_inches='tight')
+            plt.savefig(os.path.join(save_path, 'regression_kde.png'), bbox_inches='tight')
     except ValueError:
         # When arrays are empty
         logger.warning("An error occurred during regression kde plotting.")

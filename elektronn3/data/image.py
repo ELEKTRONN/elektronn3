@@ -5,6 +5,11 @@
 # Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
 
 
+# TODO: Most or all of this module can probably be removed after careful
+#       review. If some of it is indeed useful, it needs to be rewritten.
+#       Basic overlay images can instead be generated with
+#       skimage.color.label2rgb()
+
 import numpy as np
 from PIL import Image
 from scipy.misc import imsave
@@ -21,9 +26,10 @@ def write_overlayimg(dest_path, raw, pred, fname, nb_of_slices, thresh=0.1):
     if nb_of_slices is not None:
         ixs = ixs[:nb_of_slices]
     for i in ixs:
-        create_label_overlay_img(pred[i], dest_path + "/%s_%d.png" % (fname, i),
+        comp = create_label_overlay_img(pred[i], dest_path + "/%s_%d.png" % (fname, i),
                                  background=raw[i] * 255,
                                  save_raw_img=False)
+    return comp
 
 
 def create_label_overlay_img(labels, save_path, background=None, cvals=None,
@@ -53,9 +59,10 @@ def create_label_overlay_img(labels, save_path, background=None, cvals=None,
     if len(label_prob_dict) == 0:
         print("No labels detected! No overlay image created")
     else:
-        create_prob_overlay_img(label_prob_dict, save_path,
+        comp = create_prob_overlay_img(label_prob_dict, save_path,
                                 background=background, cvals=cvals,
                                 save_raw_img=save_raw_img)
+        return comp
 
 
 def create_prob_overlay_img(label_prob_dict, save_path, background=None,
@@ -131,6 +138,8 @@ def create_prob_overlay_img(label_prob_dict, save_path, background=None,
         raw_save_path = "".join(save_path.split(".")[:-1]) + "_raw." + save_path.split(".")[-1]
         imsave(raw_save_path, background)
 
+    return comp
+
 
 def alpha_composite(src, dst):
     ''' http://stackoverflow.com/questions/3374878/with-the-python-imaging-library-pil-how-does-one-compose-an-image-with-an-alp/3375291#3375291
@@ -157,7 +166,6 @@ def alpha_composite(src, dst):
     out = out.astype('uint8')
     out = Image.fromarray(out, 'RGBA')
     return out
-
 
 
 def normalise(src):

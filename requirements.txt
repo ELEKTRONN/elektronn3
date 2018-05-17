@@ -1,6 +1,6 @@
 # python>=3.6
-# torch==0.4.0a0+7b33ef4  # Manually install from source
 
+torch==0.4.0
 numpy
 scipy
 h5py
@@ -13,5 +13,5 @@ pillow
 colorlog
 
 # For tensorboard logger (not strictly required):
-tensorflow-tensorboard>=0.4.0rc3
-tensorflow>=1.4.0
+tensorboard>=1.7.0
+tensorflow>=1.7.0
