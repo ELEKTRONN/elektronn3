@@ -13,5 +13,5 @@ pillow
 colorlog
 
 # For tensorboard logger (not strictly required):
-tensorboard>=1.7.0
-tensorflow>=1.7.0
+tensorboard>=1.8.0
+tensorflow>=1.8.0

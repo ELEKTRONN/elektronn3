@@ -1,0 +1,37 @@
+# Notes:
+# - This file only lists packages that elektronn3 *directly* depends on.
+#   Transitive dependencies will be resolved by conda.
+# - Dependencies are not pinned to specific versions. The minimum versions
+#   listed below are the ones that are known to work. If some package causes
+#   problems, just downgrade to the minimum version that is documented here.
+# - If you encounter problems with CUDA versions (unwanted up-/downgrades,
+#   incompatible versions), make sure to pin the cudatoolkit package to
+#   a version that is known to work with your GPU driver, for example if
+#   you want to stay on CUDA 8.*, run the following commands:
+#       conda config --add pinned_packages 'cudatoolkit=8.*'
+#       conda update --all
+
+name: elektronn3
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - colorlog >=3.1.4
+  - h5py >=2.8.0
+  - ipython >=6.4.0
+  - matplotlib >=2.2.2
+  - numba >=0.38.0
+  - python >=3.6.5
+  - scikit-image >=0.13.1
+  - seaborn >=0.8.1
+  - tqdm >=4.23.3
+  - numpy >=1.14.2
+  - scipy >=1.1.0
+  - pytorch >=0.4.0  # pytorch-cpu also works, but it's not recommended.
+#  - cudatoolkit =8.*  # Uncomment/modify for a specific CUDA version
+  - tensorboard >=1.8.0
+  - tensorflow >=1.8.0
+  # For docs:
+  - sphinx =1.7.0  # In >=1.7.1 sphinx-build doesn't work.
+  - sphinx_rtd_theme >=0.3.1

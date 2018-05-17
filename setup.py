@@ -28,8 +28,8 @@ setup(
         'pillow',
         'colorlog',
         'tqdm',
-        'tensorflow-tensorboard>=1.7.0',
-        'tensorflow>=1.7.0',
+        'tensorboard>=1.8.0',
+        'tensorflow>=1.8.0',
     ],
 
 )
