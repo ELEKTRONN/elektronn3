@@ -21,3 +21,4 @@ tensorflow>=1.8.0
 # For building documentation:
 sphinx
 sphinx_rtd_theme
+sphinx-autodoc-typehints

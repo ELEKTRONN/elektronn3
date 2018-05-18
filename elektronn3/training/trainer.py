@@ -112,7 +112,6 @@ class StoppableTrainer:
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
     """
-    # TODO: Consider merging tensorboard_root_path with save_root so we have everything in one place.
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
