@@ -107,6 +107,8 @@ class PatchCreator(data.Dataset):
         preview_shape: Desired spatial shape of the dedicated preview batch.
             The preview batch is obtained by slicing a patch of this
             shape out of the center of the preview cube.
+            If it is ``None`` (default), preview batch functionality will be
+            disabled.
         grey_augment_channels: Determines on which of the training input
             channels gray value augmentations should be applied on.
             E.g. ``grey_augment_channels=[0]`` means that only channel 0
@@ -230,10 +232,7 @@ class PatchCreator(data.Dataset):
         self.train_inputs = []
         self.train_targets = []
 
-        if preview_shape is None:
-            self.preview_shape = self.patch_shape
-        else:
-            self.preview_shape = preview_shape
+        self.preview_shape = preview_shape
         self._preview_batch = None
 
 
@@ -288,6 +287,7 @@ class PatchCreator(data.Dataset):
         input_src, target_src = self._getcube(self.source)  # get cube randomly
         while True:
             try:
+                # TODO: Limit validation data warping
                 inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
                 # Arbitrarily choosing 100 as the threshold here, because we
@@ -460,7 +460,6 @@ class PatchCreator(data.Dataset):
             assert len(self.target_ps) == target_source.ndim - 1
             target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, (D,) H, W)
 
-
         return inp, target
 
     # In this implementation the preview batch is always kept in GPU memory.
@@ -475,8 +474,8 @@ class PatchCreator(data.Dataset):
     # TODO: Make targets optional so we can have larger previews without ground truth targets?
 
     @property
-    def preview_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self._preview_batch is None:
+    def preview_batch(self) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        if self._preview_batch is None and self.preview_shape is not None:
             inp, target = self._create_preview_batch(
                 self.valid_inputs[0], self.valid_targets[0]
             )  # TODO: Don't hardcode valid_*[0]

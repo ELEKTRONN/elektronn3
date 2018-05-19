@@ -6,6 +6,8 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 
+raise NotImplementedError('Currently broken due to data refactoring, will fix after the new dataset interface is finished / moving less quickly.')
+
 import argparse
 import datetime
 import os
@@ -125,7 +127,7 @@ st = StoppableTrainer(
     criterion=criterion,
     optimizer=optimizer,
     device=device,
-    dataset=dataset,
+    train_dataset=dataset,
     batchsize=batch_size,
     num_workers=2,
     save_root=save_root,

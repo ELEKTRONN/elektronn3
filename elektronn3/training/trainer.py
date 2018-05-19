@@ -57,21 +57,20 @@ class StoppableTrainer:
         model: PyTorch model (``nn.Module``) that shall be trained.
             Please make sure that the output shape of the ``model``
             matches the shape of targets that are delivered by the
-            ``dataset``.
+            ``train_dataset``.
         criterion: PyTorch loss that shall be used as the optimization
             criterion.
         optimizer: PyTorch optimizer that shall be used to update
             ``model`` weights according to the ``criterion`` in each
             iteration.
-        dataset: PyTorch dataset (``data.Dataset``) which produces
+        train_dataset: PyTorch dataset (``data.Dataset``) which produces
             training samples when iterated over.
-            ``StoppableTrainer`` currently has some assumptions about
-            the behavior of the ``dataset``, e.g. that the length of
-            the ``dataset`` has no special meaning except controlling how
-            often validation, plotting etc. are performed during training.
-            Currently only instances of
-            :py:class:`elektronn3.data.cnndata.PatchCreator` are supported as
-            the ``dataset``.
+            :py:class:`elektronn3.data.cnndata.PatchCreator` is currently
+            recommended for constructing datasets, others might not work.
+        valid_dataset: PyTorch dataset (``data.Dataset``) which produces
+            validation samples when iterated over.
+            The length (``len(valid_dataset)``) of it determines how many
+            samples are used for one validation metric calculation.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -86,7 +85,7 @@ class StoppableTrainer:
             See :py:class:`torch.utils.data.DataLoader`
             For normal training, you can mostly set ``num_workers=1``.
             Only use more workers if you notice a data loader bottleneck.
-            Set ``num_workers=0`` if you want to debug the ``dataset``
+            Set ``num_workers=0`` if you want to debug the datasets
             implementation, to avoid mulitprocessing-specific issues.
         schedulers: Dictionary of schedulers for training hyperparameters,
             e.g. learning rate schedulers that can be found in
@@ -136,7 +135,8 @@ class StoppableTrainer:
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
             device,  # torch.Device type is not available
-            dataset: PatchCreator,
+            train_dataset: torch.utils.data.Dataset,
+            valid_dataset: torch.utils.data.Dataset,
             save_root: str,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
@@ -154,7 +154,8 @@ class StoppableTrainer:
         self.model = model.to(device)
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
-        self.dataset = dataset
+        self.train_dataset = train_dataset
+        self.valid_dataset = valid_dataset
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -181,6 +182,9 @@ class StoppableTrainer:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
 
+        self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
+            and valid_dataset.preview_shape is not None
+
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False
             logger.warning('Tensorboard is not available, so it has to be disabled.')
@@ -196,7 +200,7 @@ class StoppableTrainer:
             self.tb = TensorBoardLogger(log_dir=tb_path, always_flush=False)
 
         self.train_loader = DelayedDataLoader(
-            self.dataset, batch_size=self.batchsize, shuffle=False,
+            self.train_dataset, batch_size=self.batchsize, shuffle=False,
             num_workers=self.num_workers, pin_memory=True,
             timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
         )
@@ -207,7 +211,7 @@ class StoppableTrainer:
         # because the validation loader doesn't perform expensive augmentations, but just reads
         # data from hdf5s.
         self.valid_loader = DelayedDataLoader(
-            self.dataset, self.batchsize, num_workers=0, pin_memory=False,
+            self.valid_dataset, self.batchsize, num_workers=0, pin_memory=False,
             timeout=30
         )
 
@@ -222,7 +226,6 @@ class StoppableTrainer:
             try:
                 # --> self.train()
                 self.model.train()
-                self.dataset.train()
 
                 # Scalar training stats that should be logged and written to tensorboard later
                 stats: Dict[str, float] = {'tr_loss': 0.0}
@@ -290,7 +293,7 @@ class StoppableTrainer:
 
                 stats['val_loss'], stats['val_err'] = self.validate()
 
-                if self.step // len(self.dataset) > 1:
+                if self.step // len(self.train_dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
@@ -311,7 +314,8 @@ class StoppableTrainer:
                 logger.info(text)
                 if self.tb:
                     self.tb_log_scalars(stats, misc)
-                    self.tb_log_preview()
+                    if self.previews_enabled:
+                        self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
                 if self.save_path is not None:
@@ -350,7 +354,6 @@ class StoppableTrainer:
         )
 
     def validate(self) -> Tuple[float, float]:
-        self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
@@ -374,8 +377,7 @@ class StoppableTrainer:
         )
 
 
-        # Reset dataset and model to training mode
-        self.dataset.train()
+        # Reset model to training mode
         self.model.train()
 
         return val_loss, val_err
@@ -396,7 +398,7 @@ class StoppableTrainer:
             group: str = 'preview_batch'
     ) -> None:
         """Preview from constant region of preview batch data"""
-        _, out = preview_inference(self.model, device=self.device, dataset=self.dataset)
+        _, out = preview_inference(self.model, device=self.device, dataset=self.valid_dataset)
 
         if z_plane is None:
             z_plane = out.shape[2] // 2
@@ -413,7 +415,7 @@ class StoppableTrainer:
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
         if self._first_plot:
-            preview_inp, preview_target = self.dataset.preview_batch
+            preview_inp, preview_target = self.valid_dataset.preview_batch
             inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
             target = preview_target[0, z_plane, ...].cpu().numpy()
             self.tb.log_image(f'{group}/inp', inp, step=0)

@@ -65,7 +65,8 @@ if device.type == 'cuda':
     torch.cuda.manual_seed(0)
 
 
-data_init_kwargs = {
+# TODO: This dictionary stuff is getting out of hand. Simplify it.
+shared_kwargs = {
     'input_path': data_path,
     'target_path': data_path,
     'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(3)],
@@ -73,21 +74,35 @@ data_init_kwargs = {
     'mean': 155.291411,
     'std': 41.812504,
     'aniso_factor': 2,
-    'source': 'train',
     'patch_shape': (48, 96, 96),
-    'preview_shape': (64, 144, 144),
     'valid_cube_indices': [2],
     'grey_augment_channels': [],
     'epoch_size': args.epoch_size,
-    'warp': 0.5,
     'class_weights': True,
+    'squeeze_target': True,  # Workaround for neuro_data_cdhw
+}
+train_kwargs = {
+    **shared_kwargs,
+    'source': 'train',
+    'epoch_size': args.epoch_size,
+    'warp': 0.5,
     'warp_kwargs': {
         'sample_aniso': True,
         'perspective': True
     },
-    'squeeze_target': True,  # Workaround for neuro_data_cdhw
 }
-dataset = PatchCreator(**data_init_kwargs, device=device)
+valid_kwargs = {
+    **shared_kwargs,
+    'source': 'valid',
+    'epoch_size': 10,  # How many samples to use for each validation run
+    'preview_shape': (64, 144, 144),
+    'warp': 0,
+    'warp_kwargs': {
+        'sample_aniso': True,
+    },
+}
+train_dataset = PatchCreator(**train_kwargs, device=device)
+valid_dataset = PatchCreator(**valid_kwargs, device=device)
 
 optimizer = optim.Adam(
     model.parameters(),
@@ -98,7 +113,7 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-criterion = nn.CrossEntropyLoss(weight=dataset.class_weights).to(device)
+criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights).to(device)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
 st = StoppableTrainer(
@@ -106,7 +121,8 @@ st = StoppableTrainer(
     criterion=criterion,
     optimizer=optimizer,
     device=device,
-    dataset=dataset,
+    train_dataset=train_dataset,
+    valid_dataset=valid_dataset,
     batchsize=batch_size,
     num_workers=2,
     save_root=save_root,
