@@ -9,6 +9,7 @@
 import argparse
 import datetime
 import os
+import inspect
 
 import torch
 from torch import nn
@@ -36,7 +37,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data.cnndata import PatchCreator
-from elektronn3.training.trainer import StoppableTrainer
+from elektronn3.training.trainer import StoppableTrainer, Backup
 from elektronn3.models.unet import UNet
 
 
@@ -113,4 +114,10 @@ st = StoppableTrainer(
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched}
 )
+
+#Saving source backup and training script
+scriptPath = inspect.getfile(inspect.currentframe())  # e.g. train_unet.py
+bk = Backup(scriptPath=scriptPath,savePath=st.save_path)
+bk.save_script_gztar()
+
 st.train(max_steps)
