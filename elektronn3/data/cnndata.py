@@ -80,7 +80,6 @@ class PatchCreator(data.Dataset):
             sizes won't help much).
         cube_prios: List of per-cube priorities, where a higher priority
             means that it is more likely that a sample comes from this cube.
-        valid_cube_indices:
         aniso_factor: Depth-anisotropy factor of the data set. E.g.
             if your data set has half resolution in the depth dimension,
             set ``aniso_factor=2``. If all dimensions have the same
@@ -151,8 +150,6 @@ class PatchCreator(data.Dataset):
             patch_shape: Sequence[int],
             device,
             cube_prios: Optional[Sequence[float]] = None,
-            valid_cube_indices: Optional[Sequence[int]] = None,
-            border_mode='crop',
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
             mean: Optional[float] = None,
@@ -169,9 +166,28 @@ class PatchCreator(data.Dataset):
             eager_init: bool = True,
             squeeze_target: bool = False,
     ):
-        assert (input_path and target_path and input_h5data and target_h5data)
-        if len(input_h5data)!=len(target_h5data):
+        # Early checks
+        if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
+        if source == 'valid':
+            if mean is None or std is None:
+                raise ValueError(
+                    'You need to manually supply mean and std for validation '
+                    'sets (that would defeat the purpose of validation). '
+                    'Please supply mean and std of your training set.'
+                )
+            if class_weights:
+                raise ValueError(
+                    'Calculating class_weights on validation sets is not allowed.'
+                )
+            if warp or random_blurring_config is not None or grey_augment_channels is not None:
+                raise ValueError(
+                    'Augmentations should not be used on validation data.'
+                )
+        else:
+            if preview_shape is not None:
+                raise ValueError()
+
         input_path = os.path.expanduser(input_path)
         target_path = os.path.expanduser(target_path)
         self.device = device
@@ -198,15 +214,11 @@ class PatchCreator(data.Dataset):
         self.target_h5data = target_h5data
         self.cube_prios = cube_prios
         # TODO: Support separate validation data? (Not using indices, but an own validation list)
-        self.valid_cube_indices = valid_cube_indices if valid_cube_indices is not None else []
         self.aniso_factor = aniso_factor
-        self.border_mode = border_mode
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
 
-        # Infer geometric info from input/target shapes
-        # HACK
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
         # TODO: Make strides and offsets for targets configurable
@@ -226,11 +238,8 @@ class PatchCreator(data.Dataset):
         self.c_target = None  # Number of target channels
 
         # Actual data fields
-        self.valid_inputs = []
-        self.valid_targets = []
-
-        self.train_inputs = []
-        self.train_targets = []
+        self.inputs = []
+        self.targets = []
 
         self.preview_shape = preview_shape
         self._preview_batch = None
@@ -241,16 +250,16 @@ class PatchCreator(data.Dataset):
             np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
         )
         self.pid = os.getpid()
-        self.gc_count = 1
 
         self._sampling_weight = None
         self._training_count = None
-        self._valid_count = None
+        self._count = None
         self.n_successful_warp = 0
         self.n_failed_warp = 0
         self.n_read_failures = 0
 
-        self.load_data()
+        self.load_data()  # Open dataset files
+
         self._mean = mean
         self._std = std
         self.normalize = normalize
@@ -264,7 +273,7 @@ class PatchCreator(data.Dataset):
         if class_weights:
             # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param. # Not quite sure what you mean, this is done once only anyway
             # TODO: This assumes a binary segmentation problem (background/foreground). Support more classes?
-            target_mean = np.mean(self.train_targets)
+            target_mean = np.mean(self.targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
             self.class_weights = torch.tensor([bg_weight, fg_weight])
@@ -379,7 +388,7 @@ class PatchCreator(data.Dataset):
                 'Calculating mean of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
-            means = [np.mean(x) for x in self.train_inputs]
+            means = [np.mean(x) for x in self.inputs]
             self._mean = np.mean(means)
             logger.info(f'mean = {self._mean:.6f}')
         return self._mean
@@ -392,7 +401,7 @@ class PatchCreator(data.Dataset):
                 'Calculating std of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
-            stds = [np.std(x) for x in self.train_inputs]
+            stds = [np.std(x) for x in self.inputs]
             # Note that this is not the same as the std of all train_inputs
             # together. The mean of stds of the individual input data cubes
             # is different because it only acknowledges intra-cube variance,
@@ -403,14 +412,6 @@ class PatchCreator(data.Dataset):
             self._std = np.mean(stds)
             logger.info(f'std = {self._std:.6f}')
         return self._std
-
-    def validate(self) -> None:
-        self.source = "valid"
-        self.epoch_size = 10
-
-    def train(self) -> None:
-        self.source = "train"
-        self.epoch_size = self._orig_epoch_size
 
     def _create_preview_batch(
             self,
@@ -468,8 +469,8 @@ class PatchCreator(data.Dataset):
     def preview_batch(self) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
         if self._preview_batch is None and self.preview_shape is not None:
             inp, target = self._create_preview_batch(
-                self.valid_inputs[0], self.valid_targets[0]
-            )  # TODO: Don't hardcode valid_*[0]
+                self.inputs[0], self.targets[0]
+            )  # TODO: Don't hardcode [0]
 
             self._preview_batch = (inp, target)
         return self._preview_batch
@@ -563,21 +564,18 @@ class PatchCreator(data.Dataset):
         if source == 'train':
             p = self.rng.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
-            inp_source, target_source = self.train_inputs[i], self.train_targets[i]
+            inp_source, target_source = self.inputs[i], self.targets[i]
         elif source == "valid":
-            if len(self.valid_inputs) == 0:
+            if len(self.inputs) == 0:
                 raise ValueError("No validation set")
 
-            i = self.rng.randint(0, len(self.valid_inputs))
-            inp_source = self.valid_inputs[i]
-            target_source = self.valid_targets[i]
+            # TODO: Sampling weight for validation data?
+            i = self.rng.randint(0, len(self.inputs))
+            inp_source, target_source = self.inputs[i], self.targets[i]
         else:
             raise ValueError("Unknown data source")
 
         return inp_source, target_source
-
-    def _stridedtargets(self, target):
-        return target[::self.strides[0], ::self.strides[1], ::self.strides[2]]
 
     def load_data(self) -> None:
         inp_files, target_files = self.open_files()
@@ -585,14 +583,10 @@ class PatchCreator(data.Dataset):
         prios = []
         # Distribute Cubes into training and valid list
         for k, (inp, target) in enumerate(zip(inp_files, target_files)):
-            if k in self.valid_cube_indices:
-                self.valid_inputs.append(inp)
-                self.valid_targets.append(target)
-            else:
-                self.train_inputs.append(inp)
-                self.train_targets.append(target)
-                # If no priorities are given: sample proportional to cube size
-                prios.append(target.size)
+            self.inputs.append(inp)
+            self.targets.append(target)
+            # If no priorities are given: sample proportional to cube size
+            prios.append(target.size)
 
         if self.cube_prios is None:
             prios = np.array(prios, dtype=np.float)
@@ -601,8 +595,7 @@ class PatchCreator(data.Dataset):
 
         # sample example i if: batch_prob[i] < p
         self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
-        self._training_count = len(self.train_inputs)
-        self._valid_count = len(self.valid_inputs)
+        self._count = len(self.inputs)
 
     def check_files(self) -> None:  # TODO: Update for cdhw version
         """

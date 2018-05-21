@@ -69,22 +69,20 @@ if device.type == 'cuda':
 shared_kwargs = {
     'input_path': data_path,
     'target_path': data_path,
-    'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(3)],
-    'target_h5data': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
     'mean': 155.291411,
     'std': 41.812504,
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
-    'valid_cube_indices': [2],
-    'grey_augment_channels': [],
     'epoch_size': args.epoch_size,
-    'class_weights': True,
     'squeeze_target': True,  # Workaround for neuro_data_cdhw
 }
 train_kwargs = {
     **shared_kwargs,
+    'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(2)],
+    'target_h5data': [('barrier_int16_%i.h5' % i, 'lab') for i in range(2)],
     'source': 'train',
     'epoch_size': args.epoch_size,
+    'class_weights': True,
     'warp': 0.5,
     'warp_kwargs': {
         'sample_aniso': True,
@@ -93,6 +91,8 @@ train_kwargs = {
 }
 valid_kwargs = {
     **shared_kwargs,
+    'input_h5data': [('raw_2.h5', 'raw')],
+    'target_h5data': [('barrier_int16_2.h5', 'lab')],
     'source': 'valid',
     'epoch_size': 10,  # How many samples to use for each validation run
     'preview_shape': (64, 144, 144),

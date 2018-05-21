@@ -433,7 +433,10 @@ class StoppableTrainer:
             z_plane: Optional[int] = None,
             group: str = 'preview_batch'
     ) -> None:
-        """Preview from constant region of preview batch data"""
+        """ Preview from constant region of preview batch data.
+
+        This only works for datasets that have a ``preview_batch`` attribute.
+        """
         inp_batch = self.valid_dataset.preview_batch[0].to(self.device)
         _, out_batch = preview_inference(self.model, inp_batch=inp_batch)
 
