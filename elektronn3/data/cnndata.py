@@ -99,10 +99,10 @@ class PatchCreator(data.Dataset):
             and unit standard deviation ("std"). If ``mean`` and/or ``std``
             are not supplied, they are automatically estimated on the training
             data on initialization.
-        source: Determines if samples should come from training or validation
+        train: Determines if samples come from training or validation
             data.
-            If ``source='train'``, training data is returned.
-            If ``source='valid'``, validation data is returned.
+            If ``True``, training data is returned.
+            If ``False``, validation data is returned.
         preview_shape: Desired spatial shape of the dedicated preview batch.
             The preview batch is obtained by slicing a patch of this
             shape out of the center of the preview cube.
@@ -155,7 +155,7 @@ class PatchCreator(data.Dataset):
             mean: Optional[float] = None,
             std: Optional[float] = None,
             normalize: bool = True,
-            source: str = 'train',
+            train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
             grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
@@ -169,11 +169,12 @@ class PatchCreator(data.Dataset):
         # Early checks
         if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
-        if source == 'valid':
-            if mean is None or std is None:
-                raise ValueError(
+        if not train:
+            if  normalize and (mean is None or std is None):
+                logger.warning(
                     'You need to manually supply mean and std for validation '
-                    'sets (that would defeat the purpose of validation). '
+                    'sets (auto-calculating them would defeat the purpose of '
+                    'having a separate validation set).\n'
                     'Please supply mean and std of your training set.'
                 )
             if class_weights:
@@ -192,7 +193,7 @@ class PatchCreator(data.Dataset):
         target_path = os.path.expanduser(target_path)
         self.device = device
         # batch properties
-        self.source = source
+        self.train = train
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_kwargs = warp_kwargs
@@ -293,7 +294,7 @@ class PatchCreator(data.Dataset):
         if self.grey_augment_channels is None:
             self.grey_augment_channels = []
         self._reseed()
-        input_src, target_src = self._getcube(self.source)  # get cube randomly
+        input_src, target_src = self._getcube()  # get cube randomly
         while True:
             try:
                 # TODO: Limit validation data warping
@@ -344,10 +345,10 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp += 1
             if self.normalize:
                 inp = (inp - self.mean) / self.std
-            if self.random_blurring_config and self.source == "train":
+            if self.random_blurring_config and self.train:
                 apply_random_blurring(inp_sample=inp,
                                       **self.random_blurring_config)
-            if self.grey_augment_channels and self.source == "train":  # grey augmentation only for training
+            if self.grey_augment_channels and self.train:  # grey augmentation only for training
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
@@ -556,24 +557,22 @@ class PatchCreator(data.Dataset):
 
         return inp, target
 
-    def _getcube(self, source: str) -> Tuple[h5py.Dataset, h5py.Dataset]:
+    def _getcube(self) -> Tuple[h5py.Dataset, h5py.Dataset]:
         """
         Draw an example cube according to sampling weight on training data,
         or randomly on valid data
         """
-        if source == 'train':
+        if self.train:
             p = self.rng.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
             inp_source, target_source = self.inputs[i], self.targets[i]
-        elif source == "valid":
+        else:
             if len(self.inputs) == 0:
                 raise ValueError("No validation set")
 
             # TODO: Sampling weight for validation data?
             i = self.rng.randint(0, len(self.inputs))
             inp_source, target_source = self.inputs[i], self.targets[i]
-        else:
-            raise ValueError("Unknown data source")
 
         return inp_source, target_source
 
@@ -625,8 +624,8 @@ class PatchCreator(data.Dataset):
     def open_files(self) -> Tuple[List[h5py.Dataset], List[h5py.Dataset]]:
         self.check_files()
         inp_h5sets, target_h5sets = [], []
-
-        print('\nUsing data sets:')
+        modestr = 'Training' if self.train else 'Validation'
+        print(f'\n{modestr} data set:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
             inp_h5 = h5py.File(os.path.join(self.input_path, inp_fname), 'r')[inp_key]
             target_h5 = h5py.File(os.path.join(self.target_path, target_fname), 'r')[target_key]

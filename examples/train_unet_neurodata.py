@@ -80,7 +80,7 @@ train_kwargs = {
     **shared_kwargs,
     'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(2)],
     'target_h5data': [('barrier_int16_%i.h5' % i, 'lab') for i in range(2)],
-    'source': 'train',
+    'train': True,
     'epoch_size': args.epoch_size,
     'class_weights': True,
     'warp': 0.5,
@@ -93,7 +93,7 @@ valid_kwargs = {
     **shared_kwargs,
     'input_h5data': [('raw_2.h5', 'raw')],
     'target_h5data': [('barrier_int16_2.h5', 'lab')],
-    'source': 'valid',
+    'train': False,
     'epoch_size': 10,  # How many samples to use for each validation run
     'preview_shape': (64, 144, 144),
     'warp': 0,
