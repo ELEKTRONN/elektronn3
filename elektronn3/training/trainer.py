@@ -434,7 +434,8 @@ class StoppableTrainer:
             group: str = 'preview_batch'
     ) -> None:
         """Preview from constant region of preview batch data"""
-        _, out_batch = preview_inference(self.model, device=self.device, dataset=self.valid_dataset)
+        inp_batch = self.valid_dataset.preview_batch[0].to(self.device)
+        _, out_batch = preview_inference(self.model, inp_batch=inp_batch)
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
@@ -538,19 +539,13 @@ def save_to_h5(fname: str, model_output: torch.Tensor):
 
 def preview_inference(
         model: torch.nn.Module,
-        device,
-        dataset: Optional[PatchCreator] = None,
+        inp_batch: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     model.eval()  # Set dropout and batchnorm to eval mode
     # Attention: Inference on Tensors with unexpected shapes can lead to errors!
     # Staying with multiples of 16 for lengths seems to work.
-    if dataset is None:
-        d, h, w = dataset.preview_shape
-        inp = torch.rand(1, dataset.c_input, d, h, w, device=device)
-    else:
-        inp = dataset.preview_batch[0]
     with torch.no_grad():
-        out = model(inp)
+        out_batch = model(inp_batch)
     model.train()  # Reset model to training mode
 
-    return inp, out
+    return inp_batch, out_batch
