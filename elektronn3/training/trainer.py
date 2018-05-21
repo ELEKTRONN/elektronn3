@@ -10,7 +10,7 @@ import os
 import traceback
 
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Union, Any
+from typing import Tuple, Dict, Optional, Callable, Any
 
 import inspect
 import IPython
@@ -392,32 +392,68 @@ class StoppableTrainer:
         for key, value in misc.items():
             self.tb.log_scalar(f'misc/{key}', value, self.step)
 
+    def _get_batch2img_function(
+            self,
+            batch: torch.Tensor,
+            z_plane: Optional[int] = None
+    ) -> Callable[[torch.Tensor], np.ndarray]:
+        """
+        Defines ``batch2img`` function dynamically, depending on tensor shapes.
+
+        ``batch2img`` slices a 4D or 5D tensor to (C, H, W) shape, moves it to
+        host memory and converts it to a numpy array.
+        By arbitrary choice, the first element of a batch is always taken here.
+        In the 5D case, the D (depth) dimension is sliced at z_plane.
+
+        This function is useful for plotting image samples during training.
+
+        Args:
+            batch: 4D or 5D tensor, used for shape analysis.
+            z_plane: Index of the spatial plane where a 5D image tensor should
+                be sliced. If not specified, this is automatically set to half
+                the size of the D dimension.
+
+        Returns:
+            Numpy array of shape (C, H, W), representing a single HxW 2D image
+            with channel dimension C.
+        """
+        if batch.dim() == 5:  # (N, C, D, H, W)
+            if z_plane is None:
+                z_plane = batch.shape[2] // 2
+            assert z_plane in range(batch.shape[2])
+            batch2img = lambda x: x[0, :, z_plane].cpu().numpy()
+        elif batch.dim() == 4:  # (N, C, H, W)
+            batch2img = lambda x: x[0, :].cpu().numpy()
+        else:
+            raise ValueError('Only 4D and 5D tensors are supported.')
+        return batch2img
+
     def tb_log_preview(
             self,
             z_plane: Optional[int] = None,
             group: str = 'preview_batch'
     ) -> None:
         """Preview from constant region of preview batch data"""
-        _, out = preview_inference(self.model, device=self.device, dataset=self.valid_dataset)
+        _, out_batch = preview_inference(self.model, device=self.device, dataset=self.valid_dataset)
 
-        if z_plane is None:
-            z_plane = out.shape[2] // 2
-        assert z_plane in range(out.shape[2])
+        batch2img = self._get_batch2img_function(out_batch, z_plane)
 
-        mcl = maxclass(out)
-        pred = mcl[0, z_plane, ...].cpu().numpy()
+        out = batch2img(out_batch)
+        pred = out.argmax(0)
 
-        for c in range(out.shape[1]):
-            c_out = out[0, c, z_plane, ...].cpu().numpy()
-            self.tb.log_image(f'{group}/c{c}', c_out, self.step)
+        for c in range(out.shape[0]):
+            self.tb.log_image(f'{group}/c{c}', out[c], self.step)
         self.tb.log_image(f'{group}/pred', pred, self.step)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
         if self._first_plot:
             preview_inp, preview_target = self.valid_dataset.preview_batch
-            inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
-            target = preview_target[0, z_plane, ...].cpu().numpy()
+            inp = batch2img(preview_inp)[0]
+            if preview_target.dim() == preview_inp.dim() - 1:
+                # Unsqueeze C dimension in target so it matches batch2dim()'s expected shape
+                preview_target = preview_target[:, None]
+            target = batch2img(preview_target)[0]
             self.tb.log_image(f'{group}/inp', inp, step=0)
             # Ground truth target for direct comparison with preview prediction
             self.tb.log_image(f'{group}/target', target, step=0)
@@ -438,23 +474,23 @@ class StoppableTrainer:
             distorted/weirdly colored.
         """
 
-        out = images['out']
+        out_batch = images['out']
 
-        if z_plane is None:
-            z_plane = out.shape[2] // 2
-        assert z_plane in range(out.shape[2])
+        batch2img = self._get_batch2img_function(out_batch, z_plane)
 
-        inp = images['inp'][0, 0, z_plane, ...].cpu().numpy()
-        target = images['target'][0, z_plane].cpu().numpy()
-        mcl = maxclass(out)
-        pred = mcl[0, z_plane, ...].cpu().numpy()
+
+        inp = batch2img(images['inp'])[0]
+        target_batch_with_c = images['target'][:, None]
+        target = batch2img(target_batch_with_c)[0]
+
+        out = batch2img(out_batch)
+        pred = out.argmax(0)
 
         self.tb.log_image(f'{group}/inp', inp, step=self.step)
         self.tb.log_image(f'{group}/target', target, step=self.step)
 
-        for c in range(out.shape[1]):
-            c_out = out[0, c, z_plane, ...].cpu().numpy()
-            self.tb.log_image(f'{group}/c{c}', c_out, step=self.step)
+        for c in range(out.shape[0]):
+            self.tb.log_image(f'{group}/c{c}', out[c], step=self.step)
         self.tb.log_image(f'{group}/pred', pred, step=self.step)
 
         inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
@@ -479,7 +515,7 @@ def maxclass(class_predictions: torch.Tensor):
     Returns:
         Tensor of shape (N, ...)
     """
-    maxcl = class_predictions.max(dim=1)[1]
+    maxcl = class_predictions.max(dim=1)[1]  # TODO: Use argmax instead
     return maxcl
 
 
