@@ -450,8 +450,8 @@ class PatchCreator(data.Dataset):
         if self.normalize:
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
 
-        inp = torch.from_numpy(inp_np).to(self.device)
-        target = torch.from_numpy(target_np).to(self.device)
+        inp = torch.from_numpy(inp_np)
+        target = torch.from_numpy(target_np)
 
         # See comments at the end of PatchCreator.__getitem__()
         # Note that here it's the dimension index 1 that we're squeezing,
@@ -462,15 +462,6 @@ class PatchCreator(data.Dataset):
 
         return inp, target
 
-    # In this implementation the preview batch is always kept in GPU memory.
-    # This means much better inference speed when using it, but this may be
-    # a bad decision if GPU memory is limited.
-    # --> TODO: Document this concern and decide how to deal with it.
-    #           (E.g. suggest a smaller preview shape if catching OOM,
-    #            or keep the batch in main memory ("cpu") and only move it
-    #            to GPU when needed, freeing up GPU memory afterwards
-    #            -> first evaluate cost of moving?...)
-    #
     # TODO: Make targets optional so we can have larger previews without ground truth targets?
 
     @property
