@@ -640,3 +640,63 @@ class PatchCreator(data.Dataset):
         print()
 
         return inp_h5sets, target_h5sets
+
+
+class SimpleNeuroData2d(data.Dataset):
+    """ 2D Dataset class for neuro_data_cdhw, reading from a single HDF5 file.
+
+    Delivers 2D image slices from the (H, W) plane at given D indices.
+    Not scalable, keeps everything in memory.
+    This is just a minimalistic proof of concept.
+    """
+
+    def __init__(
+            self,
+            inp_path=None,
+            target_path=None,
+            train=True,
+            inp_key='raw', target_key='lab',
+            # offset=(0, 0, 0),
+            pool=(1, 1, 1)
+    ):
+        super().__init__()
+        cube_id = 0 if train else 2
+        if inp_path is None:
+            inp_path = expanduser(f'~/neuro_data_cdhw/raw_{cube_id}.h5')
+        if target_path is None:
+            target_path = expanduser(f'~/neuro_data_cdhw/barrier_int16_{cube_id}.h5')
+        self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
+        self.target_file = h5py.File(os.path.expanduser(target_path), 'r')
+        self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
+        self.target = self.target_file[target_key].value.astype(np.int64)
+        self.target = self.target[0]  # Squeeze superfluous first dimension
+
+        self.target = self.target[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (dirty hack TODO)
+
+        # Cut inp and target to same size
+        inp_shape = np.array(self.inp.shape[1:])
+        target_shape = np.array(self.target.shape)
+        diff = inp_shape - target_shape
+        offset = diff // 2  # offset from image boundaries
+
+        self.inp = self.inp[
+            :,
+            offset[0]: inp_shape[0] - offset[0],
+            offset[1]: inp_shape[1] - offset[1],
+            offset[2]: inp_shape[2] - offset[2],
+        ]
+
+        self.close_files()  # Using file contents from memory -> no need to keep the file open.
+
+    def __getitem__(self, index):
+        # Get z slices
+        inp = self.inp[:, index]
+        target = self.target[index]
+        return inp, target
+
+    def __len__(self):
+        return self.target.shape[0]
+
+    def close_files(self):
+        self.inp_file.close()
+        self.target_file.close()

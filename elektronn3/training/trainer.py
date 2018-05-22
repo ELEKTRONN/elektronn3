@@ -200,7 +200,7 @@ class StoppableTrainer:
             self.tb = TensorBoardLogger(log_dir=tb_path, always_flush=False)
 
         self.train_loader = DelayedDataLoader(
-            self.train_dataset, batch_size=self.batchsize, shuffle=False,
+            self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
         )
@@ -467,6 +467,7 @@ class StoppableTrainer:
             self.tb.log_image(f'{group}/target', target, step=0)
             self._first_plot = False
 
+    # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
     def tb_log_sample_images(
             self,
             images: Dict[str, torch.Tensor],
