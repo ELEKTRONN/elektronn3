@@ -18,14 +18,12 @@ import numpy as np
 import torch
 import torch.utils.data
 from skimage.color import label2rgb
-from torch.optim.lr_scheduler import ExponentialLR, StepLR
-from copy import deepcopy
+from torch.optim.lr_scheduler import StepLR
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.utils import save_to_h5, squash01
-from elektronn3.data.cnndata import PatchCreator
 
 logger = logging.getLogger('elektronn3log')
 
@@ -66,7 +64,7 @@ class StoppableTrainer:
         train_dataset: PyTorch dataset (``data.Dataset``) which produces
             training samples when iterated over.
             :py:class:`elektronn3.data.cnndata.PatchCreator` is currently
-            recommended for constructing datasets, others might not work.
+            recommended for constructing datasets.
         valid_dataset: PyTorch dataset (``data.Dataset``) which produces
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
@@ -115,11 +113,6 @@ class StoppableTrainer:
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
-    # TODO: Try to support dataset implementations other than PatchCreator?
-    #       (The problem is currently that the *one* dataset is expected to
-    #       handle both training and validation via the ``.train()`` and
-    #       ``.validate()`` switches and a preview batch is expected to be
-    #       present.
 
     tb: TensorBoardLogger
     terminate: bool
@@ -373,16 +366,12 @@ class StoppableTrainer:
                 incorrect += int(maxcl.ne(target).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
-        # TODO: Plot some validation images (inp, pred, target, overlay)
-        #       See tb_log_sample_images
         self.tb_log_sample_images(
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
 
-
-        # Reset model to training mode
-        self.model.train()
+        self.model.train()  # Reset model to training mode
 
         return val_loss, val_err
 
@@ -442,7 +431,7 @@ class StoppableTrainer:
         This only works for datasets that have a ``preview_batch`` attribute.
         """
         inp_batch = self.valid_dataset.preview_batch[0].to(self.device)
-        _, out_batch = preview_inference(self.model, inp_batch=inp_batch)
+        out_batch = preview_inference(self.model, inp_batch=inp_batch)
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
@@ -486,7 +475,6 @@ class StoppableTrainer:
         out_batch = images['out']
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
-
 
         inp = batch2img(images['inp'])[0]
         target_batch_with_c = images['target'][:, None]
@@ -556,4 +544,4 @@ def preview_inference(
         out_batch = model(inp_batch)
     model.train()  # Reset model to training mode
 
-    return inp_batch, out_batch
+    return out_batch
