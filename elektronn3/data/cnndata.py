@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import traceback
+from os.path import expanduser
 from typing import Tuple, Dict, Optional, Union, Sequence, Any, List
 
 import h5py
@@ -56,13 +57,11 @@ class PatchCreator(data.Dataset):
     support is also planned.
 
     Args:
-        input_path: Path to the folder containing input files.
-        target_path: Path to the folder containing target files.
         input_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
-            each item specifies the filename relative to input_path and
+            each item specifies the filename and
             the HDF5 dataset key under which the input data is stored.
         target_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
-            each item specifies the filename relative to target_path and
+            each item specifies the filename and
             the HDF5 dataset key under which the target data is stored.
         patch_shape: Desired spatial shape of the samples that the iterator
             delivers by slicing from the data set files.
@@ -143,10 +142,8 @@ class PatchCreator(data.Dataset):
     """
     def __init__(
             self,
-            input_path: str,
-            target_path: str,
-            input_h5data: Dict[str, str],
-            target_h5data: Dict[str, str],
+            input_h5data: List[Tuple[str, str]],
+            target_h5data: List[Tuple[str, str]],
             patch_shape: Sequence[int],
             device,
             cube_prios: Optional[Sequence[float]] = None,
@@ -189,8 +186,6 @@ class PatchCreator(data.Dataset):
             if preview_shape is not None:
                 raise ValueError()
 
-        input_path = os.path.expanduser(input_path)
-        target_path = os.path.expanduser(target_path)
         self.device = device
         # batch properties
         self.train = train
@@ -207,10 +202,8 @@ class PatchCreator(data.Dataset):
         #       also be implemented as pluggable transformations.
 
         # general properties
-        # TODO: Merge *_path with *_h5data, i.e. *_h5data should contain tuples (<full/path/to/hdf5.h5>, <hdf5datasetkey>).
-        self.input_path = input_path
-        self.target_path = target_path
-        # TODO: "*_files" is a bit misleading, because those are actually tuples (filename, h5_key).
+        input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
+        target_h5data = [(expanduser(fn), key) for (fn, key) in target_h5data]
         self.input_h5data = input_h5data
         self.target_h5data = target_h5data
         self.cube_prios = cube_prios
@@ -602,8 +595,8 @@ class PatchCreator(data.Dataset):
         """
         notfound = False
         give_neuro_data_hint = False
-        fullpaths = [os.path.join(self.input_path, f) for f, _ in self.input_h5data] + \
-                    [os.path.join(self.target_path, f) for f, _ in self.target_h5data]
+        fullpaths = [f for f, _ in self.input_h5data] + \
+                    [f for f, _ in self.target_h5data]
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -627,8 +620,8 @@ class PatchCreator(data.Dataset):
         modestr = 'Training' if self.train else 'Validation'
         print(f'\n{modestr} data set:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(os.path.join(self.input_path, inp_fname), 'r')[inp_key]
-            target_h5 = h5py.File(os.path.join(self.target_path, target_fname), 'r')[target_key]
+            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
+            target_h5 = h5py.File(target_fname, 'r')[target_key]
 
             # assert inp_h5.ndim == 4
             # assert target_h5.ndim == 4

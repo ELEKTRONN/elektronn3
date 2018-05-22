@@ -41,9 +41,17 @@ from elektronn3.models.unet import UNet
 
 
 # USER PATHS
-data_path = os.path.expanduser('~/neuro_data_cdhw/')
 save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
+data_root = os.path.expanduser('~/neuro_data_cdhw/')
+input_h5data = [
+    (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+    for i in range(3)
+]
+target_h5data = [
+    (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+    for i in range(3)
+]
 
 max_steps = 500000
 lr = 0.0004
@@ -67,8 +75,6 @@ if device.type == 'cuda':
 
 # TODO: This dictionary stuff is getting out of hand. Simplify it.
 shared_kwargs = {
-    'input_path': data_path,
-    'target_path': data_path,
     'mean': 155.291411,
     'std': 41.812504,
     'aniso_factor': 2,
@@ -78,8 +84,8 @@ shared_kwargs = {
 }
 train_kwargs = {
     **shared_kwargs,
-    'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(2)],
-    'target_h5data': [('barrier_int16_%i.h5' % i, 'lab') for i in range(2)],
+    'input_h5data': input_h5data[:2],
+    'target_h5data': target_h5data[:2],
     'train': True,
     'epoch_size': args.epoch_size,
     'class_weights': True,
@@ -91,8 +97,8 @@ train_kwargs = {
 }
 valid_kwargs = {
     **shared_kwargs,
-    'input_h5data': [('raw_2.h5', 'raw')],
-    'target_h5data': [('barrier_int16_2.h5', 'lab')],
+    'input_h5data': [input_h5data[2]],
+    'target_h5data': [target_h5data[2]],
     'train': False,
     'epoch_size': 10,  # How many samples to use for each validation run
     'preview_shape': (64, 144, 144),
