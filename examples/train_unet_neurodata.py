@@ -35,7 +35,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data.cnndata import PatchCreator
-from elektronn3.training.trainer import StoppableTrainer
+from elektronn3.training.trainer import Trainer
 from elektronn3.models.unet import UNet
 
 torch.manual_seed(0)
@@ -118,7 +118,7 @@ criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights).to(device)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
 # Create and run trainer
-trainer = StoppableTrainer(
+trainer = Trainer(
     model=model,
     criterion=criterion,
     optimizer=optimizer,

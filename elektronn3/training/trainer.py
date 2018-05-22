@@ -40,7 +40,7 @@ class NaNException(RuntimeError):
     pass
 
 
-class StoppableTrainer:
+class Trainer:
     """ Training loop abstraction with IPython and tensorboard integration.
 
     Hitting Ctrl-C anytime during the training will drop you to the IPython

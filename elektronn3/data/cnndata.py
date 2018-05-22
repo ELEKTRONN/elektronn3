@@ -33,7 +33,7 @@ class PatchCreator(data.Dataset):
     It implements the PyTorch ``Dataset`` interface and is meant to be used
     with a PyTorch ``DataLoader`` (or the modified
     :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader``, if it is
-    used with :py:class:`elektronn3.training.trainer.StoppableTrainer``).
+    used with :py:class:`elektronn3.training.trainer.Trainer``).
 
     The main idea of this class is to automate input and target patch creation
     for training convnets for semantic image segmentation. Patches are sliced
@@ -130,7 +130,7 @@ class PatchCreator(data.Dataset):
             one "training phase", so after each ``epoch_size`` batches,
             validation/logging/plotting are performed by the training loop
             that uses this data set (e.g.
-            ``elektronn3.training.trainer.StoppableTrainer``).
+            ``elektronn3.training.trainer.Trainer``).
         eager_init: If ``False``, some parts of the class initialization
             are lazily performed only when they are needed.
             It's not recommended to change this option.
