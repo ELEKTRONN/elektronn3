@@ -7,7 +7,6 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 
 import argparse
-import datetime
 import os
 
 import torch
