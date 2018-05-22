@@ -39,6 +39,8 @@ from elektronn3.data.cnndata import PatchCreator
 from elektronn3.training.trainer import StoppableTrainer
 from elektronn3.models.unet import UNet
 
+torch.manual_seed(0)
+
 
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
@@ -59,6 +61,7 @@ lr_stepsize = 1000
 lr_dec = 0.995
 batch_size = 1
 
+# Initialize neural network model
 model = UNet(
     n_blocks=3,
     start_filts=32,
@@ -66,50 +69,43 @@ model = UNet(
     activation='relu',
     batch_norm=True
 ).to(device)
-# Note that DataParallel only makes sense with batch_size >= 2
-# model = nn.parallel.DataParallel(model, device_ids=[0, 1])
-torch.manual_seed(0)
-if device.type == 'cuda':
-    torch.cuda.manual_seed(0)
 
-
-# TODO: This dictionary stuff is getting out of hand. Simplify it.
-shared_kwargs = {
+# Specify data set
+common_data_kwargs = {  # Common options for training and valid sets.
     'mean': 155.291411,
     'std': 41.812504,
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
-    'epoch_size': args.epoch_size,
-    'squeeze_target': True,  # Workaround for neuro_data_cdhw
+    'squeeze_target': True,  # Workaround for neuro_data_cdhw,
+    'device': device,
 }
-train_kwargs = {
-    **shared_kwargs,
-    'input_h5data': input_h5data[:2],
-    'target_h5data': target_h5data[:2],
-    'train': True,
-    'epoch_size': args.epoch_size,
-    'class_weights': True,
-    'warp': 0.5,
-    'warp_kwargs': {
+train_dataset = PatchCreator(
+    input_h5data=input_h5data[:2],
+    target_h5data=target_h5data[:2],
+    train=True,
+    epoch_size=args.epoch_size,
+    class_weights=True,
+    warp=0.5,
+    warp_kwargs={
         'sample_aniso': True,
-        'perspective': True
+        'perspective': True,
     },
-}
-valid_kwargs = {
-    **shared_kwargs,
-    'input_h5data': [input_h5data[2]],
-    'target_h5data': [target_h5data[2]],
-    'train': False,
-    'epoch_size': 10,  # How many samples to use for each validation run
-    'preview_shape': (64, 144, 144),
-    'warp': 0,
-    'warp_kwargs': {
+    **common_data_kwargs
+)
+valid_dataset = PatchCreator(
+    input_h5data=[input_h5data[2]],
+    target_h5data=[target_h5data[2]],
+    train=False,
+    epoch_size=10,  # How many samples to use for each validation run
+    preview_shape=(64, 144, 144),
+    warp=0,
+    warp_kwargs={
         'sample_aniso': True,
     },
-}
-train_dataset = PatchCreator(**train_kwargs, device=device)
-valid_dataset = PatchCreator(**valid_kwargs, device=device)
+    **common_data_kwargs
+)
 
+# Set up optimization
 optimizer = optim.Adam(
     model.parameters(),
     weight_decay=0.5e-4,
@@ -122,7 +118,8 @@ lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights).to(device)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
-st = StoppableTrainer(
+# Create and run trainer
+trainer = StoppableTrainer(
     model=model,
     criterion=criterion,
     optimizer=optimizer,
@@ -135,4 +132,4 @@ st = StoppableTrainer(
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched}
 )
-st.train(max_steps)
+trainer.train(max_steps)
