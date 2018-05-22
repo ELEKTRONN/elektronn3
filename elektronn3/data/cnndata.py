@@ -4,7 +4,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 
-__all__ = ['PatchCreator']
+__all__ = ['PatchCreator', 'SimpleNeuroData2d']
 
 import logging
 import os

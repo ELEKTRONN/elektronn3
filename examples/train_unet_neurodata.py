@@ -15,11 +15,15 @@ from torch import optim
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('--exp-name', default=None, help='Manually set experiment name')
+parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
-    '--epoch-size', type=int, default=100,
+    '-s', '--epoch-size', type=int, default=100,
     help='How many training samples to process between '
          'validation/preview/extended-stat calculation phases.'
+)
+parser.add_argument(
+    '-m', '--max-steps', type=int, default=500000,
+    help='Maximum number of training steps to perform.'
 )
 args = parser.parse_args()
 
@@ -54,7 +58,7 @@ target_h5data = [
     for i in range(3)
 ]
 
-max_steps = 500000
+max_steps = args.max_steps
 lr = 0.0004
 lr_stepsize = 1000
 lr_dec = 0.995

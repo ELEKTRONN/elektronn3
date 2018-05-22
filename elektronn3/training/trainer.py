@@ -279,6 +279,8 @@ class Trainer:
                         else:
                             sched.step()
                     self.step += 1
+                    if self.step >= max_steps:
+                        break
                 stats['tr_err'] = 100. * incorrect / numel
                 stats['tr_loss'] /= len(self.train_loader)
                 mean_target = target_sum / numel

@@ -23,7 +23,11 @@ from torch import optim
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('--exp-name', default=None, help='Manually set experiment name')
+parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
+parser.add_argument(
+    '-m', '--max-steps', type=int, default=500000,
+    help='Maximum number of training steps to perform.'
+)
 args = parser.parse_args()
 
 if not args.disable_cuda and torch.cuda.is_available():
@@ -46,7 +50,7 @@ torch.manual_seed(0)
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
 
-max_steps = 5000
+max_steps = args.max_steps
 lr = 0.0004
 lr_stepsize = 1000
 lr_dec = 0.995
