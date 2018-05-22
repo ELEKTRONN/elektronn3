@@ -10,7 +10,7 @@ import os
 import traceback
 
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Union, Any
+from typing import Tuple, Dict, Optional, Callable, Any
 
 import inspect
 import IPython
@@ -18,14 +18,12 @@ import numpy as np
 import torch
 import torch.utils.data
 from skimage.color import label2rgb
-from torch.optim.lr_scheduler import ExponentialLR, StepLR
-from copy import deepcopy
+from torch.optim.lr_scheduler import StepLR
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.data.utils import save_to_h5, squash01
-from elektronn3.data.cnndata import PatchCreator
 
 logger = logging.getLogger('elektronn3log')
 
@@ -42,7 +40,7 @@ class NaNException(RuntimeError):
     pass
 
 
-class StoppableTrainer:
+class Trainer:
     """ Training loop abstraction with IPython and tensorboard integration.
 
     Hitting Ctrl-C anytime during the training will drop you to the IPython
@@ -57,21 +55,20 @@ class StoppableTrainer:
         model: PyTorch model (``nn.Module``) that shall be trained.
             Please make sure that the output shape of the ``model``
             matches the shape of targets that are delivered by the
-            ``dataset``.
+            ``train_dataset``.
         criterion: PyTorch loss that shall be used as the optimization
             criterion.
         optimizer: PyTorch optimizer that shall be used to update
             ``model`` weights according to the ``criterion`` in each
             iteration.
-        dataset: PyTorch dataset (``data.Dataset``) which produces
+        train_dataset: PyTorch dataset (``data.Dataset``) which produces
             training samples when iterated over.
-            ``StoppableTrainer`` currently has some assumptions about
-            the behavior of the ``dataset``, e.g. that the length of
-            the ``dataset`` has no special meaning except controlling how
-            often validation, plotting etc. are performed during training.
-            Currently only instances of
-            :py:class:`elektronn3.data.cnndata.PatchCreator` are supported as
-            the ``dataset``.
+            :py:class:`elektronn3.data.cnndata.PatchCreator` is currently
+            recommended for constructing datasets.
+        valid_dataset: PyTorch dataset (``data.Dataset``) which produces
+            validation samples when iterated over.
+            The length (``len(valid_dataset)``) of it determines how many
+            samples are used for one validation metric calculation.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -86,7 +83,7 @@ class StoppableTrainer:
             See :py:class:`torch.utils.data.DataLoader`
             For normal training, you can mostly set ``num_workers=1``.
             Only use more workers if you notice a data loader bottleneck.
-            Set ``num_workers=0`` if you want to debug the ``dataset``
+            Set ``num_workers=0`` if you want to debug the datasets
             implementation, to avoid mulitprocessing-specific issues.
         schedulers: Dictionary of schedulers for training hyperparameters,
             e.g. learning rate schedulers that can be found in
@@ -116,11 +113,6 @@ class StoppableTrainer:
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
-    # TODO: Try to support dataset implementations other than PatchCreator?
-    #       (The problem is currently that the *one* dataset is expected to
-    #       handle both training and validation via the ``.train()`` and
-    #       ``.validate()`` switches and a preview batch is expected to be
-    #       present.
 
     tb: TensorBoardLogger
     terminate: bool
@@ -136,8 +128,9 @@ class StoppableTrainer:
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
             device,  # torch.Device type is not available
-            dataset: PatchCreator,
             save_root: str,
+            train_dataset: torch.utils.data.Dataset,
+            valid_dataset: Optional[torch.utils.data.Dataset] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -154,7 +147,8 @@ class StoppableTrainer:
         self.model = model.to(device)
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
-        self.dataset = dataset
+        self.train_dataset = train_dataset
+        self.valid_dataset = valid_dataset
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -181,6 +175,9 @@ class StoppableTrainer:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
 
+        self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
+            and valid_dataset.preview_shape is not None
+
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False
             logger.warning('Tensorboard is not available, so it has to be disabled.')
@@ -196,7 +193,7 @@ class StoppableTrainer:
             self.tb = TensorBoardLogger(log_dir=tb_path, always_flush=False)
 
         self.train_loader = DelayedDataLoader(
-            self.dataset, batch_size=self.batchsize, shuffle=False,
+            self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
         )
@@ -206,10 +203,11 @@ class StoppableTrainer:
         # The performance impact of disabling multiprocessing here is low in normal settings,
         # because the validation loader doesn't perform expensive augmentations, but just reads
         # data from hdf5s.
-        self.valid_loader = DelayedDataLoader(
-            self.dataset, self.batchsize, num_workers=0, pin_memory=False,
-            timeout=30
-        )
+        if valid_dataset is not None:
+            self.valid_loader = DelayedDataLoader(
+                self.valid_dataset, self.batchsize, num_workers=0, pin_memory=False,
+                timeout=30
+            )
 
     # Yeah I know this is an abomination, but this monolithic function makes
     # it possible to access all important locals from within the
@@ -222,7 +220,6 @@ class StoppableTrainer:
             try:
                 # --> self.train()
                 self.model.train()
-                self.dataset.train()
 
                 # Scalar training stats that should be logged and written to tensorboard later
                 stats: Dict[str, float] = {'tr_loss': 0.0}
@@ -282,15 +279,20 @@ class StoppableTrainer:
                         else:
                             sched.step()
                     self.step += 1
+                    if self.step >= max_steps:
+                        break
                 stats['tr_err'] = 100. * incorrect / numel
                 stats['tr_loss'] /= len(self.train_loader)
                 mean_target = target_sum / numel
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
+                if self.valid_dataset is None:
+                    # TODO: Don't pretend those are 0 if they are not available:
+                    stats['val_loss'], stats['val_err'] = 0, 0
+                else:
+                    stats['val_loss'], stats['val_err'] = self.validate()
 
-                stats['val_loss'], stats['val_err'] = self.validate()
-
-                if self.step // len(self.dataset) > 1:
+                if self.step // len(self.train_dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
@@ -311,7 +313,8 @@ class StoppableTrainer:
                 logger.info(text)
                 if self.tb:
                     self.tb_log_scalars(stats, misc)
-                    self.tb_log_preview()
+                    if self.previews_enabled:
+                        self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
                 if self.save_path is not None:
@@ -350,7 +353,6 @@ class StoppableTrainer:
         )
 
     def validate(self) -> Tuple[float, float]:
-        self.dataset.validate()  # Switch dataset to validation sources
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
@@ -366,17 +368,12 @@ class StoppableTrainer:
                 incorrect += int(maxcl.ne(target).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
-        # TODO: Plot some validation images (inp, pred, target, overlay)
-        #       See tb_log_sample_images
         self.tb_log_sample_images(
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
 
-
-        # Reset dataset and model to training mode
-        self.dataset.train()
-        self.model.train()
+        self.model.train()  # Reset model to training mode
 
         return val_loss, val_err
 
@@ -390,37 +387,78 @@ class StoppableTrainer:
         for key, value in misc.items():
             self.tb.log_scalar(f'misc/{key}', value, self.step)
 
+    def _get_batch2img_function(
+            self,
+            batch: torch.Tensor,
+            z_plane: Optional[int] = None
+    ) -> Callable[[torch.Tensor], np.ndarray]:
+        """
+        Defines ``batch2img`` function dynamically, depending on tensor shapes.
+
+        ``batch2img`` slices a 4D or 5D tensor to (C, H, W) shape, moves it to
+        host memory and converts it to a numpy array.
+        By arbitrary choice, the first element of a batch is always taken here.
+        In the 5D case, the D (depth) dimension is sliced at z_plane.
+
+        This function is useful for plotting image samples during training.
+
+        Args:
+            batch: 4D or 5D tensor, used for shape analysis.
+            z_plane: Index of the spatial plane where a 5D image tensor should
+                be sliced. If not specified, this is automatically set to half
+                the size of the D dimension.
+
+        Returns:
+            Numpy array of shape (C, H, W), representing a single HxW 2D image
+            with channel dimension C.
+        """
+        if batch.dim() == 5:  # (N, C, D, H, W)
+            if z_plane is None:
+                z_plane = batch.shape[2] // 2
+            assert z_plane in range(batch.shape[2])
+            batch2img = lambda x: x[0, :, z_plane].cpu().numpy()
+        elif batch.dim() == 4:  # (N, C, H, W)
+            batch2img = lambda x: x[0, :].cpu().numpy()
+        else:
+            raise ValueError('Only 4D and 5D tensors are supported.')
+        return batch2img
+
     def tb_log_preview(
             self,
             z_plane: Optional[int] = None,
             group: str = 'preview_batch'
     ) -> None:
-        """Preview from constant region of preview batch data"""
-        _, out = preview_inference(self.model, device=self.device, dataset=self.dataset)
+        """ Preview from constant region of preview batch data.
 
-        if z_plane is None:
-            z_plane = out.shape[2] // 2
-        assert z_plane in range(out.shape[2])
+        This only works for datasets that have a ``preview_batch`` attribute.
+        """
+        inp_batch = self.valid_dataset.preview_batch[0].to(self.device)
+        out_batch = preview_inference(self.model, inp_batch=inp_batch)
 
-        mcl = maxclass(out)
-        pred = mcl[0, z_plane, ...].cpu().numpy()
+        batch2img = self._get_batch2img_function(out_batch, z_plane)
 
-        for c in range(out.shape[1]):
-            c_out = out[0, c, z_plane, ...].cpu().numpy()
-            self.tb.log_image(f'{group}/c{c}', c_out, self.step)
+        out = batch2img(out_batch)
+        pred = out.argmax(0)
+
+        for c in range(out.shape[0]):
+            self.tb.log_image(f'{group}/c{c}', out[c], self.step)
         self.tb.log_image(f'{group}/pred', pred, self.step)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
         if self._first_plot:
-            preview_inp, preview_target = self.dataset.preview_batch
-            inp = preview_inp[0, 0, z_plane, ...].cpu().numpy()
-            target = preview_target[0, z_plane, ...].cpu().numpy()
+            preview_inp, preview_target = self.valid_dataset.preview_batch
+            inp = batch2img(preview_inp)[0]
+            if preview_target.dim() == preview_inp.dim() - 1:
+                # Unsqueeze C dimension in target so it matches batch2dim()'s expected shape
+                preview_target = preview_target[:, None]
+            target = batch2img(preview_target)[0]
             self.tb.log_image(f'{group}/inp', inp, step=0)
             # Ground truth target for direct comparison with preview prediction
             self.tb.log_image(f'{group}/target', target, step=0)
             self._first_plot = False
 
+    # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
     def tb_log_sample_images(
             self,
             images: Dict[str, torch.Tensor],
@@ -436,23 +474,22 @@ class StoppableTrainer:
             distorted/weirdly colored.
         """
 
-        out = images['out']
+        out_batch = images['out']
 
-        if z_plane is None:
-            z_plane = out.shape[2] // 2
-        assert z_plane in range(out.shape[2])
+        batch2img = self._get_batch2img_function(out_batch, z_plane)
 
-        inp = images['inp'][0, 0, z_plane, ...].cpu().numpy()
-        target = images['target'][0, z_plane].cpu().numpy()
-        mcl = maxclass(out)
-        pred = mcl[0, z_plane, ...].cpu().numpy()
+        inp = batch2img(images['inp'])[0]
+        target_batch_with_c = images['target'][:, None]
+        target = batch2img(target_batch_with_c)[0]
+
+        out = batch2img(out_batch)
+        pred = out.argmax(0)
 
         self.tb.log_image(f'{group}/inp', inp, step=self.step)
         self.tb.log_image(f'{group}/target', target, step=self.step)
 
-        for c in range(out.shape[1]):
-            c_out = out[0, c, z_plane, ...].cpu().numpy()
-            self.tb.log_image(f'{group}/c{c}', c_out, step=self.step)
+        for c in range(out.shape[0]):
+            self.tb.log_image(f'{group}/c{c}', out[c], step=self.step)
         self.tb.log_image(f'{group}/pred', pred, step=self.step)
 
         inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
@@ -477,7 +514,7 @@ def maxclass(class_predictions: torch.Tensor):
     Returns:
         Tensor of shape (N, ...)
     """
-    maxcl = class_predictions.max(dim=1)[1]
+    maxcl = class_predictions.max(dim=1)[1]  # TODO: Use argmax instead
     return maxcl
 
 
@@ -500,19 +537,13 @@ def save_to_h5(fname: str, model_output: torch.Tensor):
 
 def preview_inference(
         model: torch.nn.Module,
-        device,
-        dataset: Optional[PatchCreator] = None,
+        inp_batch: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     model.eval()  # Set dropout and batchnorm to eval mode
     # Attention: Inference on Tensors with unexpected shapes can lead to errors!
     # Staying with multiples of 16 for lengths seems to work.
-    if dataset is None:
-        d, h, w = dataset.preview_shape
-        inp = torch.rand(1, dataset.c_input, d, h, w, device=device)
-    else:
-        inp = dataset.preview_batch[0]
     with torch.no_grad():
-        out = model(inp)
+        out_batch = model(inp_batch)
     model.train()  # Reset model to training mode
 
-    return inp, out
+    return out_batch
