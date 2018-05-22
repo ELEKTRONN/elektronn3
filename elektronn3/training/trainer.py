@@ -135,9 +135,9 @@ class StoppableTrainer:
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
             device,  # torch.Device type is not available
-            train_dataset: torch.utils.data.Dataset,
-            valid_dataset: torch.utils.data.Dataset,
             save_root: str,
+            train_dataset: torch.utils.data.Dataset,
+            valid_dataset: Optional[torch.utils.data.Dataset] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -210,10 +210,11 @@ class StoppableTrainer:
         # The performance impact of disabling multiprocessing here is low in normal settings,
         # because the validation loader doesn't perform expensive augmentations, but just reads
         # data from hdf5s.
-        self.valid_loader = DelayedDataLoader(
-            self.valid_dataset, self.batchsize, num_workers=0, pin_memory=False,
-            timeout=30
-        )
+        if valid_dataset is not None:
+            self.valid_loader = DelayedDataLoader(
+                self.valid_dataset, self.batchsize, num_workers=0, pin_memory=False,
+                timeout=30
+            )
 
     # Yeah I know this is an abomination, but this monolithic function makes
     # it possible to access all important locals from within the
@@ -290,8 +291,11 @@ class StoppableTrainer:
                 mean_target = target_sum / numel
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
-
-                stats['val_loss'], stats['val_err'] = self.validate()
+                if self.valid_dataset is None:
+                    # TODO: Don't pretend those are 0 if they are not available:
+                    stats['val_loss'], stats['val_err'] = 0, 0
+                else:
+                    stats['val_loss'], stats['val_err'] = self.validate()
 
                 if self.step // len(self.train_dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
