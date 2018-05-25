@@ -41,8 +41,8 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.training.trainer import Trainer
-from elektronn3.data.cnndata import SimpleNeuroData2d
+from elektronn3.training import Trainer
+from elektronn3.data import SimpleNeuroData2d
 
 torch.manual_seed(0)
 
