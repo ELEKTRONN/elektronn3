@@ -20,8 +20,7 @@ dependencies:
   - tensorflow >=1.8.0
 
   # For docs:
-  - sphinx =1.7.0  # In >=1.7.1 sphinx-build doesn't work.
-  - sphinx_rtd_theme >=0.3.1
-#  - sphinx-autodoc-typehints  # Not yet in conda-forge, install via pip:
   - pip:
+    - sphinx ==1.7.0
+    - sphinx_rtd_theme ==0.3.1
     - sphinx-autodoc-typehints
