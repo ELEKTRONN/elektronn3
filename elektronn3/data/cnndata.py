@@ -4,13 +4,14 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 
-__all__ = ['PatchCreator']
+__all__ = ['PatchCreator', 'SimpleNeuroData2d']
 
 import logging
 import os
 import sys
 import time
 import traceback
+from os.path import expanduser
 from typing import Tuple, Dict, Optional, Union, Sequence, Any, List
 
 import h5py
@@ -32,7 +33,7 @@ class PatchCreator(data.Dataset):
     It implements the PyTorch ``Dataset`` interface and is meant to be used
     with a PyTorch ``DataLoader`` (or the modified
     :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader``, if it is
-    used with :py:class:`elektronn3.training.trainer.StoppableTrainer``).
+    used with :py:class:`elektronn3.training.trainer.Trainer``).
 
     The main idea of this class is to automate input and target patch creation
     for training convnets for semantic image segmentation. Patches are sliced
@@ -56,13 +57,11 @@ class PatchCreator(data.Dataset):
     support is also planned.
 
     Args:
-        input_path: Path to the folder containing input files.
-        target_path: Path to the folder containing target files.
         input_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
-            each item specifies the filename relative to input_path and
+            each item specifies the filename and
             the HDF5 dataset key under which the input data is stored.
         target_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
-            each item specifies the filename relative to target_path and
+            each item specifies the filename and
             the HDF5 dataset key under which the target data is stored.
         patch_shape: Desired spatial shape of the samples that the iterator
             delivers by slicing from the data set files.
@@ -80,7 +79,6 @@ class PatchCreator(data.Dataset):
             sizes won't help much).
         cube_prios: List of per-cube priorities, where a higher priority
             means that it is more likely that a sample comes from this cube.
-        valid_cube_indices:
         aniso_factor: Depth-anisotropy factor of the data set. E.g.
             if your data set has half resolution in the depth dimension,
             set ``aniso_factor=2``. If all dimensions have the same
@@ -100,13 +98,15 @@ class PatchCreator(data.Dataset):
             and unit standard deviation ("std"). If ``mean`` and/or ``std``
             are not supplied, they are automatically estimated on the training
             data on initialization.
-        source: Determines if samples should come from training or validation
+        train: Determines if samples come from training or validation
             data.
-            If ``source='train'``, training data is returned.
-            If ``source='valid'``, validation data is returned.
+            If ``True``, training data is returned.
+            If ``False``, validation data is returned.
         preview_shape: Desired spatial shape of the dedicated preview batch.
             The preview batch is obtained by slicing a patch of this
             shape out of the center of the preview cube.
+            If it is ``None`` (default), preview batch functionality will be
+            disabled.
         grey_augment_channels: Determines on which of the training input
             channels gray value augmentations should be applied on.
             E.g. ``grey_augment_channels=[0]`` means that only channel 0
@@ -130,7 +130,7 @@ class PatchCreator(data.Dataset):
             one "training phase", so after each ``epoch_size`` batches,
             validation/logging/plotting are performed by the training loop
             that uses this data set (e.g.
-            ``elektronn3.training.trainer.StoppableTrainer``).
+            ``elektronn3.training.trainer.Trainer``).
         eager_init: If ``False``, some parts of the class initialization
             are lazily performed only when they are needed.
             It's not recommended to change this option.
@@ -142,21 +142,17 @@ class PatchCreator(data.Dataset):
     """
     def __init__(
             self,
-            input_path: str,
-            target_path: str,
-            input_h5data: Dict[str, str],
-            target_h5data: Dict[str, str],
+            input_h5data: List[Tuple[str, str]],
+            target_h5data: List[Tuple[str, str]],
             patch_shape: Sequence[int],
             device,
             cube_prios: Optional[Sequence[float]] = None,
-            valid_cube_indices: Optional[Sequence[int]] = None,
-            border_mode='crop',
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
             mean: Optional[float] = None,
             std: Optional[float] = None,
             normalize: bool = True,
-            source: str = 'train',
+            train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
             grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
@@ -167,14 +163,32 @@ class PatchCreator(data.Dataset):
             eager_init: bool = True,
             squeeze_target: bool = False,
     ):
-        assert (input_path and target_path and input_h5data and target_h5data)
-        if len(input_h5data)!=len(target_h5data):
+        # Early checks
+        if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
-        input_path = os.path.expanduser(input_path)
-        target_path = os.path.expanduser(target_path)
+        if not train:
+            if  normalize and (mean is None or std is None):
+                logger.warning(
+                    'You need to manually supply mean and std for validation '
+                    'sets (auto-calculating them would defeat the purpose of '
+                    'having a separate validation set).\n'
+                    'Please supply mean and std of your training set.'
+                )
+            if class_weights:
+                raise ValueError(
+                    'Calculating class_weights on validation sets is not allowed.'
+                )
+            if warp or random_blurring_config is not None or grey_augment_channels is not None:
+                raise ValueError(
+                    'Augmentations should not be used on validation data.'
+                )
+        else:
+            if preview_shape is not None:
+                raise ValueError()
+
         self.device = device
         # batch properties
-        self.source = source
+        self.train = train
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_kwargs = warp_kwargs
@@ -188,23 +202,17 @@ class PatchCreator(data.Dataset):
         #       also be implemented as pluggable transformations.
 
         # general properties
-        # TODO: Merge *_path with *_h5data, i.e. *_h5data should contain tuples (<full/path/to/hdf5.h5>, <hdf5datasetkey>).
-        self.input_path = input_path
-        self.target_path = target_path
-        # TODO: "*_files" is a bit misleading, because those are actually tuples (filename, h5_key).
+        input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
+        target_h5data = [(expanduser(fn), key) for (fn, key) in target_h5data]
         self.input_h5data = input_h5data
         self.target_h5data = target_h5data
         self.cube_prios = cube_prios
         # TODO: Support separate validation data? (Not using indices, but an own validation list)
-        self.valid_cube_indices = valid_cube_indices if valid_cube_indices is not None else []
         self.aniso_factor = aniso_factor
-        self.border_mode = border_mode
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
 
-        # Infer geometric info from input/target shapes
-        # HACK
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
         # TODO: Make strides and offsets for targets configurable
@@ -224,16 +232,10 @@ class PatchCreator(data.Dataset):
         self.c_target = None  # Number of target channels
 
         # Actual data fields
-        self.valid_inputs = []
-        self.valid_targets = []
+        self.inputs = []
+        self.targets = []
 
-        self.train_inputs = []
-        self.train_targets = []
-
-        if preview_shape is None:
-            self.preview_shape = self.patch_shape
-        else:
-            self.preview_shape = preview_shape
+        self.preview_shape = preview_shape
         self._preview_batch = None
 
 
@@ -242,16 +244,16 @@ class PatchCreator(data.Dataset):
             np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
         )
         self.pid = os.getpid()
-        self.gc_count = 1
 
         self._sampling_weight = None
         self._training_count = None
-        self._valid_count = None
+        self._count = None
         self.n_successful_warp = 0
         self.n_failed_warp = 0
         self.n_read_failures = 0
 
-        self.load_data()
+        self.load_data()  # Open dataset files
+
         self._mean = mean
         self._std = std
         self.normalize = normalize
@@ -265,7 +267,7 @@ class PatchCreator(data.Dataset):
         if class_weights:
             # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param. # Not quite sure what you mean, this is done once only anyway
             # TODO: This assumes a binary segmentation problem (background/foreground). Support more classes?
-            target_mean = np.mean(self.train_targets)
+            target_mean = np.mean(self.targets)
             bg_weight = target_mean / (1. + target_mean)
             fg_weight = 1. - bg_weight
             self.class_weights = torch.tensor([bg_weight, fg_weight])
@@ -285,9 +287,10 @@ class PatchCreator(data.Dataset):
         if self.grey_augment_channels is None:
             self.grey_augment_channels = []
         self._reseed()
-        input_src, target_src = self._getcube(self.source)  # get cube randomly
+        input_src, target_src = self._getcube()  # get cube randomly
         while True:
             try:
+                # TODO: Limit validation data warping
                 inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
                 # Arbitrarily choosing 100 as the threshold here, because we
@@ -335,10 +338,10 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp += 1
             if self.normalize:
                 inp = (inp - self.mean) / self.std
-            if self.random_blurring_config and self.source == "train":
+            if self.random_blurring_config and self.train:
                 apply_random_blurring(inp_sample=inp,
                                       **self.random_blurring_config)
-            if self.grey_augment_channels and self.source == "train":  # grey augmentation only for training
+            if self.grey_augment_channels and self.train:  # grey augmentation only for training
                 inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
@@ -379,7 +382,7 @@ class PatchCreator(data.Dataset):
                 'Calculating mean of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
-            means = [np.mean(x) for x in self.train_inputs]
+            means = [np.mean(x) for x in self.inputs]
             self._mean = np.mean(means)
             logger.info(f'mean = {self._mean:.6f}')
         return self._mean
@@ -392,7 +395,7 @@ class PatchCreator(data.Dataset):
                 'Calculating std of training inputs. This is potentially slow. Please supply\n'
                 'it manually when initializing the data set to make startup faster.'
             )
-            stds = [np.std(x) for x in self.train_inputs]
+            stds = [np.std(x) for x in self.inputs]
             # Note that this is not the same as the std of all train_inputs
             # together. The mean of stds of the individual input data cubes
             # is different because it only acknowledges intra-cube variance,
@@ -403,14 +406,6 @@ class PatchCreator(data.Dataset):
             self._std = np.mean(stds)
             logger.info(f'std = {self._std:.6f}')
         return self._std
-
-    def validate(self) -> None:
-        self.source = "valid"
-        self.epoch_size = 10
-
-    def train(self) -> None:
-        self.source = "train"
-        self.epoch_size = self._orig_epoch_size
 
     def _create_preview_batch(
             self,
@@ -450,8 +445,8 @@ class PatchCreator(data.Dataset):
         if self.normalize:
             inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
 
-        inp = torch.from_numpy(inp_np).to(self.device)
-        target = torch.from_numpy(target_np).to(self.device)
+        inp = torch.from_numpy(inp_np)
+        target = torch.from_numpy(target_np)
 
         # See comments at the end of PatchCreator.__getitem__()
         # Note that here it's the dimension index 1 that we're squeezing,
@@ -460,26 +455,16 @@ class PatchCreator(data.Dataset):
             assert len(self.target_ps) == target_source.ndim - 1
             target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, (D,) H, W)
 
-
         return inp, target
 
-    # In this implementation the preview batch is always kept in GPU memory.
-    # This means much better inference speed when using it, but this may be
-    # a bad decision if GPU memory is limited.
-    # --> TODO: Document this concern and decide how to deal with it.
-    #           (E.g. suggest a smaller preview shape if catching OOM,
-    #            or keep the batch in main memory ("cpu") and only move it
-    #            to GPU when needed, freeing up GPU memory afterwards
-    #            -> first evaluate cost of moving?...)
-    #
     # TODO: Make targets optional so we can have larger previews without ground truth targets?
 
     @property
-    def preview_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self._preview_batch is None:
+    def preview_batch(self) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        if self._preview_batch is None and self.preview_shape is not None:
             inp, target = self._create_preview_batch(
-                self.valid_inputs[0], self.valid_targets[0]
-            )  # TODO: Don't hardcode valid_*[0]
+                self.inputs[0], self.targets[0]
+            )  # TODO: Don't hardcode [0]
 
             self._preview_batch = (inp, target)
         return self._preview_batch
@@ -565,29 +550,24 @@ class PatchCreator(data.Dataset):
 
         return inp, target
 
-    def _getcube(self, source: str) -> Tuple[h5py.Dataset, h5py.Dataset]:
+    def _getcube(self) -> Tuple[h5py.Dataset, h5py.Dataset]:
         """
         Draw an example cube according to sampling weight on training data,
         or randomly on valid data
         """
-        if source == 'train':
+        if self.train:
             p = self.rng.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
-            inp_source, target_source = self.train_inputs[i], self.train_targets[i]
-        elif source == "valid":
-            if len(self.valid_inputs) == 0:
+            inp_source, target_source = self.inputs[i], self.targets[i]
+        else:
+            if len(self.inputs) == 0:
                 raise ValueError("No validation set")
 
-            i = self.rng.randint(0, len(self.valid_inputs))
-            inp_source = self.valid_inputs[i]
-            target_source = self.valid_targets[i]
-        else:
-            raise ValueError("Unknown data source")
+            # TODO: Sampling weight for validation data?
+            i = self.rng.randint(0, len(self.inputs))
+            inp_source, target_source = self.inputs[i], self.targets[i]
 
         return inp_source, target_source
-
-    def _stridedtargets(self, target):
-        return target[::self.strides[0], ::self.strides[1], ::self.strides[2]]
 
     def load_data(self) -> None:
         inp_files, target_files = self.open_files()
@@ -595,14 +575,10 @@ class PatchCreator(data.Dataset):
         prios = []
         # Distribute Cubes into training and valid list
         for k, (inp, target) in enumerate(zip(inp_files, target_files)):
-            if k in self.valid_cube_indices:
-                self.valid_inputs.append(inp)
-                self.valid_targets.append(target)
-            else:
-                self.train_inputs.append(inp)
-                self.train_targets.append(target)
-                # If no priorities are given: sample proportional to cube size
-                prios.append(target.size)
+            self.inputs.append(inp)
+            self.targets.append(target)
+            # If no priorities are given: sample proportional to cube size
+            prios.append(target.size)
 
         if self.cube_prios is None:
             prios = np.array(prios, dtype=np.float)
@@ -611,8 +587,7 @@ class PatchCreator(data.Dataset):
 
         # sample example i if: batch_prob[i] < p
         self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
-        self._training_count = len(self.train_inputs)
-        self._valid_count = len(self.valid_inputs)
+        self._count = len(self.inputs)
 
     def check_files(self) -> None:  # TODO: Update for cdhw version
         """
@@ -620,8 +595,8 @@ class PatchCreator(data.Dataset):
         """
         notfound = False
         give_neuro_data_hint = False
-        fullpaths = [os.path.join(self.input_path, f) for f, _ in self.input_h5data] + \
-                    [os.path.join(self.target_path, f) for f, _ in self.target_h5data]
+        fullpaths = [f for f, _ in self.input_h5data] + \
+                    [f for f, _ in self.target_h5data]
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -642,11 +617,11 @@ class PatchCreator(data.Dataset):
     def open_files(self) -> Tuple[List[h5py.Dataset], List[h5py.Dataset]]:
         self.check_files()
         inp_h5sets, target_h5sets = [], []
-
-        print('\nUsing data sets:')
+        modestr = 'Training' if self.train else 'Validation'
+        print(f'\n{modestr} data set:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(os.path.join(self.input_path, inp_fname), 'r')[inp_key]
-            target_h5 = h5py.File(os.path.join(self.target_path, target_fname), 'r')[target_key]
+            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
+            target_h5 = h5py.File(target_fname, 'r')[target_key]
 
             # assert inp_h5.ndim == 4
             # assert target_h5.ndim == 4
@@ -665,3 +640,63 @@ class PatchCreator(data.Dataset):
         print()
 
         return inp_h5sets, target_h5sets
+
+
+class SimpleNeuroData2d(data.Dataset):
+    """ 2D Dataset class for neuro_data_cdhw, reading from a single HDF5 file.
+
+    Delivers 2D image slices from the (H, W) plane at given D indices.
+    Not scalable, keeps everything in memory.
+    This is just a minimalistic proof of concept.
+    """
+
+    def __init__(
+            self,
+            inp_path=None,
+            target_path=None,
+            train=True,
+            inp_key='raw', target_key='lab',
+            # offset=(0, 0, 0),
+            pool=(1, 1, 1)
+    ):
+        super().__init__()
+        cube_id = 0 if train else 2
+        if inp_path is None:
+            inp_path = expanduser(f'~/neuro_data_cdhw/raw_{cube_id}.h5')
+        if target_path is None:
+            target_path = expanduser(f'~/neuro_data_cdhw/barrier_int16_{cube_id}.h5')
+        self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
+        self.target_file = h5py.File(os.path.expanduser(target_path), 'r')
+        self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
+        self.target = self.target_file[target_key].value.astype(np.int64)
+        self.target = self.target[0]  # Squeeze superfluous first dimension
+
+        self.target = self.target[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (dirty hack TODO)
+
+        # Cut inp and target to same size
+        inp_shape = np.array(self.inp.shape[1:])
+        target_shape = np.array(self.target.shape)
+        diff = inp_shape - target_shape
+        offset = diff // 2  # offset from image boundaries
+
+        self.inp = self.inp[
+            :,
+            offset[0]: inp_shape[0] - offset[0],
+            offset[1]: inp_shape[1] - offset[1],
+            offset[2]: inp_shape[2] - offset[2],
+        ]
+
+        self.close_files()  # Using file contents from memory -> no need to keep the file open.
+
+    def __getitem__(self, index):
+        # Get z slices
+        inp = self.inp[:, index]
+        target = self.target[index]
+        return inp, target
+
+    def __len__(self):
+        return self.target.shape[0]
+
+    def close_files(self):
+        self.inp_file.close()
+        self.target_file.close()

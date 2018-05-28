@@ -7,22 +7,23 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 
 import argparse
-import datetime
 import os
 
 import torch
 from torch import nn
 from torch import optim
-from elektronn3.data.random_blurring import ScalarScheduler
-
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('--exp-name', default=None, help='Manually set experiment name')
+parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
-    '--epoch-size', type=int, default=100,
+    '-s', '--epoch-size', type=int, default=100,
     help='How many training samples to process between '
          'validation/preview/extended-stat calculation phases.'
+)
+parser.add_argument(
+    '-m', '--max-steps', type=int, default=500000,
+    help='Maximum number of training steps to perform.'
 )
 args = parser.parse_args()
 
@@ -37,22 +38,35 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data.cnndata import PatchCreator
-from elektronn3.training.trainer import StoppableTrainer
+from elektronn3.data import PatchCreator
+from elektronn3.data.random_blurring import ScalarScheduler
+from elektronn3.training import Trainer
 from elektronn3.models.unet import UNet
 
 
+torch.manual_seed(0)
+
+
 # USER PATHS
-data_path = os.path.expanduser('~/neuro_data_cdhw/')
 save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
+data_root = os.path.expanduser('~/neuro_data_cdhw/')
+input_h5data = [
+    (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+    for i in range(3)
+]
+target_h5data = [
+    (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+    for i in range(3)
+]
 
-max_steps = 500000
+max_steps = args.max_steps
 lr = 0.0004
 lr_stepsize = 1000
 lr_dec = 0.995
 batch_size = 1
 
+# Initialize neural network model
 model = UNet(
     n_blocks=3,
     start_filts=32,
@@ -60,12 +74,8 @@ model = UNet(
     activation='relu',
     batch_norm=True
 ).to(device)
-# Note that DataParallel only makes sense with batch_size >= 2
-# model = nn.parallel.DataParallel(model, device_ids=[0, 1])
-torch.manual_seed(0)
-if device.type == 'cuda':
-    torch.cuda.manual_seed(0)
 
+# Configure random local blurring
 threshold = ScalarScheduler(
     value=0.1,
     max_value=0.5,
@@ -83,31 +93,43 @@ random_blurring_config = {
     "num_steps_save": 1000
 }
 
-data_init_kwargs = {
-    'input_path': data_path,
-    'target_path': data_path,
-    'input_h5data': [('raw_%i.h5' % i, 'raw') for i in range(3)],
-    'target_h5data': [('barrier_int16_%i.h5' %i, 'lab') for i in range(3)],
+# Specify data set
+common_data_kwargs = {  # Common options for training and valid sets.
     'mean': 155.291411,
     'std': 41.812504,
     'aniso_factor': 2,
-    'source': 'train',
     'patch_shape': (48, 96, 96),
-    'preview_shape': (64, 144, 144),
-    'valid_cube_indices': [2],
-    'grey_augment_channels': [],
-    'random_blurring_config': random_blurring_config,
-    'epoch_size': args.epoch_size,
-    'warp': 0.5,
-    'class_weights': True,
-    'warp_kwargs': {
-        'sample_aniso': True,
-        'perspective': True
-    },
-    'squeeze_target': True,  # Workaround for neuro_data_cdhw
+    'squeeze_target': True,  # Workaround for neuro_data_cdhw,
+    'device': device,
 }
-dataset = PatchCreator(**data_init_kwargs, device=device)
+train_dataset = PatchCreator(
+    input_h5data=input_h5data[:2],
+    target_h5data=target_h5data[:2],
+    train=True,
+    epoch_size=args.epoch_size,
+    class_weights=True,
+    warp=0.5,
+    warp_kwargs={
+        'sample_aniso': True,
+        'perspective': True,
+    },
+    random_blurring_config=random_blurring_config,
+    **common_data_kwargs
+)
+valid_dataset = PatchCreator(
+    input_h5data=[input_h5data[2]],
+    target_h5data=[target_h5data[2]],
+    train=False,
+    epoch_size=10,  # How many samples to use for each validation run
+    preview_shape=(64, 144, 144),
+    warp=0,
+    warp_kwargs={
+        'sample_aniso': True,
+    },
+    **common_data_kwargs
+)
 
+# Set up optimization
 optimizer = optim.Adam(
     model.parameters(),
     weight_decay=0.5e-4,
@@ -117,19 +139,21 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-criterion = nn.CrossEntropyLoss(weight=dataset.class_weights).to(device)
+criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights).to(device)
 # TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
 
-st = StoppableTrainer(
+# Create and run trainer
+trainer = Trainer(
     model=model,
     criterion=criterion,
     optimizer=optimizer,
     device=device,
-    dataset=dataset,
+    train_dataset=train_dataset,
+    valid_dataset=valid_dataset,
     batchsize=batch_size,
     num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched}
 )
-st.train(max_steps)
+trainer.train(max_steps)
