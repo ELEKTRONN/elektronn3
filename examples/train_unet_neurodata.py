@@ -30,7 +30,7 @@ if not args.disable_cuda and torch.cuda.is_available():
 else:
     device = torch.device('cpu')
 
-print('Running on device: {device}')
+print(f'Running on device: {device}')
 
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3

@@ -21,7 +21,6 @@ import torch.utils.data
 
 from skimage.color import label2rgb
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
-from copy import deepcopy
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
