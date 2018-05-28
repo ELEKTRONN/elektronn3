@@ -30,7 +30,7 @@ if not args.disable_cuda and torch.cuda.is_available():
 else:
     device = torch.device('cpu')
 
-print(f'Running on device: {device}')
+print('Running on device: {device}')
 
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3
@@ -115,9 +115,9 @@ st = StoppableTrainer(
     schedulers={"lr": lr_sched}
 )
 
-#Saving source backup and training script
-scriptPath = inspect.getfile(inspect.currentframe())  # e.g. train_unet.py
-bk = Backup(scriptPath=scriptPath,savePath=st.save_path)
-bk.save_script_gztar()
+#Archiving training, script, src folder, env info
+script_path = inspect.getfile(inspect.currentframe())  # e.g. train_unet.py
+bk = Backup(script_path=script_path,save_path=st.save_path)
+bk.archive_backup()
 
 st.train(max_steps)
