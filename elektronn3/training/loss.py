@@ -1,4 +1,13 @@
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch
+
 import torch
+from torch.nn import functional as F
+
+# TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
 
 
 def _channelwise_sum(x):
@@ -10,23 +19,47 @@ def _channelwise_sum(x):
 
 
 # Simple n-dimensional dice loss. Minimalistic version for easier verification
-# TODO: Verify math correctness
-def dice_loss(output, target, eps=0.0001):
-    onehot_target = torch.zeros_like(output)
+def dice_loss(probs, target, eps=0.0001):
+    # Probs need to be softmax probabilities, not raw network outputs
+    onehot_target = torch.zeros_like(probs)
     onehot_target.scatter_(1, target.unsqueeze(1), 1)
 
-    intersection = output * onehot_target
+    intersection = probs * onehot_target
     numerator = 2 * _channelwise_sum(intersection)
-    denominator = output + onehot_target
+    denominator = probs + onehot_target
     denominator = _channelwise_sum(denominator) + eps
     loss_per_channel = 1 - (numerator / denominator)
     return loss_per_channel.mean()
 
 
 class DiceLoss(torch.nn.Module):
-    def forward(self, output, target):
-        return dice_loss(output, target)
+    def __init__(self, softmax=True):
+        super().__init__()
+        if softmax:
+            self.softmax = torch.nn.Softmax(dim=1)
+        else:
+            self.softmax = lambda x: x  # Identity
+        self.dice = dice_loss
 
+    def forward(self, output, target):
+        probs = self.softmax(output)
+        return self.dice(probs, target)
+
+
+# TODO: Move this to a dedicated metrics submodule?
+def dice_error(probs, target, softmax=True, *args, **kwargs):
+    """Calculate dice loss without accumulating gradients.
+
+    You can use this function if the dice loss is just used as a performance
+    metric, but not as the direct optimizer objective.
+    """
+    probs, target = probs.detach(), target.detach()
+    if softmax:
+        probs = F.softmax(probs, dim=1)
+    return dice_loss(probs.detach(), target.detach(), *args, **kwargs)
+
+
+##### ALTERNATIVE VERSIONS OF DICE LOSS #####
 
 # Version with features that are untested and currently not needed
 # Based on https://discuss.pytorch.org/t/one-hot-encoding-with-autograd-dice-loss/9781/5
