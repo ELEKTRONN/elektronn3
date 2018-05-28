@@ -536,7 +536,29 @@ class Backup:
         """.strip()
 
 
-    def save_backup_gztar(self):
+    def archive_backup(self):
+        """Archving the source folder, the training script and environment info.
+        Some of the information saved in the env info is:
+        PyTorch version: 0.4.0
+        Is debug build: No
+        CUDA used to build PyTorch: 8.0.61
+        OS: CentOS Linux release 7.3.1611 (Core)
+        GCC version: (GCC) 5.2.0
+        CMake version: Could not collect
+        Python version: 3.6
+        Is CUDA available: Yes
+        CUDA runtime version: 8.0.44
+        GPU models and configuration:
+        GPU 0: GeForce GTX 980 Ti
+        GPU 1: GeForce GTX 980 Ti
+        .
+
+           Args:
+               arguments in the backup class instance.
+
+           Returns:
+               Nothing
+           """
 
             #Archiving the Training script
             shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
