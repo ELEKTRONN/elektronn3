@@ -40,7 +40,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator
-from elektronn3.training import Trainer
+from elektronn3.training import Trainer, Backup
 from elektronn3.models.unet import UNet
 
 torch.manual_seed(0)
@@ -138,8 +138,8 @@ trainer = Trainer(
 )
 
 #Archiving training, script, src folder, env info
-bk = Backup(script_path=__file__,save_path=st.save_path)
+bk = Backup(script_path=__file__,save_path=trainer.save_path)
 bk.archive_backup()
 
-st.train(max_steps)
+trainer.train(max_steps)
 trainer.train(max_steps)
