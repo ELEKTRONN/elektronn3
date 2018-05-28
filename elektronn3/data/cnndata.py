@@ -134,7 +134,6 @@ class PatchCreator(data.Dataset):
         eager_init: If ``False``, some parts of the class initialization
             are lazily performed only when they are needed.
             It's not recommended to change this option.
-        device: The device on which to allocate data.
         squeeze_target: If ``True``, target tensors will be squeezed in their
             channel axis if it is empty. This workaround and will be removed
             later. It is currently needed to support targets that have an
@@ -145,7 +144,6 @@ class PatchCreator(data.Dataset):
             input_h5data: List[Tuple[str, str]],
             target_h5data: List[Tuple[str, str]],
             patch_shape: Sequence[int],
-            device,
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
@@ -186,7 +184,6 @@ class PatchCreator(data.Dataset):
             if preview_shape is not None:
                 raise ValueError()
 
-        self.device = device
         # batch properties
         self.train = train
         self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
@@ -272,7 +269,6 @@ class PatchCreator(data.Dataset):
             fg_weight = 1. - bg_weight
             self.class_weights = torch.tensor([bg_weight, fg_weight])
             logger.info(f'Calculated class weights: {[bg_weight, fg_weight]}')
-            self.class_weights = self.class_weights.to(self.device)
         else:
             self.class_weights = None
 
