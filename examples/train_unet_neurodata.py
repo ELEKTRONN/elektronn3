@@ -116,8 +116,7 @@ st = StoppableTrainer(
 )
 
 #Archiving training, script, src folder, env info
-script_path = inspect.getfile(inspect.currentframe())  # e.g. train_unet.py
-bk = Backup(script_path=script_path,save_path=st.save_path)
+bk = Backup(script_path=__file__,save_path=st.save_path)
 bk.archive_backup()
 
 st.train(max_steps)

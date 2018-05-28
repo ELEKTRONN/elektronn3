@@ -20,6 +20,7 @@ import torch
 import torch.utils.data
 from skimage.color import label2rgb
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
+
 from copy import deepcopy
 
 from elektronn3.training.train_utils import Timer, pretty_string_time
@@ -28,6 +29,8 @@ from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.training import collect_env
 from elektronn3.data.utils import save_to_h5, squash01
 from elektronn3.data.cnndata import PatchCreator
+from elektronn3 import __file__ as arch_src
+
 
 logger = logging.getLogger('elektronn3log')
 
@@ -569,7 +572,7 @@ class Backup:
         os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
 
         #Archiving the src folder
-        pkg_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pkg_path = os.path.dirname(arch_src)
         backup_path = os.path.join(self.save_path, 'src_backup')
         shutil.make_archive(backup_path, 'gztar', pkg_path)
 
