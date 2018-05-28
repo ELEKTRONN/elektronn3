@@ -523,21 +523,26 @@ def preview_inference(
 
 class Backup:
 
+    """ Backup class for archiving training script, src folder and environment info.
+    Should be used for any future archiving needs.
+
+
+    Args:
+        script_path: The path to the training script. Eg. train_unet_neurodata.py
+        save_path: The path where the information is archived.
+
+    """
+
     def __init__(self, script_path, save_path):
 
         self.script_path = script_path
         self.save_path = save_path
-        self.env_summary = """     
-        
-        PyTorch {pytorch_version}{debug_str} {cuda_compiled}
-        Running with Python {py_version} and {cuda_runtime}
-        `{pip_version} list` truncated output:
-        {pip_list_output}
-        """.strip()
 
 
     def archive_backup(self):
-        """Archving the source folder, the training script and environment info.
+
+        """Archiving the source folder, the training script and environment info.
+        The training script is saved with the prefix '0-' to distinguish from regular scripts.
         Some of the information saved in the env info is:
         PyTorch version: 0.4.0
         Is debug build: No
@@ -553,24 +558,24 @@ class Backup:
         GPU 1: GeForce GTX 980 Ti
         .
 
-           Args:
-               arguments in the backup class instance.
+       Args:
+           arguments in the backup class instance.
 
-           Returns:
-               Nothing
-           """
+       Returns:
+           Nothing
+        """
 
-            #Archiving the Training script
-            shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
-            os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
+        #Archiving the Training script
+        shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
+        os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
 
-            #Archiving the src folder
-            pkg_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            backup_path = os.path.join(self.save_path, 'src_backup')
-            shutil.make_archive(backup_path, 'gztar', pkg_path)
+        #Archiving the src folder
+        pkg_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        backup_path = os.path.join(self.save_path, 'src_backup')
+        shutil.make_archive(backup_path, 'gztar', pkg_path)
 
-            #Archiving the Environment Info
-            env_info = collect_env.get_pretty_env_info()
-            f = open(self.save_path+ '/env_info.txt', 'w')
-            f.write(env_info)
-            f.close()
+        #Archiving the Environment Info
+        env_info = collect_env.get_pretty_env_info()
+        f = open(self.save_path+ '/env_info.txt', 'w')
+        f.write(env_info)
+        f.close()
