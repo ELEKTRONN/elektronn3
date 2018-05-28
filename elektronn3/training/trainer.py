@@ -18,7 +18,6 @@ import IPython
 import numpy as np
 import torch
 import torch.utils.data
-# from torch.utils import collect_env
 
 from skimage.color import label2rgb
 from torch.optim.lr_scheduler import ExponentialLR, StepLR
@@ -27,6 +26,7 @@ from copy import deepcopy
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
+from elektronn3.training import collect_env
 from elektronn3.data.utils import save_to_h5, squash01
 from elektronn3.data.cnndata import PatchCreator
 
@@ -523,10 +523,10 @@ def preview_inference(
 
 class Backup:
 
-    def __init__(self, scriptPath, savePath):
+    def __init__(self, script_path, save_path):
 
-        self.scriptPath = scriptPath
-        self.savePath = savePath
+        self.script_path = script_path
+        self.save_path = save_path
         self.env_summary = """     
         
         PyTorch {pytorch_version}{debug_str} {cuda_compiled}
@@ -535,60 +535,20 @@ class Backup:
         {pip_list_output}
         """.strip()
 
-    def run_env_analysis(self):
-        print('Running environment analysis...')
-        # TODO: Future conda updates of pytorch will have collect_env module: please dont delete
 
-        # info = get_env_info()
-        #
-        # result = []
-        #
-        # debug_str = ''
-        # if info.is_debug_build:
-        #     debug_str = ' DEBUG'
-        #
-        # cuda_avail = ''
-        # if info.is_cuda_available:
-        #     cuda = info.cuda_runtime_version
-        #     if cuda is not None:
-        #         cuda_avail = 'CUDA ' + cuda
-        # else:
-        #     cuda = 'CUDA unavailable'
-        #
-        # pip_version = info.pip_version
-        # pip_list_output = info.pip_packages
-        # if pip_list_output is None:
-        #     pip_list_output = 'Unable to fetch'
-        #
-        # result = {
-        #     'debug_str': debug_str,
-        #     'pytorch_version': info.torch_version,
-        #     'cuda_compiled': compiled_with_cuda(info),
-        #     'py_version': '{}.{}'.format(sys.version_info[0], sys.version_info[1]),
-        #     'cuda_runtime': cuda_avail,
-        #     'pip_version': pip_version,
-        #     'pip_list_output': pip_list_output,
-        # }
-        #
-        # return self.env_summary.format(**result)
+    def save_backup_gztar(self):
 
+            #Archiving the Training script
+            shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
+            os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
 
-    def save_script_gztar(self):
+            #Archiving the src folder
+            pkg_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            backup_path = os.path.join(self.save_path, 'src_backup')
+            shutil.make_archive(backup_path, 'gztar', pkg_path)
 
-            shutil.copyfile(self.scriptPath, self.savePath + '/0-' + os.path.basename(self.scriptPath))
-            os.chmod(self.savePath + '/0-' + os.path.basename(self.scriptPath), 0o755)
-
-            try:
-                pkgpath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                backuppath = os.path.join(self.savePath, 'Backup', 'src')
-                shutil.make_archive(backuppath, 'gztar', pkgpath)
-
-                #TODO: Future conda updates of pytorch will have collect_env module which will be used below
-                # f = open(st.save_path+ 'Backup/env_info.txt', 'w')
-                # env_info = run_env_analysis()
-                # f.write(env_info)
-                # f.close()
-
-            except Exception:
-                print('problem')
-
+            #Archiving the Environment Info
+            env_info = collect_env.get_pretty_env_info()
+            f = open(self.save_path+ '/env_info.txt', 'w')
+            f.write(env_info)
+            f.close()
