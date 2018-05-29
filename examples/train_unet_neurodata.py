@@ -40,7 +40,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator
-from elektronn3.training import Trainer, Backup
+from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 
 torch.manual_seed(0)
@@ -81,7 +81,6 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
     'squeeze_target': True,  # Workaround for neuro_data_cdhw,
-    'device': device,
 }
 train_dataset = PatchCreator(
     input_h5data=input_h5data[:2],
@@ -119,8 +118,8 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights).to(device)
-# TODO: Dice loss? (used in original V-Net) https://github.com/mattmacy/torchbiomed/blob/661b3e4411f7e57f4c5cbb56d02998d2d8bddfdb/torchbiomed/loss.py
+criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
+# criterion = DiceLoss()
 
 # Create and run trainer
 trainer = Trainer(

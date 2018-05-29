@@ -64,6 +64,7 @@ class Trainer:
         optimizer: PyTorch optimizer that shall be used to update
             ``model`` weights according to the ``criterion`` in each
             iteration.
+        device: The device on which the network shall be trained.
         train_dataset: PyTorch dataset (``data.Dataset``) which produces
             training samples when iterated over.
             :py:class:`elektronn3.data.cnndata.PatchCreator` is currently
@@ -101,7 +102,6 @@ class Trainer:
             ``exp_name``.
             If ``tensorboard_root_path`` is not set, tensorboard logs are
             written to ``save_path`` (next to model checkpoints, plots etc.).
-        device: The device on which the network shall be trained.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -294,6 +294,7 @@ class Trainer:
                     stats['val_loss'], stats['val_err'] = 0, 0
                 else:
                     stats['val_loss'], stats['val_err'] = self.validate()
+                # TODO: Report more metrics, e.g. dice error
 
                 if self.step // len(self.train_dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
