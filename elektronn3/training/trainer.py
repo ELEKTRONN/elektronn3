@@ -8,6 +8,7 @@ import datetime
 import logging
 import os
 import traceback
+import shutil
 
 from textwrap import dedent
 from typing import Tuple, Dict, Optional, Callable, Any
@@ -23,7 +24,9 @@ from torch.optim.lr_scheduler import StepLR
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
+from elektronn3.training import collect_env
 from elektronn3.data.utils import save_to_h5, squash01
+from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
 
@@ -548,3 +551,63 @@ def preview_inference(
     model.train()  # Reset model to training mode
 
     return out_batch
+
+
+class Backup:
+
+    """ Backup class for archiving training script, src folder and environment info.
+    Should be used for any future archiving needs.
+
+
+    Args:
+        script_path: The path to the training script. Eg. train_unet_neurodata.py
+        save_path: The path where the information is archived.
+
+    """
+
+    def __init__(self, script_path, save_path):
+
+        self.script_path = script_path
+        self.save_path = save_path
+
+
+    def archive_backup(self):
+
+        """Archiving the source folder, the training script and environment info.
+        The training script is saved with the prefix '0-' to distinguish from regular scripts.
+        Some of the information saved in the env info is:
+        PyTorch version: 0.4.0
+        Is debug build: No
+        CUDA used to build PyTorch: 8.0.61
+        OS: CentOS Linux release 7.3.1611 (Core)
+        GCC version: (GCC) 5.2.0
+        CMake version: Could not collect
+        Python version: 3.6
+        Is CUDA available: Yes
+        CUDA runtime version: 8.0.44
+        GPU models and configuration:
+        GPU 0: GeForce GTX 980 Ti
+        GPU 1: GeForce GTX 980 Ti
+        .
+
+       Args:
+           arguments in the backup class instance.
+
+       Returns:
+           Nothing
+        """
+
+        #Archiving the Training script
+        shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
+        os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
+
+        #Archiving the src folder
+        pkg_path = os.path.dirname(arch_src)
+        backup_path = os.path.join(self.save_path, 'src_backup')
+        shutil.make_archive(backup_path, 'gztar', pkg_path)
+
+        #Archiving the Environment Info
+        env_info = collect_env.get_pretty_env_info()
+        f = open(self.save_path+ '/env_info.txt', 'w')
+        f.write(env_info)
+        f.close()

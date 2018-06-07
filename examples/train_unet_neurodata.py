@@ -8,6 +8,7 @@
 
 import argparse
 import os
+import inspect
 
 import torch
 from torch import nn
@@ -39,7 +40,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator
-from elektronn3.training import Trainer, DiceLoss
+from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 
 torch.manual_seed(0)
@@ -134,4 +135,10 @@ trainer = Trainer(
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched}
 )
+
+#Archiving training, script, src folder, env info
+bk = Backup(script_path=__file__,save_path=trainer.save_path)
+bk.archive_backup()
+
+trainer.train(max_steps)
 trainer.train(max_steps)
