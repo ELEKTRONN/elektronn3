@@ -212,13 +212,13 @@ class Trainer:
                 timeout=30
             )
 
-    # Yeah I know this is an abomination, but this monolithic function makes
-    # it possible to access all important locals from within the
-    # KeyboardInterrupt-triggered IPython shell.
-    # TODO: Try to modularize it as well as possible while keeping the
-    #       above-mentioned requirement. E.g. the history tracking stuff can
-    #       be refactored into smaller functions
+
+    # TODO: Modularize, make some general parts reusable for other trainers.
     def train(self, max_steps: int = 1) -> None:
+        """Train the network for ``max_steps`` steps.
+
+        After each training epoch, validation performance is measured and
+        visualizations are computed and logged to tensorboard."""
         while self.step < max_steps:
             try:
                 # --> self.train()
@@ -231,10 +231,9 @@ class Trainer:
                 # Hold image tensors for real-time training sample visualization in tensorboard
                 images: Dict[str, torch.Tensor] = {}
 
-                numel = 0
-                target_sum = 0
-                incorrect = 0
-                vx_size = 0
+                running_error = 0
+                running_mean_target = 0
+                running_vx_size = 0
                 timer = Timer()
                 for inp, target in self.train_loader:
                     inp, target = inp.to(self.device), target.to(self.device)
@@ -243,7 +242,7 @@ class Trainer:
                     out = self.model(inp)
                     loss = self.criterion(out, target)
                     if torch.isnan(loss):
-                        logger.error('NaN loss detected! Check your hyperparams.')
+                        logger.error('NaN loss detected! Aborting training.')
                         raise NaNException
 
                     # update step
@@ -251,26 +250,23 @@ class Trainer:
                     loss.backward()
                     self.optimizer.step()
 
-                    # get training performance
-                    numel += int(target.numel())
-                    target_sum += int(target.sum())
-                    vx_size += inp.numel()
-                    maxcl = maxclass(out)
-                    # .ne() creates a ByteTensor, which leads to integer
-                    # overflows when it is sum-reduced. Therefore it's
-                    # necessary to cast to a LongTensor before reducing.
-                    incorrect += int(maxcl.ne(target).long().sum())
-                    stats['tr_loss'] += float(loss)
-                    print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
-                    self._tracker.update_timeline([self._timer.t_passed, float(loss), target_sum / numel])
+                    # Prevent accidental autograd overheads after optimizer step
+                    inp.detach_()
+                    target.detach_()
+                    out.detach_()
+                    loss.detach_()
 
-                    # Preserve training batch and network output for later
-                    # visualization (detached from the implicit autograd
-                    # graph, so operations on them are not recorded and
-                    # differentiated).
-                    images['inp'] = inp.detach()
-                    images['target'] = target.detach()
-                    images['out'] = out.detach()
+                    # get training performance
+                    stats['tr_loss'] += float(loss)
+                    error = calculate_error(out, target)
+                    mean_target = target.to(torch.float32).mean()
+                    print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
+                    self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
+
+                    # Preserve training batch and network output for later visualization
+                    images['inp'] = inp
+                    images['target'] = target
+                    images['out'] = out
                     # this was changed to support ReduceLROnPlateau which does not implement get_lr
                     misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
                     # update schedules
@@ -281,14 +277,19 @@ class Trainer:
                             sched.step(metrics=float(loss))
                         else:
                             sched.step()
+
+                    running_error += error
+                    running_mean_target += mean_target
+                    running_vx_size += inp.numel()
+
                     self.step += 1
                     if self.step >= max_steps:
                         break
-                stats['tr_err'] = 100. * incorrect / numel
+                stats['tr_err'] = running_error / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
-                mean_target = target_sum / numel
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
-                misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
+                misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
+                mean_target = running_mean_target / len(self.train_loader)
                 if self.valid_dataset is None:
                     # TODO: Don't pretend those are 0 if they are not available:
                     stats['val_loss'], stats['val_err'] = 0, 0
@@ -296,43 +297,46 @@ class Trainer:
                     stats['val_loss'], stats['val_err'] = self.validate()
                 # TODO: Report more metrics, e.g. dice error
 
+                # Update history tracker (kind of made obsolete by tensorboard)
+                # TODO: Decide what to do with this, now that most things are already in tensorboard.
                 if self.step // len(self.train_dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
-                self._tracker.update_history([self.step, self._timer.t_passed, stats['tr_loss'],
-                                              stats['val_loss'], tr_loss_gain,
-                                              stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0])  # 0's correspond to mom and gradnet (?)
+                self._tracker.update_history([
+                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
+                    tr_loss_gain, stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0
+                ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
                 loss_smooth = self._tracker.loss._ema
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % \
-                       (self.step, loss_smooth, stats['tr_loss'],
-                        stats['tr_err'])
-                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
-                    % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
-                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" \
-                        % (misc['learning_rate'], misc['tr_speed'],
-                           misc['tr_speed_vx'], t)
-                # TODO: Log voxels/s
+
+                # Logging to stdout, text log file
+                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_err'])
+                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
+                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
+
+                # Plot tracker stats to pngs in save_path
+                self._tracker.plot(self.save_path)
+
+                # Reporting to tensorboard logger
                 if self.tb:
                     self.tb_log_scalars(stats, misc)
                     if self.previews_enabled:
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
-                if self.save_path is not None:
-                    self._tracker.plot(self.save_path)
-                if self.save_path is not None:
-                    torch.save(
-                        self.model.state_dict(),
-                        # os.path.join(self.save_path, f'model-{self.step:06d}.pth')  # Saving with different file names leads to heaps of large files,
-                        os.path.join(self.save_path, 'model-checkpoint.pth')
-                    )
-                    # TODO: Also save "best" model, not only the latest one, which is often overfitted.
-                    #       -> "best" in which regard? Lowest validation loss, validation error?
-                    #          We can't blindly trust these metrics and may have to calculate
-                    #          additional metrics (with focus on object boundary correctness).
+
+                # Save trained model state
+                torch.save(
+                    self.model.state_dict(),
+                    # os.path.join(self.save_path, f'model-{self.step:06d}.pth')  # Saving with different file names leads to heaps of large files,
+                    os.path.join(self.save_path, 'model-checkpoint.pth')
+                )
+                # TODO: Also save "best" model, not only the latest one, which is often overfitted.
+                #       -> "best" in which regard? Lowest validation loss, validation error?
+                #          We can't blindly trust these metrics and may have to calculate
+                #          additional metrics (with focus on object boundary correctness).
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
@@ -505,6 +509,15 @@ class Trainer:
         #       This normalization issue gets worse with higher alpha values
         #       (i.e. with more contribution of the overlayed label map).
         #       Don't know how to fix this currently.
+
+
+def calculate_error(out, target):
+    numel = int(target.numel())
+    maxcl = maxclass(out)
+    incorrect = maxcl.ne(target).sum()
+    error = 100. * incorrect / numel
+    return error.item()
+
 
 # TODO: Move all the functions below out of trainer.py
 
