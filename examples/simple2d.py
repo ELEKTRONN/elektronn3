@@ -41,7 +41,7 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.training import Trainer
+from elektronn3.training import Trainer, Backup
 from elektronn3.data import SimpleNeuroData2d
 
 torch.manual_seed(0)
@@ -79,7 +79,7 @@ lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 
 criterion = nn.CrossEntropyLoss().to(device)
 
-# Create and run trainer
+# Create trainer
 trainer = Trainer(
     model=model,
     criterion=criterion,
@@ -93,4 +93,9 @@ trainer = Trainer(
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched}
 )
+
+# Archiving training script, src folder, env info
+bk = Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+
+# Start training
 trainer.train(max_steps)

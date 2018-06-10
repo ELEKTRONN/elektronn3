@@ -8,7 +8,6 @@
 
 import argparse
 import os
-import inspect
 
 import torch
 from torch import nn
@@ -43,8 +42,8 @@ from elektronn3.data import PatchCreator
 from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 
-torch.manual_seed(0)
 
+torch.manual_seed(0)
 
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
@@ -121,7 +120,7 @@ lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
 # criterion = DiceLoss()
 
-# Create and run trainer
+# Create trainer
 trainer = Trainer(
     model=model,
     criterion=criterion,
@@ -136,9 +135,8 @@ trainer = Trainer(
     schedulers={"lr": lr_sched}
 )
 
-#Archiving training, script, src folder, env info
-bk = Backup(script_path=__file__,save_path=trainer.save_path)
-bk.archive_backup()
+# Archiving training script, src folder, env info
+Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
-trainer.train(max_steps)
+# Start training
 trainer.train(max_steps)

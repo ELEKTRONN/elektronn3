@@ -40,12 +40,11 @@ elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator
 from elektronn3.data.random_blurring import ScalarScheduler
-from elektronn3.training import Trainer, DiceLoss
+from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 
 
 torch.manual_seed(0)
-
 
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
@@ -141,7 +140,7 @@ lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
 # criterion = DiceLoss()
 
-# Create and run trainer
+# Create trainer
 trainer = Trainer(
     model=model,
     criterion=criterion,
@@ -155,4 +154,9 @@ trainer = Trainer(
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched}
 )
+
+# Archiving training script, src folder, env info
+Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+
+# Start training
 trainer.train(max_steps)
