@@ -25,6 +25,10 @@ parser.add_argument(
     '-m', '--max-steps', type=int, default=500000,
     help='Maximum number of training steps to perform.'
 )
+parser.add_argument(
+    '-r', '--resume', metavar='PATH',
+    help='Path to pretrained model state dict from which to resume training.'
+)
 args = parser.parse_args()
 
 if not args.disable_cuda and torch.cuda.is_available():
@@ -72,6 +76,8 @@ model = UNet(
     activation='relu',
     batch_norm=True
 ).to(device)
+if args.resume is not None:  # Load pretrained network params
+    model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
 # Specify data set
 common_data_kwargs = {  # Common options for training and valid sets.
