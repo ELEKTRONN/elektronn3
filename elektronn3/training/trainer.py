@@ -142,7 +142,7 @@ class Trainer:
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
-            ipython_on_error: bool = True
+            ipython_on_error: bool = False
     ):
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
