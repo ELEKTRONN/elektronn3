@@ -109,6 +109,7 @@ valid_dataset = PatchCreator(
     warp=0,
     warp_kwargs={
         'sample_aniso': True,
+        'warp_amount': 0.8,  # Strength
     },
     **common_data_kwargs
 )

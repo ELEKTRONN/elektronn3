@@ -307,8 +307,8 @@ class PatchCreator(data.Dataset):
                     # Note that this warning will be spammed once the conditions are met.
                     # Better than logging it once and risking that it stays unnoticed IMO.
                     logger.warning(
-                        f'{fail_percentage}% of warping attempts are failing. '
-                        'Consider lowering the warping strength.'
+                        f'{fail_percentage}% of warping attempts are failing.\n'
+                        'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
                     )
                 continue
             # TODO: Actually find out what's causing those.
