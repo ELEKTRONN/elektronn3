@@ -291,8 +291,7 @@ class Trainer:
                 misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
                 mean_target = running_mean_target / len(self.train_loader)
                 if self.valid_dataset is None:
-                    # TODO: Don't pretend those are 0 if they are not available:
-                    stats['val_loss'], stats['val_err'] = 0, 0
+                    stats['val_loss'], stats['val_err'] = float('nan'), float('nan')
                 else:
                     stats['val_loss'], stats['val_err'] = self.validate()
                 # TODO: Report more metrics, e.g. dice error
