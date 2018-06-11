@@ -371,7 +371,7 @@ class Trainer:
                 out = self.model(inp)
                 numel += int(target.numel())
                 val_loss += float(self.criterion(out, target))
-                maxcl = maxclass(out)  # get the index of the max log-probability
+                maxcl = out.argmax(1)  # get the index of the max log-probability
                 incorrect += int(maxcl.ne(target).long().sum())
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = 100. * incorrect / numel
@@ -512,7 +512,7 @@ class Trainer:
 
 def calculate_error(out, target):
     numel = int(target.numel())
-    maxcl = maxclass(out)
+    maxcl = out.argmax(1)
     incorrect = maxcl.ne(target).sum()
     error = 100. * incorrect / numel
     return error.item()
@@ -520,25 +520,11 @@ def calculate_error(out, target):
 
 # TODO: Move all the functions below out of trainer.py
 
-
-def maxclass(class_predictions: torch.Tensor):
-    """For each point in a tensor, determine the class with max. probability.
-
-    Args:
-        class_predictions: Tensor of shape (N, C, ...)
-
-    Returns:
-        Tensor of shape (N, ...)
-    """
-    maxcl = class_predictions.max(dim=1)[1]  # TODO: Use argmax instead
-    return maxcl
-
-
 # TODO
 def save_to_h5(fname: str, model_output: torch.Tensor):
     raise NotImplementedError
 
-    maxcl = maxclass(model_output)  # TODO: Ensure correct shape
+    maxcl = model_output.argmax(1)  # TODO: Ensure correct shape
     save_to_h5(
         [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
         fname,
