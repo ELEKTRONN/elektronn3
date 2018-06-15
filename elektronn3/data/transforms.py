@@ -16,7 +16,7 @@ Important note: The transformations here have a similar interface to
     torch.Tensor data.
 """
 
-from typing import Sequence, Tuple, Optional, Dict, Any
+from typing import Sequence, Tuple, Optional, Dict, Any, Union
 
 import numpy as np
 
@@ -66,7 +66,7 @@ class Normalize:
     def __call__(
             self,
             inp: np.ndarray,
-            target: Optional[np.ndarray]  # returned without modifications
+            target: Optional[np.ndarray] = None  # returned without modifications
     ) -> Tuple[np.ndarray, np.ndarray]:
         normalized = np.empty_like(inp)
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
@@ -90,8 +90,43 @@ class RandomBlurring:  # Warning: This operates in-place!
     def __call__(
             self,
             inp: np.ndarray,
-            target: Optional[np.ndarray]  # returned without modifications
+            target: Optional[np.ndarray] = None  # returned without modifications
     ) -> Tuple[np.ndarray, np.ndarray]:
         # In-place, overwrites inp!
+        assert inp.ndim == 4, 'Currently only (C, D, H, W) inputs are supported.'
         apply_random_blurring(inp_sample=inp, **self.config)
         return inp, target
+
+
+class RandomCrop:
+    def __init__(self, size: Union[int, Sequence[int]]):
+        self.size = np.array(size)
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        ndim_spatial = len(self.size)  # Number of spatial axes E.g. 3 for (C,D,H.W)
+        img_shape = inp.shape[-ndim_spatial:]
+        # Number of nonspatial axes (like the C axis). Usually this is one
+        ndim_nonspatial = inp.ndim - ndim_spatial
+        # Calculate the "lower" corner coordinate of the slice
+        coords_lo = np.array([
+            np.random.randint(0, img_shape[i] - self.size[i] + 1)
+            for i in range(ndim_spatial)
+        ])
+        coords_hi = coords_lo + self.size  # Upper ("high") corner coordinate.
+        # Calculate necessary slice indices for reading the file
+        nonspatial_slice = [  # Slicing all available content in these dims.
+            slice(0, inp.shape[i]) for i in range(ndim_nonspatial)
+        ]
+        spatial_slice = [  # Slice only the content within the coordinate bounds
+            slice(coords_lo[i], coords_hi[i]) for i in range(ndim_spatial)
+        ]
+        full_slice = nonspatial_slice + spatial_slice
+        inp_cropped = inp[full_slice]
+        if target is None:
+            return inp_cropped, target
+        target_cropped = target[full_slice]
+        return inp_cropped, target_cropped
