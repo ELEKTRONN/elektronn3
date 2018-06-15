@@ -6,7 +6,11 @@
 
 import torch
 from torch.nn import functional as F
-
+import numpy as np
+from torch.nn import CrossEntropyLoss
+from scipy.ndimage.filters import gaussian_filter
+from scipy import misc
+from sklearn.preprocessing import LabelBinarizer
 # TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
 
 
@@ -105,3 +109,55 @@ def __dice_loss_binary(output, target, smooth=0, eps=0.0001):
 
     return 1 - ((2 * intersection + smooth) /
                 (iflat.sum() + tflat.sum() + smooth + eps))
+
+# weaken voxel-loss close to segmentation boundaries by applying weights which
+# are highest inside each class foreground and blurred at the boundaries
+# by Gaussian smoothing
+class BlurryBoarderLoss(torch.nn.Module):
+    def __init__(self, softmax=True):
+        super().__init__()
+        if softmax:
+            self.softmax = torch.nn.Softmax(dim=1)
+        else:
+            self.softmax = lambda x: x  # Identity
+        self.blurry_boarder_weights = blurry_boarder_weights
+
+    def forward(self, output, target):
+        boarder_w =  self.blurry_boarder_weights(output.size(), target)
+        loss = F.cross_entropy(output, target, reduce=False)
+        loss = loss * boarder_w
+        return loss.mean()
+
+
+def blurry_boarder_weights(output_shape, target, sigma=1):
+    boarder_w = target.cpu().numpy() # vigra.taggedView(target.numpy(), 'xcyz') ISSUE: gaussianSmoothing does not support t-axis which should be used as batch axis
+    # smoothing is applied per-channel
+    n_classes = output_shape[1]
+    if np.isscalar(sigma):
+        sigma = [sigma] * (len(boarder_w.shape) - 1)
+    else:
+        assert len(sigma) == (len(boarder_w.shape) - 1)
+        sigma = list(sigma)
+    # add zero smoothing along channels, unfortunately this is not supported by scipy and vigra does not support python 3.6...
+    sigma = [0] + sigma
+    # fit to number of classes
+    lb = LabelBinarizer().fit(np.arange(n_classes))
+    # use probas shape because target shape does not have explicit class axis
+    orig_shape = list(output_shape)
+    orig_shape[1] = 1 if n_classes <= 2 else n_classes # for binary data label binarizes keeps it at length 1
+    boarder_w = lb.transform(boarder_w.flatten())
+    boarder_w = boarder_w.reshape(orig_shape)
+    if orig_shape[1] == 1:
+        boarder_w = np.hstack((boarder_w == 0, boarder_w == 1))
+    print(boarder_w.shape)
+    print(sigma)
+    boarder_w = boarder_w.astype(np.float32)
+    for ii in range(len(target)):
+        curr_patch = boarder_w[ii]
+        boarder_w[ii] = gaussian_filter(curr_patch, sigma=sigma)
+    # choose weights according to maximum value along class axis. this leads to a low weights symmetricly spread along the boundary of classes.
+    misc.imsave("/wholebrain/scratch/pschuber/test_weights.tif", np.max(boarder_w, axis=1)[0])
+    boarder_w = torch.from_numpy(np.max(boarder_w, axis=1)).float().cuda()
+    misc.imsave("/wholebrain/scratch/pschuber/test_target.tif", target.cpu().numpy()[0])
+    raise()
+    return boarder_w
