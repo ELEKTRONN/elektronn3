@@ -42,8 +42,7 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data import PatchCreator
-from elektronn3.data import transforms
+from elektronn3.data import PatchCreator, transforms
 from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 

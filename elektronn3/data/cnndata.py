@@ -90,14 +90,6 @@ class PatchCreator(data.Dataset):
             be used for reading target data:
             - discrete targets are obtained by nearest-neighbor interpolation
             - non-discrete (continuous) targets are linearly interpolated.
-        mean: Mean of input data (if not set, it is automatically
-            estimated on the training data during initialization).
-        std: Standard deviation of input data (if not set, it is automatically
-            estimated on the training data during initialization).
-        normalize: If ``True``, input data is normalized to approx. zero mean
-            and unit standard deviation ("std"). If ``mean`` and/or ``std``
-            are not supplied, they are automatically estimated on the training
-            data on initialization.
         train: Determines if samples come from training or validation
             data.
             If ``True``, training data is returned.
@@ -107,19 +99,12 @@ class PatchCreator(data.Dataset):
             shape out of the center of the preview cube.
             If it is ``None`` (default), preview batch functionality will be
             disabled.
-        grey_augment_channels: Determines on which of the training input
-            channels gray value augmentations should be applied on.
-            E.g. ``grey_augment_channels=[0]`` means that only channel 0
-            should be grey-augmented. Only specify channels which contain
-            gray values.
-            (Currently ignored, because gray value augm. are broken)
         warp: ratio of training samples that should be obtained using
             geometric warping augmentations.
         warp_kwargs: kwargs that are passed through to
             :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
-        random_blurring_config:
         class_weights: If ``True``, target class weights (for the loss
             function) are calculated on the available training targets
             when the class is instantiated.
@@ -131,9 +116,6 @@ class PatchCreator(data.Dataset):
             validation/logging/plotting are performed by the training loop
             that uses this data set (e.g.
             ``elektronn3.training.trainer.Trainer``).
-        eager_init: If ``False``, some parts of the class initialization
-            are lazily performed only when they are needed.
-            It's not recommended to change this option.
         squeeze_target: If ``True``, target tensors will be squeezed in their
             channel axis if it is empty. This workaround and will be removed
             later. It is currently needed to support targets that have an
@@ -149,10 +131,8 @@ class PatchCreator(data.Dataset):
             target_discrete_ix: Optional[List[int]] = None,
             train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
-            grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
-            random_blurring_config: Optional[Dict[str, Any]] = None,
             class_weights: bool = False,
             epoch_size: int = 100,
             squeeze_target: bool = False,
@@ -166,8 +146,8 @@ class PatchCreator(data.Dataset):
                 raise ValueError(
                     'Calculating class_weights on validation sets is not allowed.'
                 )
-            if warp or random_blurring_config is not None or grey_augment_channels is not None:
-                raise ValueError(
+            if warp:
+                logger.warning(
                     'Augmentations should not be used on validation data.'
                 )
         else:
@@ -260,10 +240,6 @@ class PatchCreator(data.Dataset):
         else:
             self.class_weights = None
 
-        self.random_blurring_config = random_blurring_config
-        if self.random_blurring_config:
-            check_random_data_blurring_config(patch_shape, **self.random_blurring_config)
-
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
         # Note that the index is ignored. Samples are always random
         return self._get_random_sample()
@@ -323,9 +299,6 @@ class PatchCreator(data.Dataset):
                 continue
             self.n_successful_warp += 1
             inp, target = self.transform(inp, target)
-            if self.random_blurring_config and self.train:
-                apply_random_blurring(inp_sample=inp,
-                                      **self.random_blurring_config)
             break
 
         # target is now of shape (K, D, H, W), where K is the number of

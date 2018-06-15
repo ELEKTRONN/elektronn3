@@ -16,9 +16,11 @@ Important note: The transformations here have a similar interface to
     torch.Tensor data.
 """
 
-from typing import Sequence, Tuple, Optional
+from typing import Sequence, Tuple, Optional, Dict, Any
 
 import numpy as np
+
+from elektronn3.data.random_blurring import apply_random_blurring, check_random_data_blurring_config
 
 
 # Transformation = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
@@ -73,3 +75,23 @@ class Normalize:
         for c in range(inp.shape[0]):
             normalized[c] = (inp[c] - self.mean[c]) / self.std[c]
         return normalized, target
+
+
+class RandomBlurring:  # Warning: This operates in-place!
+    def __init__(
+            self,
+            config: Dict[str, Any],
+            patch_shape: Optional[Sequence[int]] = None
+    ):
+        self.config = config
+        if patch_shape is not None:
+            check_random_data_blurring_config(patch_shape, **config)
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray]  # returned without modifications
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        # In-place, overwrites inp!
+        apply_random_blurring(inp_sample=inp, **self.config)
+        return inp, target
