@@ -12,14 +12,14 @@ import sys
 import time
 import traceback
 from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 
 import h5py
 import numpy as np
 import torch
 from torch.utils import data
 
-from elektronn3.data import transformations
+from elektronn3.data import transformations, transforms  # TODO: Rename transformations module
 from elektronn3.data.utils import slice_h5
 from elektronn3.data.random_blurring import check_random_data_blurring_config
 from elektronn3.data.random_blurring import apply_random_blurring
@@ -147,9 +147,6 @@ class PatchCreator(data.Dataset):
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
-            mean: Optional[float] = None,
-            std: Optional[float] = None,
-            normalize: bool = True,
             train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
             grey_augment_channels: Optional[Sequence[int]] = None,
@@ -158,20 +155,13 @@ class PatchCreator(data.Dataset):
             random_blurring_config: Optional[Dict[str, Any]] = None,
             class_weights: bool = False,
             epoch_size: int = 100,
-            eager_init: bool = True,
             squeeze_target: bool = False,
+            transform: Callable = transforms.Identity(),
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         if not train:
-            if  normalize and (mean is None or std is None):
-                logger.warning(
-                    'You need to manually supply mean and std for validation '
-                    'sets (auto-calculating them would defeat the purpose of '
-                    'having a separate validation set).\n'
-                    'Please supply mean and std of your training set.'
-                )
             if class_weights:
                 raise ValueError(
                     'Calculating class_weights on validation sets is not allowed.'
@@ -186,7 +176,6 @@ class PatchCreator(data.Dataset):
 
         # batch properties
         self.train = train
-        self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_kwargs = warp_kwargs
         self.squeeze_target = squeeze_target
@@ -251,16 +240,15 @@ class PatchCreator(data.Dataset):
 
         self.load_data()  # Open dataset files
 
-        self._mean = mean
-        self._std = std
-        self.normalize = normalize
-        if eager_init:
-            if self.normalize:
-                # Pre-compute to prevent later redundant computation in multiple processes.
-                _, _ = self.mean, self.std
-            # Load preview data on initialization so read errors won't occur late
-            # and reading doesn't have to be done by each background worker process separately.
-            _ = self.preview_batch
+        if transform is None:
+            transform = lambda x: x
+        self.transform = transform
+
+
+        # Load preview data on initialization so read errors won't occur late
+        # and reading doesn't have to be done by each background worker process separately.
+        _ = self.preview_batch
+
         if class_weights:
             # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param. # Not quite sure what you mean, this is done once only anyway
             # TODO: This assumes a binary segmentation problem (background/foreground). Support more classes?
@@ -277,11 +265,13 @@ class PatchCreator(data.Dataset):
             check_random_data_blurring_config(patch_shape, **self.random_blurring_config)
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
+        # Note that the index is ignored. Samples are always random
+        return self._get_random_sample()
+
+    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray]:
         #                                      np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
-        if self.grey_augment_channels is None:
-            self.grey_augment_channels = []
         self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
         while True:
@@ -332,13 +322,10 @@ class PatchCreator(data.Dataset):
                 )
                 continue
             self.n_successful_warp += 1
-            if self.normalize:
-                inp = (inp - self.mean) / self.std
+            inp, target = self.transform(inp, target)
             if self.random_blurring_config and self.train:
                 apply_random_blurring(inp_sample=inp,
                                       **self.random_blurring_config)
-            if self.grey_augment_channels and self.train:  # grey augmentation only for training
-                inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
             break
 
         # target is now of shape (K, D, H, W), where K is the number of
@@ -437,9 +424,7 @@ class PatchCreator(data.Dataset):
             target_source, target_lo, target_hi,
             dtype=self._target_dtype, prepend_empty_axis=True
         )
-
-        if self.normalize:
-            inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
+        inp_np, target_np = self.transform(inp_np, target_np)
 
         inp = torch.from_numpy(inp_np)
         target = torch.from_numpy(target_np)

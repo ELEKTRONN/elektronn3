@@ -43,6 +43,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator
+from elektronn3.data import transforms
 from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 
@@ -79,10 +80,20 @@ model = UNet(
 if args.resume is not None:  # Load pretrained network params
     model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
+# These statistics are computed from the training dataset.
+# Remember to re-compute and change them when switching the dataset.
+dataset_mean = (155.291411,)
+dataset_std = (41.812504,)
+
+# Transformations to be applied to samples before feeding them to the network
+common_transforms = [
+    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+]
+train_transform = transforms.Compose(common_transforms + [])
+valid_transform = transforms.Compose(common_transforms + [])
+
 # Specify data set
 common_data_kwargs = {  # Common options for training and valid sets.
-    'mean': 155.291411,
-    'std': 41.812504,
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
     'squeeze_target': True,  # Workaround for neuro_data_cdhw,
@@ -98,6 +109,7 @@ train_dataset = PatchCreator(
         'sample_aniso': True,
         'perspective': True,
     },
+    transform=train_transform,
     **common_data_kwargs
 )
 valid_dataset = PatchCreator(
@@ -111,6 +123,7 @@ valid_dataset = PatchCreator(
         'sample_aniso': True,
         'warp_amount': 0.8,  # Strength
     },
+    transform=valid_transform,
     **common_data_kwargs
 )
 
