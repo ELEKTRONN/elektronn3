@@ -51,15 +51,9 @@ def slice_h5(
     """ Slice a patch of image data out of a h5py dataset.
 
     Args:
-        src: Source data set from which to read data. All non-spatial
-            dimensions (e.g. "channel" C) must come first.
-            The last n dimensions must be spatial data (image pixels/voxels),
-            where n is the length of the coordinate vectors below.
-            Examples for supported shapes are:
-            - (C, D, H, W) for 3D images
-            - (C, H, W) for 2D images
-            - (C, D, H, W) for separate 2D images stacked along the D axis.
-            The C axis in the above examples is not strictly required.
+        src: Source data set from which to read data.
+            The expected data shape is (C, D, H, W), so 3D images with a
+            channel-first layout (standard for most PyTorch code).
         coords_lo: Lower bound of the coordinates where data should be read
             from in ``src``.
         coords_hi: Upper bound of the coordinates where data should be read
@@ -81,10 +75,19 @@ def slice_h5(
         raise ValueError
 
     try:
-        full_slice = calculate_nd_slice(src, coords_lo, coords_hi)
-        # # TODO: Use a better workaround or fix this in h5py:
-        srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
-        cut = srcv[full_slice]
+        # Generalized n-d slicing code (temporarily disabled because of the
+        #  performance issue described in the comment below):
+        ## full_slice = calculate_nd_slice(src, coords_lo, coords_hi)
+        ## # # TODO: Use a better workaround or fix this in h5py:
+        ## srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
+        ## cut = srcv[full_slice]
+
+        cut = src[
+            :,
+            coords_lo[0]:coords_hi[0],
+            coords_lo[1]:coords_hi[1],
+            coords_lo[2]:coords_hi[2]
+        ]
     # Work around mysterious random HDF5 read errors by recursively calling
     #  this function from within itself until it works again or until
     #  max_retries is exceeded.
