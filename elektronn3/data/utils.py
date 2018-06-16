@@ -19,6 +19,27 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
+def calculate_nd_slice(src, coords_lo, coords_hi):
+    """Calculate the ``slice`` object list that is used as indices for
+    reading from a data source.
+
+    Unfortunately, this kind of slice list is not yet supported by h5py.
+    It only works with numpy arrays."""
+    # Separate spatial dimensions (..., H, W) from nonspatial dimensions (C, ...)
+    spatial_dims = len(coords_lo)  # Assuming coords_lo addresses all spatial dims
+    nonspatial_dims = src.ndim - spatial_dims  # Assuming every other dim is nonspatial
+
+    # Calculate necessary slice indices for reading the file
+    nonspatial_slice = [  # Slicing all available content in these dims.
+        slice(0, src.shape[i]) for i in range(nonspatial_dims)
+    ]
+    spatial_slice = [  # Slice only the content within the coordinate bounds
+        slice(coords_lo[i], coords_hi[i]) for i in range(spatial_dims)
+    ]
+    full_slice = nonspatial_slice + spatial_slice
+    return full_slice
+
+
 def slice_h5(
         src: h5py.Dataset,
         coords_lo: Sequence[int],
@@ -31,7 +52,7 @@ def slice_h5(
 
     Args:
         src: Source data set from which to read data. All non-spatial
-            dimensions (e.g. "channel" C) must first.
+            dimensions (e.g. "channel" C) must come first.
             The last n dimensions must be spatial data (image pixels/voxels),
             where n is the length of the coordinate vectors below.
             Examples for supported shapes are:
@@ -58,21 +79,10 @@ def slice_h5(
             f'slice_h5(): max_retries exceeded at {coords_lo}, {coords_hi}. Aborting...'
         )
         raise ValueError
-    # Separate spatial dimensions (..., H, W) from nonspatial dimensions (C, ...)
-    spatial_dims = len(coords_lo)  # Assuming coords_lo addresses all spatial dims
-    nonspatial_dims = src.ndim - spatial_dims  # Assuming every other dim is nonspatial
-
-    # Calculate necessary slice indices for reading the file
-    nonspatial_slice = [  # Slicing all available content in these dims.
-        slice(0, src.shape[i]) for i in range(nonspatial_dims)
-    ]
-    spatial_slice = [  # Slice only the content within the coordinate bounds
-        slice(coords_lo[i], coords_hi[i]) for i in range(spatial_dims)
-    ]
-    full_slice = nonspatial_slice + spatial_slice
 
     try:
-        # TODO: Use a better workaround or fix this in h5py:
+        full_slice = calculate_nd_slice(src, coords_lo, coords_hi)
+        # # TODO: Use a better workaround or fix this in h5py:
         srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
         cut = srcv[full_slice]
     # Work around mysterious random HDF5 read errors by recursively calling
