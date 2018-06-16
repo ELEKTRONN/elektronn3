@@ -19,7 +19,7 @@ def _channelwise_sum(x):
 
 
 # Simple n-dimensional dice loss. Minimalistic version for easier verification
-def dice_loss(probs, target, eps=0.0001):
+def dice_loss(probs, target, weight=1., eps=0.0001):
     # Probs need to be softmax probabilities, not raw network outputs
     onehot_target = torch.zeros_like(probs)
     onehot_target.scatter_(1, target.unsqueeze(1), 1)
@@ -29,21 +29,23 @@ def dice_loss(probs, target, eps=0.0001):
     denominator = probs + onehot_target
     denominator = _channelwise_sum(denominator) + eps
     loss_per_channel = 1 - (numerator / denominator)
-    return loss_per_channel.mean()
+    weighted_loss_per_channel = weight * loss_per_channel
+    return weighted_loss_per_channel.mean()
 
 
 class DiceLoss(torch.nn.Module):
-    def __init__(self, softmax=True):
+    def __init__(self, softmax=True, weight=torch.tensor(1.)):
         super().__init__()
         if softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
-            self.softmax = lambda x: x  # Identity
+            self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
+        self.register_buffer('weight', weight)
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.dice(probs, target)
+        return self.dice(probs, target, weight=self.weight)
 
 
 # TODO: Move this to a dedicated metrics submodule?
