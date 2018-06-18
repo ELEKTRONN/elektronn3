@@ -21,8 +21,6 @@ from torch.utils import data
 
 from elektronn3.data import transformations, transforms  # TODO: Rename transformations module
 from elektronn3.data.utils import slice_h5
-from elektronn3.data.random_blurring import check_random_data_blurring_config
-from elektronn3.data.random_blurring import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 
@@ -212,9 +210,6 @@ class PatchCreator(data.Dataset):
 
         self.load_data()  # Open dataset files
 
-        self._mean = None
-        self._std = None
-
         if transform is None:
             transform = lambda x: x
         self.transform = transform
@@ -309,42 +304,6 @@ class PatchCreator(data.Dataset):
         s = s.format(self.c_target, self.c_input, self._training_count,
                      self._valid_count, self.n_labelled_pixels)
         return s
-
-    # TODO: Support individual per-cube mean/std (in case of high differences
-    #       between cubes)? Not sure if this is important.
-
-    # TODO: Respect separate channels
-    @property
-    def mean(self) -> float:
-        if self._mean is None:
-            logger.warning(
-                'Calculating mean of training inputs. This is potentially slow. Please supply\n'
-                'it manually when initializing the data set to make startup faster.'
-            )
-            means = [np.mean(x) for x in self.inputs]
-            self._mean = np.mean(means)
-            logger.info(f'mean = {self._mean:.6f}')
-        return self._mean
-
-    # TODO: Respect separate channels
-    @property
-    def std(self) -> float:
-        if self._std is None:
-            logger.warning(
-                'Calculating std of training inputs. This is potentially slow. Please supply\n'
-                'it manually when initializing the data set to make startup faster.'
-            )
-            stds = [np.std(x) for x in self.inputs]
-            # Note that this is not the same as the std of all train_inputs
-            # together. The mean of stds of the individual input data cubes
-            # is different because it only acknowledges intra-cube variance,
-            # not variance between training cubes.
-            # TODO: Does it make sense to have the actual global std of all
-            #       training inputs? If yes, how can it be computed without
-            #       loading everything into RAM at once?
-            self._std = np.mean(stds)
-            logger.info(f'std = {self._std:.6f}')
-        return self._std
 
     def _create_preview_batch(
             self,

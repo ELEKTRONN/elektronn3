@@ -19,6 +19,27 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
+# TODO: Respect separate channels
+def calculate_mean(inputs: Sequence) -> Sequence[float]:
+    means = [np.mean(x) for x in inputs]
+    mean = np.mean(means)
+    return mean
+
+
+# TODO: Respect separate channels
+def calculate_std(inputs: Sequence) -> Sequence[float]:
+    stds = [np.std(x) for x in inputs]
+    # Note that this is not the same as the std of all inputs
+    # together. The mean of stds of the individual input data cubes
+    # is different because it only acknowledges intra-cube variance,
+    # not variance between training cubes.
+    # TODO: Does it make sense to have the actual global std of all
+    #       training inputs? If yes, how can it be computed without
+    #       loading everything into RAM at once?
+    std = np.mean(stds)
+    return std
+
+
 def calculate_class_weights(
         targets: Sequence[np.ndarray],
         mode='binmean'
