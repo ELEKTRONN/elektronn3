@@ -7,8 +7,9 @@
 import torch
 from torch.nn import functional as F
 
-# TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
+from elektronn3.training.lovasz_losses import lovasz_softmax
 
+# TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
 
 def _channelwise_sum(x):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
@@ -46,6 +47,23 @@ class DiceLoss(torch.nn.Module):
     def forward(self, output, target):
         probs = self.softmax(output)
         return self.dice(probs, target, weight=self.weight)
+
+
+class LovaszLoss(torch.nn.Module):
+    """https://arxiv.org/abs/1705.08790"""
+    def __init__(self, softmax=True):
+        super().__init__()
+        if softmax:
+            self.softmax = torch.nn.Softmax(dim=1)
+        else:
+            self.softmax = lambda x: x  # Identity (no softmax)
+        # lovasz_softmax works on softmax probs, so we still have to apply
+        #  softmax before passing probs to it
+        self.lovasz = lovasz_softmax
+
+    def forward(self, output, target):
+        probs = self.softmax(output)
+        return self.lovasz(probs, target)
 
 
 # TODO: Move this to a dedicated metrics submodule?
