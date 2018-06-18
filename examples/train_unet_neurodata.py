@@ -81,8 +81,8 @@ if args.resume is not None:  # Load pretrained network params
 
 # These statistics are computed from the training dataset.
 # Remember to re-compute and change them when switching the dataset.
-dataset_mean = (155.291411,)
-dataset_std = (41.812504,)
+dataset_mean = (155.291411,)  # = elektronn3.data.utils.calculate_means(train_dataset.inputs)
+dataset_std = (42.599973,)  # = elektronn3.data.utils.calculate_stds(train_dataset.inputs)
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [

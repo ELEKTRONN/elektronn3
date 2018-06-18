@@ -33,30 +33,21 @@ def _to_full_numpy(seq):
 
 
 def calculate_means(inputs: Sequence) -> Tuple[float]:
-    inputs = _to_full_numpy(inputs)
-    means = []  # Per-channel mean values
-    num_channels = inputs[0].shape[0]
-    for c in range(num_channels):
-        seq_means = [x[c].mean() for x in inputs]  # Per array mean for channel c
-        mean = np.mean(seq_means)  # Total mean of channel c in all arrays
-        means.append(float(mean))
+    # TODO: This implementation can surely be optimized (esp. memory usage)
+    inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
+    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
+    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
+    means = flat.mean(axis=1)  # For each channel, calculate mean of all values
     return tuple(means)
 
 
 # TODO: Respect separate channels
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
+    # TODO: This implementation can surely be optimized (esp. memory usage)
     inputs = _to_full_numpy(inputs)
-    stds = []  # Per-channel std values
-    num_channels = inputs[0].shape[0]
-    for c in range(num_channels):
-        seq_stds = [np.std(x) for x in inputs]
-        # Note that this is not the same as the std of all inputs
-        # together. The mean of stds of the individual input data cubes
-        # is different because it only acknowledges intra-cube variance,
-        # not variance between training cubes.
-        # TODO: Does it make sense to have the actual global std of all inputs?
-        std = np.mean(seq_stds)
-        stds.append(float(std))
+    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
+    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
+    stds = flat.std(axis=1)  # For each channel, calculate std of all values
     return tuple(stds)
 
 
