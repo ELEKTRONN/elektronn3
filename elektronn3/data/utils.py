@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 import traceback
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import h5py
 import numpy as np
@@ -19,25 +19,45 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
-# TODO: Respect separate channels
-def calculate_mean(inputs: Sequence) -> Sequence[float]:
-    means = [np.mean(x) for x in inputs]
-    mean = np.mean(means)
-    return mean
+def _to_full_numpy(seq):
+    if isinstance(seq, np.ndarray):
+        return seq
+    elif isinstance(seq[0], np.ndarray):
+        return np.array(seq)
+    elif isinstance(seq[0], h5py.Dataset):
+        # Explicitly pre-load all dataset values into ndarray format
+        return np.array([x.value for x in seq])
+    else:
+        raise ValueError('inputs must be an ndarray, a sequence of ndarrays '
+                         'or a sequence of h5py.Datasets.')
+
+
+def calculate_means(inputs: Sequence) -> Tuple[float]:
+    inputs = _to_full_numpy(inputs)
+    means = []  # Per-channel mean values
+    num_channels = inputs[0].shape[0]
+    for c in range(num_channels):
+        seq_means = [x[c].mean() for x in inputs]  # Per array mean for channel c
+        mean = np.mean(seq_means)  # Total mean of channel c in all arrays
+        means.append(float(mean))
+    return tuple(means)
 
 
 # TODO: Respect separate channels
-def calculate_std(inputs: Sequence) -> Sequence[float]:
-    stds = [np.std(x) for x in inputs]
-    # Note that this is not the same as the std of all inputs
-    # together. The mean of stds of the individual input data cubes
-    # is different because it only acknowledges intra-cube variance,
-    # not variance between training cubes.
-    # TODO: Does it make sense to have the actual global std of all
-    #       training inputs? If yes, how can it be computed without
-    #       loading everything into RAM at once?
-    std = np.mean(stds)
-    return std
+def calculate_stds(inputs: Sequence) -> Tuple[float]:
+    inputs = _to_full_numpy(inputs)
+    stds = []  # Per-channel std values
+    num_channels = inputs[0].shape[0]
+    for c in range(num_channels):
+        seq_stds = [np.std(x) for x in inputs]
+        # Note that this is not the same as the std of all inputs
+        # together. The mean of stds of the individual input data cubes
+        # is different because it only acknowledges intra-cube variance,
+        # not variance between training cubes.
+        # TODO: Does it make sense to have the actual global std of all inputs?
+        std = np.mean(seq_stds)
+        stds.append(float(std))
+    return tuple(stds)
 
 
 def calculate_class_weights(
