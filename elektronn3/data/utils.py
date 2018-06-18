@@ -19,6 +19,38 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
+def calculate_class_weights(
+        targets: Sequence[np.ndarray],
+        mode='binmean'
+) -> np.ndarray:
+    """Calulate class weights that assign more weight to less common classes.
+
+    The weights can then be used for loss function rebalancing (e.g. for
+    CrossEntropyLoss it's very important to do this when training on
+    datasets with high class imbalance."""
+
+    def __inverse(targets):
+        raise NotImplementedError  # TODO
+        # Weight of each class c1, c2, c3, ... with element counts n1, n2, n3, ... is assigned by:
+        # weight[i] = 1 / n[i]
+
+    def __binmean(targets):
+        # This assumes a binary segmentation problem (background/foreground)
+        target_mean = np.mean(targets)
+        bg_weight = target_mean / (1. + target_mean)
+        fg_weight = 1. - bg_weight
+        # class_weights = torch.tensor([bg_weight, fg_weight])
+        class_weights = np.array([bg_weight, fg_weight], dtype=np.float32)
+        return class_weights
+
+    if mode == 'inverse':
+        return __inverse(targets)
+    elif mode == 'inversesquared':
+        return __inverse(targets) ** 2
+    elif mode == 'binmean':
+        return __binmean(targets)
+
+
 def calculate_nd_slice(src, coords_lo, coords_hi):
     """Calculate the ``slice`` object list that is used as indices for
     reading from a data source.
