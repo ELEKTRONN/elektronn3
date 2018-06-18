@@ -129,7 +129,7 @@ class BlurryBoarderLoss(torch.nn.Module):
         return loss.mean()
 
 
-def blurry_boarder_weights(output_shape, target, sigma=1):
+def blurry_boarder_weights(output_shape, target, sigma=1.5):
     boarder_w = target.cpu().numpy() # vigra.taggedView(target.numpy(), 'xcyz') ISSUE: gaussianSmoothing does not support t-axis which should be used as batch axis
     # smoothing is applied per-channel
     n_classes = output_shape[1]
@@ -145,19 +145,24 @@ def blurry_boarder_weights(output_shape, target, sigma=1):
     # use probas shape because target shape does not have explicit class axis
     orig_shape = list(output_shape)
     orig_shape[1] = 1 if n_classes <= 2 else n_classes # for binary data label binarizes keeps it at length 1
+    # change to shape (b, x, y, (z), C) because 'LabelBinarizer' outputs (N, C)
+    orig_shape += orig_shape[1:2]
+    orig_shape.pop(1)
     boarder_w = lb.transform(boarder_w.flatten())
-    boarder_w = boarder_w.reshape(orig_shape)
+    # now reshape to (b, x, y, (z), C) to (b, C, x, y, (z))
+    boarder_w = boarder_w.reshape(orig_shape)  # (b, x, y, (z), C)
+    boarder_w = boarder_w.swapaxes(-1, -2)  # (b, x, y, C, (z)) or (b, x, C, y)
+    boarder_w = boarder_w.swapaxes(-2, -3)  # (b, x, C, y, (z)) or (b, C, x, y)
+    if len(orig_shape) == 5:
+        boarder_w = boarder_w.swapaxes(-3, -4)  # (b, C, x, y, z)
     if orig_shape[1] == 1:
         boarder_w = np.hstack((boarder_w == 0, boarder_w == 1))
-    print(boarder_w.shape)
-    print(sigma)
     boarder_w = boarder_w.astype(np.float32)
     for ii in range(len(target)):
         curr_patch = boarder_w[ii]
         boarder_w[ii] = gaussian_filter(curr_patch, sigma=sigma)
     # choose weights according to maximum value along class axis. this leads to a low weights symmetricly spread along the boundary of classes.
-    misc.imsave("/wholebrain/scratch/pschuber/test_weights.tif", np.max(boarder_w, axis=1)[0])
+    # misc.imsave("/wholebrain/scratch/pschuber/test_weights.png", np.max(boarder_w, axis=1)[2])
     boarder_w = torch.from_numpy(np.max(boarder_w, axis=1)).float().cuda()
-    misc.imsave("/wholebrain/scratch/pschuber/test_target.tif", target.cpu().numpy()[0])
-    raise()
+    # misc.imsave("/wholebrain/scratch/pschuber/test_target.png", target.cpu().numpy()[2])
     return boarder_w

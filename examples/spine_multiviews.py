@@ -65,7 +65,7 @@ batch_size = 10
 # ).to(device)
 vgg_model = VGGNet(requires_grad=True, in_channels=4)
 model = FCN32s(pretrained_net=vgg_model, n_class=4)
-
+model = nn.DataParallel(model, device_ids=[0, 1])
 # Specify data set
 train_dataset = MultiviewData(train=True)
 valid_dataset = MultiviewData(train=False)
@@ -94,6 +94,10 @@ trainer = Trainer(
     save_root=save_root,
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched},
-    ipython_on_error=True
+    ipython_on_error=False
 )
+
+# Archiving training script, src folder, env info
+bk = Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+
 trainer.train(max_steps)

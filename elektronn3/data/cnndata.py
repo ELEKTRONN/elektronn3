@@ -714,7 +714,7 @@ class MultiviewData(data.Dataset):
         cube_id = "train" if train else "valid"
         if inp_path is None or target_path is None:
             base_dir = "/wholebrain/scratch/areaxfs3/ssv_spgt" \
-                       "/spiness_multiviews/spine_gt_multiview/"
+                       "/spiness_multiviews/spine_gt_multiview_14_06/"
             inp_path = expanduser(f'{base_dir}raw_{cube_id}.h5')
             target_path = expanduser(f'{base_dir}label_{cube_id}.h5')
         self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
@@ -722,10 +722,6 @@ class MultiviewData(data.Dataset):
         self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[:, 0]
-        # HACK
-        raise()
-        if len(np.unique(self.target)) != np.max(self.target) + 1 and np.max(self.target) == 4:
-            self.target[self.target == 4] = 3
 
         self.close_files()  # Using file contents from memory -> no need to keep the file open.
 
