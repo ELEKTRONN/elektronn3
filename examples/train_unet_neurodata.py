@@ -42,8 +42,8 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data import PatchCreator, transforms
-from elektronn3.training import Trainer, Backup, DiceLoss
+from elektronn3.data import PatchCreator, transforms, calculate_class_weights
+from elektronn3.training import Trainer, Backup, DiceLoss, LovaszLoss
 from elektronn3.models.unet import UNet
 
 
@@ -102,7 +102,6 @@ train_dataset = PatchCreator(
     target_h5data=target_h5data[:2],
     train=True,
     epoch_size=args.epoch_size,
-    class_weights=True,
     warp=0.5,
     warp_kwargs={
         'sample_aniso': True,
@@ -136,8 +135,12 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
+# Get class weights for imbalanced datasets
+class_weights = torch.tensor(calculate_class_weights(train_dataset.targets))
+
+criterion = nn.CrossEntropyLoss(weight=class_weights)
 # criterion = DiceLoss()
+# criterion = LovaszLoss()
 
 # Create trainer
 trainer = Trainer(

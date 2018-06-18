@@ -105,9 +105,6 @@ class PatchCreator(data.Dataset):
             :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
-        class_weights: If ``True``, target class weights (for the loss
-            function) are calculated on the available training targets
-            when the class is instantiated.
         epoch_size: Determines the length (``__len__``) of the ``Dataset``
             iterator. ``epoch_size`` can be set to an arbitrary value and
             doesn't have any effect on the content of produced training
@@ -133,7 +130,6 @@ class PatchCreator(data.Dataset):
             preview_shape: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
-            class_weights: bool = False,
             epoch_size: int = 100,
             squeeze_target: bool = False,
             transform: Callable = transforms.Identity(),
@@ -142,10 +138,6 @@ class PatchCreator(data.Dataset):
         if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         if not train:
-            if class_weights:
-                raise ValueError(
-                    'Calculating class_weights on validation sets is not allowed.'
-                )
             if warp:
                 logger.warning(
                     'Augmentations should not be used on validation data.'
@@ -220,25 +212,16 @@ class PatchCreator(data.Dataset):
 
         self.load_data()  # Open dataset files
 
+        self._mean = None
+        self._std = None
+
         if transform is None:
             transform = lambda x: x
         self.transform = transform
 
-
         # Load preview data on initialization so read errors won't occur late
         # and reading doesn't have to be done by each background worker process separately.
         _ = self.preview_batch
-
-        if class_weights:
-            # TODO: This target mean calculation can be expensive. Add support for pre-calculated values, similar to `mean` param. # Not quite sure what you mean, this is done once only anyway
-            # TODO: This assumes a binary segmentation problem (background/foreground). Support more classes?
-            target_mean = np.mean(self.targets)
-            bg_weight = target_mean / (1. + target_mean)
-            fg_weight = 1. - bg_weight
-            self.class_weights = torch.tensor([bg_weight, fg_weight])
-            logger.info(f'Calculated class weights: {[bg_weight, fg_weight]}')
-        else:
-            self.class_weights = None
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
         # Note that the index is ignored. Samples are always random
