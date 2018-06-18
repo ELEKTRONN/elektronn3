@@ -14,6 +14,13 @@ import numba
 from elektronn3 import floatX
 from elektronn3.data.utils import slice_h5
 
+# TODO: A major refactoring is required here:
+#  This module should be renamed to something like coord_transforms and
+#  it should not perform any data I/O itself. Instead it should provide a
+#  framework for generating and transforming source coordinates (with
+#  support for user-defined transforms, similar to the image transforms pipeline).
+#  Code for HDF5 slicing and voxel value interpolation should be in separate modules.
+
 
 # TODO: Revise this. Especially the clipping is very destructive!
 # This is currently broken because it expects floats in the range (0, 1)

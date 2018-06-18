@@ -42,7 +42,7 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data import PatchCreator, transforms, calculate_class_weights
+from elektronn3.data import PatchCreator, transforms, utils
 from elektronn3.training import Trainer, Backup, DiceLoss, LovaszLoss
 from elektronn3.models.unet import UNet
 
@@ -81,8 +81,8 @@ if args.resume is not None:  # Load pretrained network params
 
 # These statistics are computed from the training dataset.
 # Remember to re-compute and change them when switching the dataset.
-dataset_mean = (155.291411,)  # = elektronn3.data.utils.calculate_means(train_dataset.inputs)
-dataset_std = (42.599973,)  # = elektronn3.data.utils.calculate_stds(train_dataset.inputs)
+dataset_mean = (155.291411,)
+dataset_std = (42.599973,)
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
@@ -135,8 +135,8 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-# Get class weights for imbalanced datasets
-class_weights = torch.tensor(calculate_class_weights(train_dataset.targets))
+# Class weights for imbalanced dataset
+class_weights = torch.tensor([0.2653,  0.7347])
 
 criterion = nn.CrossEntropyLoss(weight=class_weights)
 # criterion = DiceLoss()
@@ -162,3 +162,9 @@ Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
 # Start training
 trainer.train(max_steps)
+
+
+# How to re-calculate mean, std and class_weights for other datasets:
+#  dataset_mean = utils.calculate_means(train_dataset.inputs)
+#  dataset_std = utils.calculate_stds(train_dataset.inputs)
+#  class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))

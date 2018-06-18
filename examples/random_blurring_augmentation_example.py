@@ -4,7 +4,9 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert
+# Authors: Martin Drawitsch, Ravil Dorozhinskii
+
+# TODO: Sync
 
 import argparse
 import os
