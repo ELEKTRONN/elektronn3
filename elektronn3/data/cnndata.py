@@ -666,7 +666,6 @@ class SimpleNeuroData2d(data.Dataset):
         self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[0]  # Squeeze superfluous first dimension
-
         self.target = self.target[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (dirty hack TODO)
 
         # Cut inp and target to same size
@@ -713,16 +712,15 @@ class MultiviewData(data.Dataset):
         super().__init__()
         cube_id = "train" if train else "valid"
         if inp_path is None or target_path is None:
-            base_dir = "/wholebrain/scratch/areaxfs3/ssv_spgt" \
-                       "/spiness_multiviews/spine_gt_multiview_14_06/"
+            base_dir = os.path.expanduser("~") + "/spine_gt_multiview/"
             inp_path = expanduser(f'{base_dir}raw_{cube_id}.h5')
             target_path = expanduser(f'{base_dir}label_{cube_id}.h5')
         self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
         self.target_file = h5py.File(os.path.expanduser(target_path), 'r')
-        self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
+        self.inp = self.inp_file[inp_key].value
+        self.inp = self.inp[:, :4].astype(np.float32) / 255.
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[:, 0]
-
         self.close_files()  # Using file contents from memory -> no need to keep the file open.
 
     def __getitem__(self, index):

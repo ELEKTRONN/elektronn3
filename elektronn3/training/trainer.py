@@ -491,7 +491,6 @@ class Trainer:
 
         out = batch2img(out_batch)
         pred = out.argmax(0)
-
         self.tb.log_image(f'{group}/inp', inp, step=self.step)
         self.tb.log_image(f'{group}/target', target, step=self.step)
 

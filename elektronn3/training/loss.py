@@ -114,8 +114,9 @@ def __dice_loss_binary(output, target, smooth=0, eps=0.0001):
 # are highest inside each class foreground and blurred at the boundaries
 # by Gaussian smoothing
 class BlurryBoarderLoss(torch.nn.Module):
-    def __init__(self, softmax=True):
+    def __init__(self, softmax=True, sigma=2.5):
         super().__init__()
+        self.sigma = sigma
         if softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
@@ -123,13 +124,14 @@ class BlurryBoarderLoss(torch.nn.Module):
         self.blurry_boarder_weights = blurry_boarder_weights
 
     def forward(self, output, target):
-        boarder_w =  self.blurry_boarder_weights(output.size(), target)
+        boarder_w =  self.blurry_boarder_weights(output.size(), target,
+                                                 self.sigma)
         loss = F.cross_entropy(output, target, reduce=False)
         loss = loss * boarder_w
         return loss.mean()
 
 
-def blurry_boarder_weights(output_shape, target, sigma=1.5):
+def blurry_boarder_weights(output_shape, target, sigma):
     boarder_w = target.cpu().numpy() # vigra.taggedView(target.numpy(), 'xcyz') ISSUE: gaussianSmoothing does not support t-axis which should be used as batch axis
     # smoothing is applied per-channel
     n_classes = output_shape[1]
@@ -162,7 +164,8 @@ def blurry_boarder_weights(output_shape, target, sigma=1.5):
         curr_patch = boarder_w[ii]
         boarder_w[ii] = gaussian_filter(curr_patch, sigma=sigma)
     # choose weights according to maximum value along class axis. this leads to a low weights symmetricly spread along the boundary of classes.
-    # misc.imsave("/wholebrain/scratch/pschuber/test_weights.png", np.max(boarder_w, axis=1)[2])
+    misc.imsave("/wholebrain/scratch/pschuber/test_weights.png", np.max(boarder_w, axis=1)[0])
     boarder_w = torch.from_numpy(np.max(boarder_w, axis=1)).float().cuda()
-    # misc.imsave("/wholebrain/scratch/pschuber/test_target.png", target.cpu().numpy()[2])
+    boarder_w = boarder_w / boarder_w.mean()  # normalize mean
+    misc.imsave("/wholebrain/scratch/pschuber/test_target.png", target.cpu().numpy()[0])
     return boarder_w

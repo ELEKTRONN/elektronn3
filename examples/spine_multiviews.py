@@ -15,7 +15,7 @@ Caution! The input dataset was not manually corrected.
 
 import argparse
 import os
-from elektronn3.models.fcn_2d import VGGNet, FCN32s
+from elektronn3.models.fcn_2d import *
 import torch
 from torch import nn
 from torch import optim
@@ -41,7 +41,7 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.training import Trainer
+from elektronn3.training import Trainer, Backup
 from elektronn3.data.cnndata import MultiviewData
 
 torch.manual_seed(0)
@@ -53,7 +53,7 @@ save_root = os.path.expanduser('~/e3training/')
 max_steps = args.max_steps
 lr = 0.004
 lr_stepsize = 500
-lr_dec = 0.99
+lr_dec = 0.995
 batch_size = 10
 
 # Initialize neural network model
@@ -64,7 +64,7 @@ batch_size = 10
 #     nn.Conv2d(32, 4, 1)
 # ).to(device)
 vgg_model = VGGNet(requires_grad=True, in_channels=4)
-model = FCN32s(pretrained_net=vgg_model, n_class=4)
+model = FCNs(pretrained_net=vgg_model, n_class=4)
 model = nn.DataParallel(model, device_ids=[0, 1])
 # Specify data set
 train_dataset = MultiviewData(train=True)
