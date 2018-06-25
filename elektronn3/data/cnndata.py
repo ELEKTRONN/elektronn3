@@ -115,6 +115,15 @@ class PatchCreator(data.Dataset):
             channel axis if it is empty. This workaround and will be removed
             later. It is currently needed to support targets that have an
             extra channel axis which doesn't exist in the network outputs.
+        transform: Transformation function to be applied to ``(inp, target)``
+            samples (for normalization, data augmentation etc.). The signature
+            is always ``inp, target = transform(inp, target)``, where ``inp``
+            and ``target`` both are ``numpy.ndarray``s.
+            To combine multiple transforms, use
+            :py:class:`elektronn3.data.transforms.Compose`.
+            See :py:mod:`elektronn3.data.transforms`. for some implementations.
+
+
     """
     def __init__(
             self,
