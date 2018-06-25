@@ -99,7 +99,7 @@ class RandomBlurring:  # Warning: This operates in-place!
 
 
 class RandomCrop:
-    def __init__(self, size: Union[int, Sequence[int]]):
+    def __init__(self, size: Sequence[int]):
         self.size = np.array(size)
 
     def __call__(
@@ -128,5 +128,8 @@ class RandomCrop:
         inp_cropped = inp[full_slice]
         if target is None:
             return inp_cropped, target
+
+        if target.ndim == inp.ndim - 1:  # inp: (C, [D,], H, W), target: ([D,], H, W)
+            full_slice = full_slice[1:]  # Remove C axis from slice because target doesn't have it
         target_cropped = target[full_slice]
         return inp_cropped, target_cropped
