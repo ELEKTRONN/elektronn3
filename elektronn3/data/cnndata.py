@@ -563,11 +563,16 @@ class SimpleNeuroData2d(data.Dataset):
             inp_path=None,
             target_path=None,
             train=True,
-            inp_key='raw', target_key='lab',
+            inp_key='raw',
+            target_key='lab',
             # offset=(0, 0, 0),
-            pool=(1, 1, 1)
+            pool=(1, 1, 1),
+            transform: Callable = transforms.Identity(),
+            num_classes: Optional[int] = None,
     ):
         super().__init__()
+        self.transform = transform
+        self.num_classes = num_classes
         cube_id = 0 if train else 2
         if inp_path is None:
             inp_path = expanduser(f'~/neuro_data_cdhw/raw_{cube_id}.h5')
@@ -575,7 +580,7 @@ class SimpleNeuroData2d(data.Dataset):
             target_path = expanduser(f'~/neuro_data_cdhw/barrier_int16_{cube_id}.h5')
         self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
         self.target_file = h5py.File(os.path.expanduser(target_path), 'r')
-        self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
+        self.inp = self.inp_file[inp_key].value.astype(np.float32)
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[0]  # Squeeze superfluous first dimension
 
@@ -600,6 +605,7 @@ class SimpleNeuroData2d(data.Dataset):
         # Get z slices
         inp = self.inp[:, index]
         target = self.target[index]
+        inp, target = self.transform(inp, target)
         return inp, target
 
     def __len__(self):
