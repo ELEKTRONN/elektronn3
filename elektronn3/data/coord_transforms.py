@@ -21,32 +21,6 @@ from elektronn3.data.utils import slice_h5
 #  Code for HDF5 slicing and voxel value interpolation should be in separate modules.
 
 
-# TODO: Revise this. Especially the clipping is very destructive!
-# This is currently broken because it expects floats in the range (0, 1)
-# and we can't supply those (except by re-breaking normalization or awkward
-# and lossy transforms before and after calling this function).
-def grey_augment(d, channels, rng):
-    """
-    Performs grey value (histogram) augmentations on ``d``. This is only
-    applied to ``channels`` (list of channels indices), ``rng`` is a random
-    number generator
-    """
-    raise NotImplementedError
-    if channels == []:
-        return d
-    else:
-        k = len(channels)
-        d = d.copy()  # d is still just a view, we don't want to change the original data so copy it
-        alpha = 1 + (rng.rand(k) - 0.5) * 0.3 # ~ contrast
-        c     = (rng.rand(k) - 0.5) * 0.3 # mediates whether values are clipped for shadows or lights
-        gamma = 2.0 ** (rng.rand(k) * 2 - 1) # sample from [0.5,2] with mean 0
-
-        d[channels] = d[channels] * alpha[:,None,None] + c[:,None,None]
-        d[channels] = np.clip(d[channels], 0, 1)
-        d[channels] = d[channels] ** gamma[:,None,None]
-    return d
-
-
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)#target='parallel',
 def map_coordinates_nearest(src, coords, lo, dest):
