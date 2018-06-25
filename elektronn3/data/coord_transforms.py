@@ -15,8 +15,7 @@ from elektronn3 import floatX
 from elektronn3.data.utils import slice_h5
 
 # TODO: A major refactoring is required here:
-#  This module should be renamed to something like coord_transforms and
-#  it should not perform any data I/O itself. Instead it should provide a
+#  This module should not perform any data I/O itself. Instead it should provide a
 #  framework for generating and transforming source coordinates (with
 #  support for user-defined transforms, similar to the image transforms pipeline).
 #  Code for HDF5 slicing and voxel value interpolation should be in separate modules.
@@ -390,7 +389,7 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
                      target_src=None, target_ps=None,
                      target_discrete_ix=None, rng=None):
     """
-    (Wraps :py:meth:`elektronn2.data.transformations.warp_slice()`)
+    (Wraps :py:meth:`elektronn2.data.coord_transforms.warp_slice()`)
 
     Generates the warping transformation parameters and composes them into a
     single 4D homogeneous transformation matrix ``M``.

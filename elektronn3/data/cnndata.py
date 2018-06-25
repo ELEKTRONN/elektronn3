@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from torch.utils import data
 
-from elektronn3.data import transformations, transforms  # TODO: Rename transformations module
+from elektronn3.data import coord_transforms, transforms
 from elektronn3.data.utils import slice_h5
 
 logger = logging.getLogger('elektronn3log')
@@ -100,7 +100,7 @@ class PatchCreator(data.Dataset):
         warp: ratio of training samples that should be obtained using
             geometric warping augmentations.
         warp_kwargs: kwargs that are passed through to
-            :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
+            :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
         epoch_size: Determines the length (``__len__``) of the ``Dataset``
@@ -255,7 +255,7 @@ class PatchCreator(data.Dataset):
                     # TODO: Find out where to catch this early / prevent this issue from happening
                     logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
                     continue
-            except transformations.WarpingOOBError:
+            except coord_transforms.WarpingOOBError:
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
@@ -401,7 +401,7 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Dict[str, Any]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
+        (Wraps :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`)
 
         Cuts a warped slice out of the input and target arrays.
         The same random warping transformation is each applied to both input
@@ -424,7 +424,7 @@ class PatchCreator(data.Dataset):
             applies warping to the image-target pair.
         warp_kwargs: dict
             kwargs that are passed through to
-            :py:meth:`elektronn2.data.transformations.get_warped_slice()`.
+            :py:meth:`elektronn2.data.coord_transforms.get_warped_slice()`.
             Can be empty.
 
         Returns
@@ -445,7 +445,7 @@ class PatchCreator(data.Dataset):
             warp_kwargs = dict(warp_kwargs)
             warp_kwargs['warp_amount'] = 0
 
-        inp, target = transformations.get_warped_slice(
+        inp, target = coord_transforms.get_warped_slice(
             inp_src,
             self.patch_shape,
             aniso_factor=self.aniso_factor,
