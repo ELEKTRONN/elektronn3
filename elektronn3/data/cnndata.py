@@ -122,8 +122,9 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-
-
+        num_classes: The total number of different target classes that exist
+            in the data set. Setting this is optional, but some features might
+            only work if this is specified.
     """
     def __init__(
             self,
@@ -140,6 +141,7 @@ class PatchCreator(data.Dataset):
             epoch_size: int = 100,
             squeeze_target: bool = False,
             transform: Callable = transforms.Identity(),
+            num_classes: Optional[int] = None
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
@@ -177,6 +179,7 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
+        self.num_classes = num_classes
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
