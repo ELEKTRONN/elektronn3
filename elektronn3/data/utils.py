@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 import traceback
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import h5py
 import numpy as np
@@ -17,6 +17,38 @@ import numpy as np
 from elektronn3 import floatX
 
 logger = logging.getLogger("elektronn3log")
+
+
+def _to_full_numpy(seq):
+    if isinstance(seq, np.ndarray):
+        return seq
+    elif isinstance(seq[0], np.ndarray):
+        return np.array(seq)
+    elif isinstance(seq[0], h5py.Dataset):
+        # Explicitly pre-load all dataset values into ndarray format
+        return np.array([x.value for x in seq])
+    else:
+        raise ValueError('inputs must be an ndarray, a sequence of ndarrays '
+                         'or a sequence of h5py.Datasets.')
+
+
+def calculate_means(inputs: Sequence) -> Tuple[float]:
+    # TODO: This implementation can surely be optimized (esp. memory usage)
+    inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
+    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
+    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
+    means = flat.mean(axis=1)  # For each channel, calculate mean of all values
+    return tuple(means)
+
+
+# TODO: Respect separate channels
+def calculate_stds(inputs: Sequence) -> Tuple[float]:
+    # TODO: This implementation can surely be optimized (esp. memory usage)
+    inputs = _to_full_numpy(inputs)
+    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
+    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
+    stds = flat.std(axis=1)  # For each channel, calculate std of all values
+    return tuple(stds)
 
 
 def calculate_class_weights(

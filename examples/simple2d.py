@@ -46,7 +46,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.training import Trainer, Backup
-from elektronn3.data import SimpleNeuroData2d
+from elektronn3.data import SimpleNeuroData2d, transforms
 
 torch.manual_seed(0)
 
@@ -70,9 +70,21 @@ model = nn.Sequential(
 if args.resume is not None:  # Load pretrained network params
     model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
+dataset_mean = (143.97594,)
+dataset_std = (44.264744,)
+
+# Transformations to be applied to samples before feeding them to the network
+common_transforms = [
+    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+]
+train_transform = transforms.Compose(common_transforms + [
+    transforms.RandomCrop((128, 128))  # Use smaller patches for training
+])
+valid_transform = transforms.Compose(common_transforms + [])
+
 # Specify data set
-train_dataset = SimpleNeuroData2d(train=True)
-valid_dataset = SimpleNeuroData2d(train=False)
+train_dataset = SimpleNeuroData2d(train=True, transform=train_transform, num_classes=2)
+valid_dataset = SimpleNeuroData2d(train=False, transform=valid_transform, num_classes=2)
 
 # Set up optimization
 optimizer = optim.Adam(

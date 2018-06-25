@@ -14,31 +14,11 @@ import numba
 from elektronn3 import floatX
 from elektronn3.data.utils import slice_h5
 
-
-# TODO: Revise this. Especially the clipping is very destructive!
-# This is currently broken because it expects floats in the range (0, 1)
-# and we can't supply those (except by re-breaking normalization or awkward
-# and lossy transforms before and after calling this function).
-def grey_augment(d, channels, rng):
-    """
-    Performs grey value (histogram) augmentations on ``d``. This is only
-    applied to ``channels`` (list of channels indices), ``rng`` is a random
-    number generator
-    """
-    raise NotImplementedError
-    if channels == []:
-        return d
-    else:
-        k = len(channels)
-        d = d.copy()  # d is still just a view, we don't want to change the original data so copy it
-        alpha = 1 + (rng.rand(k) - 0.5) * 0.3 # ~ contrast
-        c     = (rng.rand(k) - 0.5) * 0.3 # mediates whether values are clipped for shadows or lights
-        gamma = 2.0 ** (rng.rand(k) * 2 - 1) # sample from [0.5,2] with mean 0
-
-        d[channels] = d[channels] * alpha[:,None,None] + c[:,None,None]
-        d[channels] = np.clip(d[channels], 0, 1)
-        d[channels] = d[channels] ** gamma[:,None,None]
-    return d
+# TODO: A major refactoring is required here:
+#  This module should not perform any data I/O itself. Instead it should provide a
+#  framework for generating and transforming source coordinates (with
+#  support for user-defined transforms, similar to the image transforms pipeline).
+#  Code for HDF5 slicing and voxel value interpolation should be in separate modules.
 
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
@@ -383,7 +363,7 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
                      target_src=None, target_ps=None,
                      target_discrete_ix=None, rng=None):
     """
-    (Wraps :py:meth:`elektronn2.data.transformations.warp_slice()`)
+    (Wraps :py:meth:`elektronn2.data.coord_transforms.warp_slice()`)
 
     Generates the warping transformation parameters and composes them into a
     single 4D homogeneous transformation matrix ``M``.

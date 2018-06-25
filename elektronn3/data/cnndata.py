@@ -12,17 +12,15 @@ import sys
 import time
 import traceback
 from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 
 import h5py
 import numpy as np
 import torch
 from torch.utils import data
 
-from elektronn3.data import transformations
+from elektronn3.data import coord_transforms, transforms
 from elektronn3.data.utils import slice_h5
-from elektronn3.data.random_blurring import check_random_data_blurring_config
-from elektronn3.data.random_blurring import apply_random_blurring
 
 logger = logging.getLogger('elektronn3log')
 
@@ -90,14 +88,6 @@ class PatchCreator(data.Dataset):
             be used for reading target data:
             - discrete targets are obtained by nearest-neighbor interpolation
             - non-discrete (continuous) targets are linearly interpolated.
-        mean: Mean of input data (if not set, it is automatically
-            estimated on the training data during initialization).
-        std: Standard deviation of input data (if not set, it is automatically
-            estimated on the training data during initialization).
-        normalize: If ``True``, input data is normalized to approx. zero mean
-            and unit standard deviation ("std"). If ``mean`` and/or ``std``
-            are not supplied, they are automatically estimated on the training
-            data on initialization.
         train: Determines if samples come from training or validation
             data.
             If ``True``, training data is returned.
@@ -107,19 +97,12 @@ class PatchCreator(data.Dataset):
             shape out of the center of the preview cube.
             If it is ``None`` (default), preview batch functionality will be
             disabled.
-        grey_augment_channels: Determines on which of the training input
-            channels gray value augmentations should be applied on.
-            E.g. ``grey_augment_channels=[0]`` means that only channel 0
-            should be grey-augmented. Only specify channels which contain
-            gray values.
-            (Currently ignored, because gray value augm. are broken)
         warp: ratio of training samples that should be obtained using
             geometric warping augmentations.
         warp_kwargs: kwargs that are passed through to
-            :py:meth:`elektronn3.data.transformations.get_warped_slice()`.
+            :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`.
             See the docs of this function for information on kwargs options.
             Can be empty.
-        random_blurring_config:
         epoch_size: Determines the length (``__len__``) of the ``Dataset``
             iterator. ``epoch_size`` can be set to an arbitrary value and
             doesn't have any effect on the content of produced training
@@ -132,6 +115,16 @@ class PatchCreator(data.Dataset):
             channel axis if it is empty. This workaround and will be removed
             later. It is currently needed to support targets that have an
             extra channel axis which doesn't exist in the network outputs.
+        transform: Transformation function to be applied to ``(inp, target)``
+            samples (for normalization, data augmentation etc.). The signature
+            is always ``inp, target = transform(inp, target)``, where ``inp``
+            and ``target`` both are ``numpy.ndarray``s.
+            To combine multiple transforms, use
+            :py:class:`elektronn3.data.transforms.Compose`.
+            See :py:mod:`elektronn3.data.transforms`. for some implementations.
+        num_classes: The total number of different target classes that exist
+            in the data set. Setting this is optional, but some features might
+            only work if this is specified.
     """
     def __init__(
             self,
@@ -141,31 +134,21 @@ class PatchCreator(data.Dataset):
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
-            mean: Optional[float] = None,
-            std: Optional[float] = None,
-            normalize: bool = True,
             train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
-            grey_augment_channels: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
-            random_blurring_config: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             squeeze_target: bool = False,
+            transform: Callable = transforms.Identity(),
+            num_classes: Optional[int] = None
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         if not train:
-            if  normalize and (mean is None or std is None):
+            if warp:
                 logger.warning(
-                    'You need to manually supply mean and std for validation '
-                    'sets (auto-calculating them would defeat the purpose of '
-                    'having a separate validation set).\n'
-                    'Please supply mean and std of your training set.'
-                )
-            if warp or random_blurring_config is not None or grey_augment_channels is not None:
-                raise ValueError(
                     'Augmentations should not be used on validation data.'
                 )
         else:
@@ -174,7 +157,6 @@ class PatchCreator(data.Dataset):
 
         # batch properties
         self.train = train
-        self.grey_augment_channels = grey_augment_channels  # TODO: Rename to "gray..." (AE)
         self.warp = warp
         self.warp_kwargs = warp_kwargs
         self.squeeze_target = squeeze_target
@@ -197,6 +179,7 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
+        self.num_classes = num_classes
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
@@ -239,26 +222,22 @@ class PatchCreator(data.Dataset):
 
         self.load_data()  # Open dataset files
 
-        self._mean = mean
-        self._std = std
-        self.normalize = normalize
-        if self.normalize:
-            # Pre-compute to prevent later redundant computation in multiple processes.
-            _, _ = self.mean, self.std
+        if transform is None:
+            transform = lambda x: x
+        self.transform = transform
+
         # Load preview data on initialization so read errors won't occur late
         # and reading doesn't have to be done by each background worker process separately.
         _ = self.preview_batch
 
-        self.random_blurring_config = random_blurring_config
-        if self.random_blurring_config:
-            check_random_data_blurring_config(patch_shape, **self.random_blurring_config)
-
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
+        # Note that the index is ignored. Samples are always random
+        return self._get_random_sample()
+
+    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray]:
         #                                      np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
-        if self.grey_augment_channels is None:
-            self.grey_augment_channels = []
         self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
         while True:
@@ -276,7 +255,7 @@ class PatchCreator(data.Dataset):
                     # TODO: Find out where to catch this early / prevent this issue from happening
                     logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
                     continue
-            except transformations.WarpingOOBError:
+            except coord_transforms.WarpingOOBError:
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
@@ -309,13 +288,7 @@ class PatchCreator(data.Dataset):
                 )
                 continue
             self.n_successful_warp += 1
-            if self.normalize:
-                inp = (inp - self.mean) / self.std
-            if self.random_blurring_config and self.train:
-                apply_random_blurring(inp_sample=inp,
-                                      **self.random_blurring_config)
-            if self.grey_augment_channels and self.train:  # grey augmentation only for training
-                inp = transformations.grey_augment(inp, self.grey_augment_channels, self.rng)
+            inp, target = self.transform(inp, target)
             break
 
         # target is now of shape (K, D, H, W), where K is the number of
@@ -343,42 +316,6 @@ class PatchCreator(data.Dataset):
         s = s.format(self.c_target, self.c_input, self._training_count,
                      self._valid_count, self.n_labelled_pixels)
         return s
-
-    # TODO: Support individual per-cube mean/std (in case of high differences
-    #       between cubes)? Not sure if this is important.
-
-    # TODO: Respect separate channels
-    @property
-    def mean(self) -> float:
-        if self._mean is None:
-            logger.warning(
-                'Calculating mean of training inputs. This is potentially slow. Please supply\n'
-                'it manually when initializing the data set to make startup faster.'
-            )
-            means = [np.mean(x) for x in self.inputs]
-            self._mean = np.mean(means)
-            logger.info(f'mean = {self._mean:.6f}')
-        return self._mean
-
-    # TODO: Respect separate channels
-    @property
-    def std(self) -> float:
-        if self._std is None:
-            logger.warning(
-                'Calculating std of training inputs. This is potentially slow. Please supply\n'
-                'it manually when initializing the data set to make startup faster.'
-            )
-            stds = [np.std(x) for x in self.inputs]
-            # Note that this is not the same as the std of all train_inputs
-            # together. The mean of stds of the individual input data cubes
-            # is different because it only acknowledges intra-cube variance,
-            # not variance between training cubes.
-            # TODO: Does it make sense to have the actual global std of all
-            #       training inputs? If yes, how can it be computed without
-            #       loading everything into RAM at once?
-            self._std = np.mean(stds)
-            logger.info(f'std = {self._std:.6f}')
-        return self._std
 
     def _create_preview_batch(
             self,
@@ -414,9 +351,7 @@ class PatchCreator(data.Dataset):
             target_source, target_lo, target_hi,
             dtype=self._target_dtype, prepend_empty_axis=True
         )
-
-        if self.normalize:
-            inp_np = ((inp_np - self.mean) / self.std).astype(np.float32)
+        inp_np, target_np = self.transform(inp_np, target_np)
 
         inp = torch.from_numpy(inp_np)
         target = torch.from_numpy(target_np)
@@ -466,7 +401,7 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Dict[str, Any]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        (Wraps :py:meth:`elektronn3.data.transformations.get_warped_slice()`)
+        (Wraps :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`)
 
         Cuts a warped slice out of the input and target arrays.
         The same random warping transformation is each applied to both input
@@ -489,7 +424,7 @@ class PatchCreator(data.Dataset):
             applies warping to the image-target pair.
         warp_kwargs: dict
             kwargs that are passed through to
-            :py:meth:`elektronn2.data.transformations.get_warped_slice()`.
+            :py:meth:`elektronn2.data.coord_transforms.get_warped_slice()`.
             Can be empty.
 
         Returns
@@ -510,7 +445,7 @@ class PatchCreator(data.Dataset):
             warp_kwargs = dict(warp_kwargs)
             warp_kwargs['warp_amount'] = 0
 
-        inp, target = transformations.get_warped_slice(
+        inp, target = coord_transforms.get_warped_slice(
             inp_src,
             self.patch_shape,
             aniso_factor=self.aniso_factor,
@@ -628,11 +563,16 @@ class SimpleNeuroData2d(data.Dataset):
             inp_path=None,
             target_path=None,
             train=True,
-            inp_key='raw', target_key='lab',
+            inp_key='raw',
+            target_key='lab',
             # offset=(0, 0, 0),
-            pool=(1, 1, 1)
+            pool=(1, 1, 1),
+            transform: Callable = transforms.Identity(),
+            num_classes: Optional[int] = None,
     ):
         super().__init__()
+        self.transform = transform
+        self.num_classes = num_classes
         cube_id = 0 if train else 2
         if inp_path is None:
             inp_path = expanduser(f'~/neuro_data_cdhw/raw_{cube_id}.h5')
@@ -640,7 +580,7 @@ class SimpleNeuroData2d(data.Dataset):
             target_path = expanduser(f'~/neuro_data_cdhw/barrier_int16_{cube_id}.h5')
         self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
         self.target_file = h5py.File(os.path.expanduser(target_path), 'r')
-        self.inp = self.inp_file[inp_key].value.astype(np.float32) / 255
+        self.inp = self.inp_file[inp_key].value.astype(np.float32)
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[0]  # Squeeze superfluous first dimension
 
@@ -665,6 +605,7 @@ class SimpleNeuroData2d(data.Dataset):
         # Get z slices
         inp = self.inp[:, index]
         target = self.target[index]
+        inp, target = self.transform(inp, target)
         return inp, target
 
     def __len__(self):
