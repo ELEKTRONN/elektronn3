@@ -77,7 +77,9 @@ dataset_std = (44.264744,)
 common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
-train_transform = transforms.Compose(common_transforms + [])
+train_transform = transforms.Compose(common_transforms + [
+    transforms.RandomCrop((128, 128))  # Use smaller patches for training
+])
 valid_transform = transforms.Compose(common_transforms + [])
 
 # Specify data set
