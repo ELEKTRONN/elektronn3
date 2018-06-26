@@ -42,8 +42,8 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data import PatchCreator
-from elektronn3.training import Trainer, Backup, DiceLoss
+from elektronn3.data import PatchCreator, transforms, utils
+from elektronn3.training import Trainer, Backup, DiceLoss, LovaszLoss
 from elektronn3.models.unet import UNet
 
 
@@ -85,25 +85,36 @@ if __name__ == "__main__":
     if args.resume is not None:  # Load pretrained network params
         model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
+    # These statistics are computed from the training dataset.
+    # Remember to re-compute and change them when switching the dataset.
+    dataset_mean = (155.291411,)
+    dataset_std = (42.599973,)
+
+    # Transformations to be applied to samples before feeding them to the network
+    common_transforms = [
+        transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    ]
+    train_transform = transforms.Compose(common_transforms + [])
+    valid_transform = transforms.Compose(common_transforms + [])
+
     # Specify data set
     common_data_kwargs = {  # Common options for training and valid sets.
-        'mean': 155.291411,
-        'std': 41.812504,
         'aniso_factor': 2,
         'patch_shape': (48, 96, 96),
         'squeeze_target': True,  # Workaround for neuro_data_cdhw,
+        'num_classes': 2,
     }
     train_dataset = PatchCreator(
         input_h5data=input_h5data[:2],
         target_h5data=target_h5data[:2],
         train=True,
         epoch_size=args.epoch_size,
-        class_weights=True,
         warp=0.5,
         warp_kwargs={
             'sample_aniso': True,
             'perspective': True,
         },
+        transform=train_transform,
         **common_data_kwargs
     )
     valid_dataset = PatchCreator(
@@ -117,6 +128,7 @@ if __name__ == "__main__":
             'sample_aniso': True,
             'warp_amount': 0.8,  # Strength
         },
+        transform=valid_transform,
         **common_data_kwargs
     )
 
@@ -130,8 +142,12 @@ if __name__ == "__main__":
     lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
     # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-    criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
+    # Class weights for imbalanced dataset
+    class_weights = torch.tensor([0.2653,  0.7347])
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     # criterion = DiceLoss()
+    # criterion = LovaszLoss()
 
     # Create trainer
     trainer = Trainer(
@@ -153,3 +169,9 @@ if __name__ == "__main__":
 
     # Start training
     trainer.train(max_steps)
+
+
+    # How to re-calculate mean, std and class_weights for other datasets:
+    #  dataset_mean = utils.calculate_means(train_dataset.inputs)
+    #  dataset_std = utils.calculate_stds(train_dataset.inputs)
+    #  class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))

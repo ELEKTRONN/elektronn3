@@ -111,6 +111,14 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
+        num_classes: Optionally specifies the number of different target
+            classes for classification tasks. If this is not set manually,
+            the ``Trainer`` checks if the ``train_dataset`` provides this
+            value. If available, ``self.num_classes`` is set to
+            ``self.train_dataset.num_classes``. Otherwise, it is set to
+            ``None``.
+            The num_classes attribute is used for plotting purposes and is
+            not strictly required for training.
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
@@ -124,6 +132,7 @@ class Trainer:
     valid_loader: torch.utils.data.DataLoader
     exp_name: str
     save_path: str  # Full path to where training files are stored
+    num_classes: Optional[int]  # Number of different target classes in the train_dataset
 
     def __init__(
             self,
@@ -137,12 +146,13 @@ class Trainer:
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
-            schedulers: Optional[Dict[Any, Any]] = None,  # TODO: Define a Scheduler protocol. This needs typing_extensions.
+            schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
-            ipython_on_error: bool = False
+            ipython_on_error: bool = False,
+            num_classes: Optional[int] = None,
     ):
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
@@ -178,6 +188,10 @@ class Trainer:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
 
+        # Determine optional dataset properties
+        self.num_classes = None
+        if hasattr(self.train_dataset, 'num_classes'):
+            self.num_classes = self.train_dataset.num_classes
         self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
             and valid_dataset.preview_shape is not None
 

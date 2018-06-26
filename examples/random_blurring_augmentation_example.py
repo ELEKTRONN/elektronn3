@@ -4,7 +4,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert
+# Authors: Martin Drawitsch, Philipp Schubert, Ravil Dorozhinskii
 
 import argparse
 import os
@@ -42,9 +42,9 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data import PatchCreator
+from elektronn3.data import PatchCreator, transforms, utils
 from elektronn3.data.random_blurring import ScalarScheduler
-from elektronn3.training import Trainer, Backup, DiceLoss
+from elektronn3.training import Trainer, Backup, DiceLoss, LovaszLoss
 from elektronn3.models.unet import UNet
 
 
@@ -80,44 +80,53 @@ model = UNet(
 if args.resume is not None:  # Load pretrained network params
     model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
-# Configure random local blurring
-threshold = ScalarScheduler(
-    value=0.1,
-    max_value=0.5,
-    growth_type="lin",
-    interval=max_steps,
-    steps_per_report=1000
-)
+# These statistics are computed from the training dataset.
+# Remember to re-compute and change them when switching the dataset.
+dataset_mean = (155.291411,)
+dataset_std = (41.812504,)
 
+# Configure random local blurring
 random_blurring_config = {
     "probability" : 0.5,
-    "threshold": threshold,
+    "threshold": ScalarScheduler(
+        value=0.1,
+        max_value=0.5,
+        growth_type="lin",
+        interval=max_steps,
+        steps_per_report=1000
+    ),
     "lower_lim_region_size": [3, 6, 6],
     "upper_lim_region_size": [8, 16, 16],
     "verbose": False,
-    "num_steps_save": 1000
 }
+
+# Transformations to be applied to samples before feeding them to the network
+common_transforms = [
+    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+]
+train_transform = transforms.Compose(common_transforms + [
+    transforms.RandomBlurring(random_blurring_config)
+])
+valid_transform = transforms.Compose(common_transforms + [])
 
 # Specify data set
 common_data_kwargs = {  # Common options for training and valid sets.
-    'mean': 155.291411,
-    'std': 41.812504,
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
     'squeeze_target': True,  # Workaround for neuro_data_cdhw,
+    'num_classes': 2,
 }
 train_dataset = PatchCreator(
     input_h5data=input_h5data[:2],
     target_h5data=target_h5data[:2],
     train=True,
     epoch_size=args.epoch_size,
-    class_weights=True,
     warp=0.5,
     warp_kwargs={
         'sample_aniso': True,
         'perspective': True,
     },
-    random_blurring_config=random_blurring_config,
+    transform=train_transform,
     **common_data_kwargs
 )
 valid_dataset = PatchCreator(
@@ -131,6 +140,7 @@ valid_dataset = PatchCreator(
         'sample_aniso': True,
         'warp_amount': 0.8,  # Strength
     },
+    transform=valid_transform,
     **common_data_kwargs
 )
 
@@ -144,8 +154,12 @@ optimizer = optim.Adam(
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
+# Class weights for imbalanced dataset
+class_weights = torch.tensor([0.2653,  0.7347])
+
+criterion = nn.CrossEntropyLoss(weight=class_weights)
 # criterion = DiceLoss()
+# criterion = LovaszLoss()
 
 # Create trainer
 trainer = Trainer(
@@ -167,3 +181,9 @@ Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
 # Start training
 trainer.train(max_steps)
+
+
+# How to re-calculate mean, std and class_weights for other datasets:
+#  dataset_mean = utils.calculate_means(train_dataset.inputs)
+#  dataset_std = utils.calculate_stds(train_dataset.inputs)
+#  class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))
