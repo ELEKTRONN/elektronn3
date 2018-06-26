@@ -70,17 +70,16 @@ class TensorBoardLogger:
         if self.always_flush:
             self.writer.flush()
 
-    # TODO: Remove support for image sequences.
     def log_image(
             self,
             tag: str,
-            images: Union[np.ndarray, Sequence[np.ndarray]],
+            image: np.ndarray,
             step: int,
             cmap=None,
             num_classes=None,
             colorbar=True,
     ) -> None:
-        """Logs a an image or a list of images.
+        """Logs a an image to tensorboard.
 
         For gray-scale images, use ``cmap='gray'``.
         For label matrices (segmentation targets or class predictions),
@@ -120,22 +119,9 @@ class TensorBoardLogger:
             )
             return img_sum
 
-        img_summaries = []
-        if isinstance(images, np.ndarray):  # Single image
-            img_sum = image_summary(images)
-            img_summaries = [tf.Summary.Value(tag=tag, image=img_sum)]
-        elif isinstance(images, Sequence):
-            for i, img in enumerate(images):
-                numtag = f'{tag}/{i}'  # Use sequence index as tag suffix
-                img_sum = image_summary(img)
-                img_summaries.append(
-                    tf.Summary.Value(tag=numtag, image=img_sum)
-                )
-        else:
-            raise ValueError('"images" has invalid type.')
-
+        img_sum = image_summary(image)
         # Create and write Summary
-        summary = tf.Summary(value=img_summaries)
+        summary = tf.Summary(value=[tf.Summary.Value(tag=tag, image=img_sum)])
         self.writer.add_summary(summary, step)
         if self.always_flush:
             self.writer.flush()
