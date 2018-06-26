@@ -164,8 +164,6 @@ def blurry_boarder_weights(output_shape, target, sigma):
         curr_patch = boarder_w[ii]
         boarder_w[ii] = gaussian_filter(curr_patch, sigma=sigma)
     # choose weights according to maximum value along class axis. this leads to a low weights symmetricly spread along the boundary of classes.
-    misc.imsave("/wholebrain/scratch/pschuber/test_weights.png", np.max(boarder_w, axis=1)[0])
     boarder_w = torch.from_numpy(np.max(boarder_w, axis=1)).float().cuda()
     boarder_w = boarder_w / boarder_w.mean()  # normalize mean
-    misc.imsave("/wholebrain/scratch/pschuber/test_target.png", target.cpu().numpy()[0])
     return boarder_w

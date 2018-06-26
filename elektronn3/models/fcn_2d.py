@@ -1,3 +1,14 @@
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+
+"""
+adopted from https://github.com/pochih/FCN-pytorch/blob/master/python/fcn.py
+LICENSE https://github.com/meetshah1995/pytorch-semseg/blob/master/LICENSE
+
+"""
+
 from __future__ import print_function
 
 import torch
@@ -5,7 +16,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import models
 from torchvision.models.vgg import VGG
-# from https://github.com/pochih/FCN-pytorch/blob/master/python/fcn.py
+
 
 class FCN32s(nn.Module):
 

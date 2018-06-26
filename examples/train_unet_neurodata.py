@@ -47,103 +47,109 @@ from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.models.unet import UNet
 
 
-torch.manual_seed(0)
+def get_model():
+    # Initialize neural network model
+    model = UNet(
+        n_blocks=3,
+        start_filts=32,
+        planar_blocks=(1,),
+        activation='relu',
+        batch_norm=True
+    ).to(device)
+    return model
 
-# USER PATHS
-save_root = os.path.expanduser('~/e3training/')
-os.makedirs(save_root, exist_ok=True)
-data_root = os.path.expanduser('~/neuro_data_cdhw/')
-input_h5data = [
-    (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
-    for i in range(3)
-]
-target_h5data = [
-    (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
-    for i in range(3)
-]
 
-max_steps = args.max_steps
-lr = 0.0004
-lr_stepsize = 1000
-lr_dec = 0.995
-batch_size = 1
+if __name__ == "__main__":
+    torch.manual_seed(0)
 
-# Initialize neural network model
-model = UNet(
-    n_blocks=3,
-    start_filts=32,
-    planar_blocks=(1,),
-    activation='relu',
-    batch_norm=True
-).to(device)
-if args.resume is not None:  # Load pretrained network params
-    model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
+    # USER PATHS
+    save_root = os.path.expanduser('~/e3training/')
+    os.makedirs(save_root, exist_ok=True)
+    data_root = os.path.expanduser('~/neuro_data_cdhw/')
+    input_h5data = [
+        (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+        for i in range(3)
+    ]
+    target_h5data = [
+        (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+        for i in range(3)
+    ]
 
-# Specify data set
-common_data_kwargs = {  # Common options for training and valid sets.
-    'mean': 155.291411,
-    'std': 41.812504,
-    'aniso_factor': 2,
-    'patch_shape': (48, 96, 96),
-    'squeeze_target': True,  # Workaround for neuro_data_cdhw,
-}
-train_dataset = PatchCreator(
-    input_h5data=input_h5data[:2],
-    target_h5data=target_h5data[:2],
-    train=True,
-    epoch_size=args.epoch_size,
-    class_weights=True,
-    warp=0.5,
-    warp_kwargs={
-        'sample_aniso': True,
-        'perspective': True,
-    },
-    **common_data_kwargs
-)
-valid_dataset = PatchCreator(
-    input_h5data=[input_h5data[2]],
-    target_h5data=[target_h5data[2]],
-    train=False,
-    epoch_size=10,  # How many samples to use for each validation run
-    preview_shape=(64, 144, 144),
-    warp=0,
-    warp_kwargs={
-        'sample_aniso': True,
-        'warp_amount': 0.8,  # Strength
-    },
-    **common_data_kwargs
-)
+    max_steps = args.max_steps
+    lr = 0.0004
+    lr_stepsize = 1000
+    lr_dec = 0.995
+    batch_size = 1
 
-# Set up optimization
-optimizer = optim.Adam(
-    model.parameters(),
-    weight_decay=0.5e-4,
-    lr=lr,
-    amsgrad=True
-)
-lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
-# lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
+    model = get_model()
+    if args.resume is not None:  # Load pretrained network params
+        model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
-criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
-# criterion = DiceLoss()
+    # Specify data set
+    common_data_kwargs = {  # Common options for training and valid sets.
+        'mean': 155.291411,
+        'std': 41.812504,
+        'aniso_factor': 2,
+        'patch_shape': (48, 96, 96),
+        'squeeze_target': True,  # Workaround for neuro_data_cdhw,
+    }
+    train_dataset = PatchCreator(
+        input_h5data=input_h5data[:2],
+        target_h5data=target_h5data[:2],
+        train=True,
+        epoch_size=args.epoch_size,
+        class_weights=True,
+        warp=0.5,
+        warp_kwargs={
+            'sample_aniso': True,
+            'perspective': True,
+        },
+        **common_data_kwargs
+    )
+    valid_dataset = PatchCreator(
+        input_h5data=[input_h5data[2]],
+        target_h5data=[target_h5data[2]],
+        train=False,
+        epoch_size=10,  # How many samples to use for each validation run
+        preview_shape=(64, 144, 144),
+        warp=0,
+        warp_kwargs={
+            'sample_aniso': True,
+            'warp_amount': 0.8,  # Strength
+        },
+        **common_data_kwargs
+    )
 
-# Create trainer
-trainer = Trainer(
-    model=model,
-    criterion=criterion,
-    optimizer=optimizer,
-    device=device,
-    train_dataset=train_dataset,
-    valid_dataset=valid_dataset,
-    batchsize=batch_size,
-    num_workers=2,
-    save_root=save_root,
-    exp_name=args.exp_name,
-    schedulers={"lr": lr_sched}
-)
+    # Set up optimization
+    optimizer = optim.Adam(
+        model.parameters(),
+        weight_decay=0.5e-4,
+        lr=lr,
+        amsgrad=True
+    )
+    lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
+    # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-# Archiving training script, src folder, env info
-Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+    criterion = nn.CrossEntropyLoss(weight=train_dataset.class_weights)
+    # criterion = DiceLoss()
 
-# Start training
-trainer.train(max_steps)
+    # Create trainer
+    trainer = Trainer(
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        train_dataset=train_dataset,
+        valid_dataset=valid_dataset,
+        batchsize=batch_size,
+        num_workers=2,
+        save_root=save_root,
+        exp_name=args.exp_name,
+        schedulers={"lr": lr_sched}
+    )
+
+    # Archiving training script, src folder, env info
+    Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+
+    # Start training
+    trainer.train(max_steps)
