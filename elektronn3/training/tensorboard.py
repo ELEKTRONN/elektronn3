@@ -111,6 +111,7 @@ class TensorBoardLogger:
             if colorbar:
                 fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
             fig.savefig(image_bytes, format='png')
+            plt.close(fig)
 
             img_sum = tf.Summary.Image(
                 encoded_image_string=image_bytes.getvalue(),
