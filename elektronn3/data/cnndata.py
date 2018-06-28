@@ -245,13 +245,10 @@ class PatchCreator(data.Dataset):
                 # TODO: Limit validation data warping
                 inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
-                # Arbitrarily choosing 100 as the threshold here, because we
-                # currently can't find out the total number of classes in the
-                # data set automatically. The assumption here is that no one
-                # wants to use elektronn3 with a data set that actually
-                # contains more than 100 classes for the target labels.
+
                 # TODO: Remove this stupid check ASAP once https://github.com/ELEKTRONN/elektronn3/issues/10 is fixed.
-                if target.max() > 100:
+                # Assuming classes are [0, 1, ..., num_classes - 1]
+                if target.max() > self.num_classes - 1:
                     # TODO: Find out where to catch this early / prevent this issue from happening
                     logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
                     continue
