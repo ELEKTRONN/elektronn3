@@ -18,10 +18,9 @@ References:
     (http://scikit-learn.org/stable/modules/classes.html#classification-metrics).
 
     For example, to get the equivalent output to
-    ``elektronn3.training.metrics.recall(pred, target, num_classes=2, mean=False)``,
+    ``elektronn3.training.metrics.recall(target, pred, num_classes=2, mean=False)``,
     from scikit-learn, you can compute
     ``sklearn.metrics.recall_score(target.view(-1).cpu().numpy(), pred.view(-1).cpu().numpy(), average=None).astype(np.float32)``.
-    (Note that pred and target are swapped!)
 
 
     For most metrics, we don't use scikit-learn directly in this module for
@@ -48,8 +47,8 @@ import torch
 
 @lru_cache(maxsize=128)
 def confusion_matrix(
-        pred: torch.LongTensor,
         target: torch.LongTensor,
+        pred: torch.LongTensor,
         num_classes: int = 2,
         dtype: torch.dtype = torch.float32,
         device: torch.device = torch.device('cpu')
@@ -100,9 +99,9 @@ def confusion_matrix(
     return cm
 
 
-def precision(pred, target, num_classes=2, mean=False):
+def precision(target, pred, num_classes=2, mean=False):
     """Precision metric"""
-    cm = confusion_matrix(pred, target, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     # Compute metrics for each class simulataneously
     prec = tp / (tp + fp)  # Per-class precision
@@ -111,9 +110,9 @@ def precision(pred, target, num_classes=2, mean=False):
     return prec
 
 
-def recall(pred, target, num_classes=2, mean=False):
+def recall(target, pred, num_classes=2, mean=False):
     """Recall metric a.k.a. sensitivity a.k.a. hit rate"""
-    cm = confusion_matrix(pred, target, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     rec = tp / (tp + fn)  # Per-class recall
     if mean:
@@ -121,9 +120,9 @@ def recall(pred, target, num_classes=2, mean=False):
     return rec
 
 
-def accuracy(pred, target, num_classes=2, mean=False):
+def accuracy(target, pred, num_classes=2, mean=False):
     """Accuracy metric"""
-    cm = confusion_matrix(pred, target, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     acc = (tp + tn) / (tp + tn + fp + fn)  # Per-class accuracy
     if mean:
@@ -131,9 +130,9 @@ def accuracy(pred, target, num_classes=2, mean=False):
     return acc
 
 
-def dice_coefficient(pred, target, num_classes=2, mean=False):
+def dice_coefficient(target, pred, num_classes=2, mean=False):
     """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score"""
-    cm = confusion_matrix(pred, target, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     dsc = 2 * tp / (2 * tp + fp + fn)  # Per-class (Sørensen-)Dice similarity coefficient
     if mean:
@@ -141,9 +140,9 @@ def dice_coefficient(pred, target, num_classes=2, mean=False):
     return dsc
 
 
-def iou(pred, target, num_classes=2, mean=False):
+def iou(target, pred, num_classes=2, mean=False):
     """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index"""
-    cm = confusion_matrix(pred, target, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     iu = tp / (tp + fp + fn)  # Per-class Intersection over Union
     if mean:
