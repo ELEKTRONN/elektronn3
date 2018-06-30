@@ -139,7 +139,7 @@ class Trainer:
             model: torch.nn.Module,
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
-            device,  # torch.Device type is not available
+            device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,

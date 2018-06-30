@@ -6,11 +6,30 @@
 
 """Metrics and tools for evaluating neural network predictions
 
-Reference:
+References:
 - https://en.wikipedia.org/wiki/Confusion_matrix
 - https://stats.stackexchange.com/questions/273537/f1-dice-score-vs-iou
-"""
+- http://scikit-learn.org/stable/modules/model_evaluation.html
 
+.. note::
+
+    ``sklearn.metrics`` has a lot of alternative implementations that can be
+    compared with these here and could be used as inspiration for future work
+    (http://scikit-learn.org/stable/modules/classes.html#classification-metrics).
+
+    For example, to get the equivalent output to
+    ``elektronn3.training.metrics.recall(pred, target, num_classes=2, mean=False)``,
+    from scikit-learn, you can compute
+    ``sklearn.metrics.recall_score(target.view(-1).cpu().numpy(), pred.view(-1).cpu().numpy(), average=None).astype(np.float32)``.
+    (Note that pred and target are swapped!)
+
+
+    For most metrics, we don't use scikit-learn directly in this module for
+    performance reasons:
+
+    - PyTorch allows us to calculate metrics directly on GPU
+    - We LRU-cache confusion matrices for cheap calculation of multiple metrics
+"""
 
 from functools import lru_cache
 
@@ -19,19 +38,26 @@ import torch
 
 # TODO: Tests would make a lot of sense here.
 
-# TODO: Support ignoring certain classes
+# TODO: Support ignoring certain classes (labels).
+#       OR Support a ``labels=...`` param like sklearn, where you pass a
+#        whitelist of classes that should be considered in calculations).
+#        Actually although it's a bit more effort, I think that's a better
+#        approach than blacklisting via an ``ignore=...` param.
+
+# TODO:
 
 @lru_cache(maxsize=128)
 def confusion_matrix(
         pred: torch.LongTensor,
         target: torch.LongTensor,
         num_classes: int = 2,
-        dtype: torch.dtype = torch.float32
+        dtype: torch.dtype = torch.float32,
+        device: torch.device = torch.device('cpu')
 ) -> torch.Tensor:
     """ Calculate per-class confusion matrix.
 
-    An LRU cache is used, so subsequent calls with the same arguments
-    have no performance impact.
+    Uses an LRU cache, so subsequent calls with the same arguments are very
+    cheap.
 
     Args:
         pred: Tensor with predicted class values
@@ -43,20 +69,21 @@ def confusion_matrix(
             ``torch.float32`` is used as default because it is robust
             against overflows and can be used directly in true divisions
             without re-casting.
+        device: PyTorch device on which to store the confusion matrix
 
     Returns:
-        Confusion matrix cm, with shape ``(num_classes, 4)``, where
-        each row cm[c] contains (in this order) the count of
+        Confusion matrix ``cm``, with shape ``(num_classes, 4)``, where
+        each row ``cm[c]`` contains (in this order) the count of
         - true positives
         - true negatives
         - false positives
         - false negatives
-        of ``pred`` w.r.t. ``target`` and class c.
+        of ``pred`` w.r.t. ``target`` and class ``c``.
 
         E.g. ``cm[1][2]`` contains the number of false positive predictions
         of class ``1``.
     """
-    cm = torch.empty(num_classes, 4, dtype=dtype)
+    cm = torch.empty(num_classes, 4, dtype=dtype, device=device)
     for c in range(num_classes):
         pos_pred = pred == c
         neg_pred = ~pos_pred
