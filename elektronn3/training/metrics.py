@@ -32,6 +32,7 @@ References:
 
 from functools import lru_cache
 
+import sklearn.metrics
 import torch
 
 
@@ -148,3 +149,28 @@ def iou(target, pred, num_classes=2, mean=False):
     if mean:
         iu = iu.mean().item()
     return iu
+
+
+def auroc(target, probs, mean=False):
+    """ Area under Curve (AuC) of the ROC curve.
+
+    This implementation uses scikit-learn on the CPU to do the heavy lifting,
+    so it's significantly slower than the other metrics (one call can take about
+    100 - 1000 ms for typical inputs)."""
+    assert probs.dim() == target.dim() + 1
+    num_classes = probs.shape[1]
+    # target: (N, [D,], H, W) -> (N*[D,]*H*W,)
+    target_npflat = target.view(-1).cpu().numpy()
+    # probs: (N, C, [D,], H, W) -> (C, N*[D,]*H*W)
+    probs_npflat = probs.transpose(1, 0).view(num_classes, -1).cpu().numpy()
+    auc = torch.empty(num_classes)
+    # Direct roc_auc_score() computation with multi-class arrays takes hours,
+    #  so split this into binary calculations manually here by looping through
+    #  classes:
+    for c in range(num_classes):
+        t = target_npflat == c  # 1 where target is c, 0 everywhere else
+        p = probs_npflat[c]  # probs of class c
+        auc[c] = sklearn.metrics.roc_auc_score(t, p)
+    if mean:
+        auc = auc.mean().item()
+    return auc
