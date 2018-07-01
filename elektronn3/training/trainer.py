@@ -234,16 +234,7 @@ class Trainer:
                 timeout=30
             )
 
-        if self.valid_metrics is None and self.num_classes == 2:
-            self.valid_metrics = {
-                'val_precision': metrics.bin_precision,
-                'val_recall': metrics.bin_recall,
-                'val_accuracy': metrics.bin_accuracy,
-                'val_DSC': metrics.bin_dice_coefficient,
-                'val_IoU': metrics.bin_iou,
-                'val_AP': metrics.bin_average_precision,  # expensive
-                'val_AUROC': metrics.bin_auroc,  # expensive
-            }
+        self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
     # TODO: Modularize, make some general parts reusable for other trainers.
     def train(self, max_steps: int = 1) -> None:

@@ -46,6 +46,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.training import Trainer, Backup
+from elektronn3.training import metrics
 from elektronn3.data import SimpleNeuroData2d, transforms
 
 torch.manual_seed(0)
@@ -95,6 +96,16 @@ optimizer = optim.Adam(
 )
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 
+valid_metrics = {
+    'val_accuracy': metrics.bin_accuracy,
+    'val_precision': metrics.bin_precision,
+    'val_recall': metrics.bin_recall,
+    'val_DSC': metrics.bin_dice_coefficient,
+    'val_IoU': metrics.bin_iou,
+    'val_AP': metrics.bin_average_precision,  # expensive
+    'val_AUROC': metrics.bin_auroc,  # expensive
+}
+
 criterion = nn.CrossEntropyLoss().to(device)
 
 # Create trainer
@@ -109,7 +120,8 @@ trainer = Trainer(
     num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
-    schedulers={"lr": lr_sched}
+    schedulers={"lr": lr_sched},
+    valid_metrics=valid_metrics,
 )
 
 # Archiving training script, src folder, env info
