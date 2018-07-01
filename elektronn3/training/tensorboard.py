@@ -5,6 +5,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 
+# TODO: Consider switching the backend to tensorboardX
 
 """ Logging numpy and python scalars to tensorboard.
 
@@ -72,15 +73,46 @@ class TensorBoardLogger:
     def log_image(
             self,
             tag: str,
-            images: Union[np.ndarray, Sequence[np.ndarray]],
+            image: np.ndarray,
             step: int,
-            cmap='gray'
+            cmap=None,
+            num_classes=None,
+            colorbar=True,
     ) -> None:
-        """Logs a an image or a list of images."""
+        """Logs a an image to tensorboard.
+
+        For gray-scale images, use ``cmap='gray'``.
+        For label matrices (segmentation targets or class predictions),
+        specify the global number of possible classes in ``num_classes``."""
+
+        # Determine colormap and set discrete color values if needed.
+        vmax = None
+        ticks = None
+        if cmap is None and num_classes is not None:
+            # Assume label matrix with qualitative classes, no meaningful order
+            # Using rainbow because IMHO all actually qualitative colormaps
+            #  are incredibly ugly.
+            cmap = plt.cm.get_cmap('viridis', num_classes)
+            ticks = np.arange(num_classes)
+
+        if num_classes is not None:  # For label matrices
+            # Prevent colormap normalization. If vmax is not set, the colormap
+            #  is dynamically rescaled to fit between the minimum and maximum
+            #  values of the image to be plotted. This could lead to misleading
+            #  visualizations if the maximum value of the array to be plotted
+            #  is less than the global maximum of classes.
+            vmax = num_classes
 
         def image_summary(img: np.ndarray) -> tf.Summary.Image:
             image_bytes = BytesIO()  # Bytestring for storing the image
-            plt.imsave(image_bytes, img, format='png', cmap=cmap)
+
+            fig, ax = plt.subplots()
+            aximg = ax.imshow(img, cmap=cmap, vmax=vmax)
+            if colorbar:
+                fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
+            fig.savefig(image_bytes, format='png')
+            plt.close(fig)
+
             img_sum = tf.Summary.Image(
                 encoded_image_string=image_bytes.getvalue(),
                 height=img.shape[0],
@@ -88,22 +120,9 @@ class TensorBoardLogger:
             )
             return img_sum
 
-        img_summaries = []
-        if isinstance(images, np.ndarray):  # Single image
-            img_sum = image_summary(images)
-            img_summaries = [tf.Summary.Value(tag=tag, image=img_sum)]
-        elif isinstance(images, Sequence):
-            for i, img in enumerate(images):
-                numtag = f'{tag}/{i}'  # Use sequence index as tag suffix
-                img_sum = image_summary(img)
-                img_summaries.append(
-                    tf.Summary.Value(tag=numtag, image=img_sum)
-                )
-        else:
-            raise ValueError('"images" has invalid type.')
-
+        img_sum = image_summary(image)
         # Create and write Summary
-        summary = tf.Summary(value=img_summaries)
+        summary = tf.Summary(value=[tf.Summary.Value(tag=tag, image=img_sum)])
         self.writer.add_summary(summary, step)
         if self.always_flush:
             self.writer.flush()

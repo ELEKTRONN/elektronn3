@@ -139,7 +139,7 @@ class Trainer:
             model: torch.nn.Module,
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
-            device,  # torch.Device type is not available
+            device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
@@ -463,7 +463,7 @@ class Trainer:
 
         for c in range(out.shape[0]):
             self.tb.log_image(f'{group}/c{c}', out[c], self.step)
-        self.tb.log_image(f'{group}/pred', pred, self.step)
+        self.tb.log_image(f'{group}/pred', pred, self.step, num_classes=self.num_classes)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
@@ -474,9 +474,9 @@ class Trainer:
                 # Unsqueeze C dimension in target so it matches batch2dim()'s expected shape
                 preview_target = preview_target[:, None]
             target = batch2img(preview_target)[0]
-            self.tb.log_image(f'{group}/inp', inp, step=0)
+            self.tb.log_image(f'{group}/inp', inp, step=0, cmap='gray')
             # Ground truth target for direct comparison with preview prediction
-            self.tb.log_image(f'{group}/target', target, step=0)
+            self.tb.log_image(f'{group}/target', target, step=0, num_classes=self.num_classes)
             self._first_plot = False
 
     # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
@@ -505,18 +505,21 @@ class Trainer:
 
         out = batch2img(out_batch)
         pred = out.argmax(0)
-        self.tb.log_image(f'{group}/inp', inp, step=self.step)
-        self.tb.log_image(f'{group}/target', target, step=self.step)
+
+        self.tb.log_image(f'{group}/inp', inp, step=self.step, cmap='gray')
+        self.tb.log_image(f'{group}/target', target, step=self.step, num_classes=self.num_classes)
 
         for c in range(out.shape[0]):
             self.tb.log_image(f'{group}/c{c}', out[c], step=self.step)
-        self.tb.log_image(f'{group}/pred', pred, step=self.step)
+        self.tb.log_image(f'{group}/pred', pred, step=self.step, num_classes=self.num_classes)
 
         inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
         target_ov = label2rgb(target, inp01, bg_label=0, alpha=self.overlay_alpha)
         pred_ov = label2rgb(pred, inp01, bg_label=0, alpha=self.overlay_alpha)
-        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.step)
-        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.step)
+        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.step, colorbar=False)
+        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.step, colorbar=False)
+        # TODO: Synchronize overlay colors with pred- and target colors
+        # TODO: What's up with the colorbar in overlay plots?
         # TODO: When plotting overlay images, they appear darker than they should.
         #       This normalization issue gets worse with higher alpha values
         #       (i.e. with more contribution of the overlayed label map).
