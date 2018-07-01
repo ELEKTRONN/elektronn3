@@ -616,7 +616,6 @@ class SimpleNeuroData2d(data.Dataset):
         self.target_file.close()
 
 
-
 class MultiviewData(data.Dataset):
     """
     Spinal 2D dataset.
@@ -627,7 +626,8 @@ class MultiviewData(data.Dataset):
             inp_path=None,
             target_path=None,
             train=True,
-            inp_key='raw', target_key='label'
+            inp_key='raw', target_key='label',
+            transform: Callable = transforms.Identity()
     ):
         super().__init__()
         cube_id = "train" if train else "valid"
@@ -641,11 +641,15 @@ class MultiviewData(data.Dataset):
         self.inp = self.inp[:, :4].astype(np.float32) / 255.
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[:, 0]
+        if 5 in np.unique(self.target):
+            self.target[self.target ==5] = 4
         self.close_files()  # Using file contents from memory -> no need to keep the file open.
+        self.transform = transform
 
     def __getitem__(self, index):
         inp = self.inp[index]
         target = self.target[index]
+        inp, target = self.transform(inp, target)
         return inp, target
 
     def __len__(self):

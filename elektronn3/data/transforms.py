@@ -133,3 +133,22 @@ class RandomCrop:
             full_slice = full_slice[1:]  # Remove C axis from slice because target doesn't have it
         target_cropped = target[full_slice]
         return inp_cropped, target_cropped
+
+
+class RandomFlip:
+    def __init__(self, ndim_spatial=2):
+        self.ndim_spatial = ndim_spatial
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray]  # returned without modifications
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        flip_dims = np.random.randint(0, 2, self.ndim_spatial)
+        # flip all images at once
+        slices_inp = tuple([slice(None, None, 1) for ii in range(len(inp.shape) - self.ndim_spatial)] + \
+                 [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+        slices_target = tuple([slice(None, None, 1) for ii in range(len(target.shape) - self.ndim_spatial)] + \
+                 [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+        inp_flipped = inp[slices_inp].copy()
+        target_flipped = target[slices_target].copy()
+        return inp_flipped, target_flipped

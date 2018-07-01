@@ -13,7 +13,7 @@ from elektronn3.training.train_utils import pretty_string_time
 
 
 class InferenceModel(object):
-    def __init__(self, src, disable_cuda=False):
+    def __init__(self, src, disable_cuda=False, multi_gpu=True):
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -24,16 +24,28 @@ class InferenceModel(object):
         else:
             self.model = src
             self.model.eval()
+        if multi_gpu:
+            self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
-    def predict_proba(self, inp, verbose=False):
+    def predict_proba(self, inp, bs=10, verbose=False):
         if verbose:
             start = time.time()
         if type(inp) is np.ndarray:
             inp = torch.Tensor(inp)
         inp = inp.to(torch.float32).to(self.device)
         with torch.no_grad():
-            out = self.model(inp)
+            # get output shape shape
+            out = self.model(inp[:1])
+            # change sample number according to input
+            out = np.zeros([len(inp)] + list(out.shape)[1:], dtype=np.float32)
+            for ii in range(0, int(np.ceil(len(inp) / bs))):
+                low = bs * ii
+                high = bs * (ii + 1)
+                inp_stride = inp[low:high]
+                out[low:high] = self.model(inp_stride)
+            assert high >= len(inp), "Prediction less samples then given" \
+                                     " in input."
         if verbose:
             dtime = time.time() - start
             speed = float(np.prod(inp.shape)) / dtime / 1e6

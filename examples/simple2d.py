@@ -89,8 +89,10 @@ if __name__ == "__main__":
     valid_transform = transforms.Compose(common_transforms + [])
 
     # Specify data set
-    train_dataset = SimpleNeuroData2d(train=True)
-    valid_dataset = SimpleNeuroData2d(train=False)
+    train_dataset = SimpleNeuroData2d(train=True, transform=train_transform,
+                                      num_classes=2)
+    valid_dataset = SimpleNeuroData2d(train=False, transform=valid_transform,
+                                      num_classes=2)
 
     # Set up optimization
     optimizer = optim.Adam(
@@ -119,7 +121,8 @@ if __name__ == "__main__":
     )
 
     # Archiving training script, src folder, env info
-    bk = Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+    bk = Backup(script_path=__file__,
+                save_path=trainer.save_path).archive_backup()
 
     # Start training
     trainer.train(max_steps)

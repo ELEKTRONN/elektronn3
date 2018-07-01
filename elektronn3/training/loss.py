@@ -131,7 +131,8 @@ def __dice_loss_binary(output, target, smooth=0, eps=0.0001):
 
 
 class BlurryBoarderLoss(torch.nn.Module):
-    # reduce voxel-loss close to label boundaries by applying weights which
+    # Cross-entropy loss with per-voxel weights. Weights of voxels close
+    # to label boundaries are reduced by applying weights which
     # are highest inside a class region and blurred at the boundaries
     # by Gaussian smoothing towards 0
     def __init__(self, softmax=True, sigma=2.5):
