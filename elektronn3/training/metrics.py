@@ -18,7 +18,7 @@ References:
     (http://scikit-learn.org/stable/modules/classes.html#classification-metrics).
 
     For example, to get the equivalent output to
-    ``elektronn3.training.metrics.recall(target, pred, num_classes=2, mean=False)``,
+    ``elektronn3.training.metrics.recall(target, pred, num_classes=2, mean=False) / 100``,
     from scikit-learn, you can compute
     ``sklearn.metrics.recall_score(target.view(-1).cpu().numpy(), pred.view(-1).cpu().numpy(), average=None).astype(np.float32)``.
 
@@ -101,58 +101,58 @@ def confusion_matrix(
 
 
 def precision(target, pred, num_classes=2, mean=False):
-    """Precision metric"""
+    """Precision metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     # Compute metrics for each class simulataneously
     prec = tp / (tp + fp)  # Per-class precision
     if mean:
         prec = prec.mean().item()
-    return prec
+    return prec * 100
 
 
 def recall(target, pred, num_classes=2, mean=False):
-    """Recall metric a.k.a. sensitivity a.k.a. hit rate"""
+    """Recall metric a.k.a. sensitivity a.k.a. hit rate (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     rec = tp / (tp + fn)  # Per-class recall
     if mean:
         rec = rec.mean().item()
-    return rec
+    return rec * 100
 
 
 def accuracy(target, pred, num_classes=2, mean=False):
-    """Accuracy metric"""
+    """Accuracy metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     acc = (tp + tn) / (tp + tn + fp + fn)  # Per-class accuracy
     if mean:
         acc = acc.mean().item()
-    return acc
+    return acc * 100
 
 
 def dice_coefficient(target, pred, num_classes=2, mean=False):
-    """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score"""
+    """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     dsc = 2 * tp / (2 * tp + fp + fn)  # Per-class (Sørensen-)Dice similarity coefficient
     if mean:
         dsc = dsc.mean().item()
-    return dsc
+    return dsc * 100
 
 
 def iou(target, pred, num_classes=2, mean=False):
-    """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index"""
+    """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     iu = tp / (tp + fp + fn)  # Per-class Intersection over Union
     if mean:
         iu = iu.mean().item()
-    return iu
+    return iu * 100
 
 
 def auroc(target, probs, mean=False):
-    """ Area under Curve (AuC) of the ROC curve.
+    """ Area under Curve (AuC) of the ROC curve (in %).
 
     .. note::
         This implementation uses scikit-learn on the CPU to do the heavy
@@ -175,11 +175,11 @@ def auroc(target, probs, mean=False):
         auc[c] = sklearn.metrics.roc_auc_score(t, p)
     if mean:
         auc = auc.mean().item()
-    return auc
+    return auc * 100
 
 
 def average_precision(target, probs, mean=False):
-    """Average precision (AP) metric based on PR curves.
+    """Average precision (AP) metric based on PR curves (in %).
 
     .. note::
         This implementation uses scikit-learn on the CPU to do the heavy
@@ -202,7 +202,7 @@ def average_precision(target, probs, mean=False):
         ap[c] = sklearn.metrics.average_precision_score(t, p)
     if mean:
         ap = ap.mean().item()
-    return ap
+    return ap * 100
 
 
 # Metric evaluator shortcuts for raw network outputs in binary classification
