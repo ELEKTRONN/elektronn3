@@ -44,7 +44,6 @@ import torch
 #        Actually although it's a bit more effort, I think that's a better
 #        approach than blacklisting via an ``ignore=...` param.
 
-# TODO:
 
 @lru_cache(maxsize=128)
 def confusion_matrix(
@@ -208,54 +207,68 @@ def average_precision(target, probs, mean=False):
 # Metric evaluator shortcuts for raw network outputs in binary classification
 #  tasks ("raw binary", "rb"). "Raw" means not softmaxed or argmaxed.
 
-# Redundant argmax and softmax calculations have neglegible
-#  computation times (typically << 1 ms), so to be more clear
-#  they are not cached and re-used here.
+@lru_cache(maxsize=128)
+def _softmax(x, dim=1):
+    return torch.nn.functional.softmax(x, dim)
+
+
+@lru_cache(maxsize=128)
+def _argmax(x, dim=1):
+    return x.argmax(dim)
+
 
 def _rb_precision(target, out):
-    pred = out.argmax(1)
+    pred = _argmax(out)
     return precision(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
 def _rb_recall(target, out):
-    pred = out.argmax(1)
+    pred = _argmax(out)
     return recall(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
 def _rb_accuracy(target, out):
-    pred = out.argmax(1)
+    pred = _argmax(out)
     return accuracy(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
 def _rb_dice_coefficient(target, out):
-    pred = out.argmax(1)
+    pred = _argmax(out)
     return dice_coefficient(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
 def _rb_iou(target, out):
-    pred = out.argmax(1)
+    pred = _argmax(out)
     return iou(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
 def _rb_average_precision(target, out):
-    probs = torch.nn.functional.softmax(out, 1)
+    probs = _softmax(out)
     return average_precision(
         target, probs, mean=False
     )[1]  # Take only the score for class 1
 
 
 def _rb_auroc(target, out):
-    probs = torch.nn.functional.softmax(out, 1)
+    probs = _softmax(out)
     return auroc(
         target, probs, mean=False
     )[1]  # Take only the score for class 1
+
+
+def __rb_error(target, out):
+    """Ratio of misclassified elements."""
+    pred = _argmax(out)
+    incorrect = torch.sum(pred != target).item()
+    err = incorrect / target.numel()
+    return err * 100
