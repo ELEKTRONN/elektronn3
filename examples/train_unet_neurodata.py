@@ -96,7 +96,7 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
     'squeeze_target': True,  # Workaround for neuro_data_cdhw,
-    'num_classes': 2,
+    'classes': [0, 1],
 }
 train_dataset = PatchCreator(
     input_h5data=input_h5data[:2],

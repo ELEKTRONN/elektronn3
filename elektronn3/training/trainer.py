@@ -11,7 +11,7 @@ import traceback
 import shutil
 
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence
 
 import inspect
 import IPython
@@ -115,13 +115,13 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
-        num_classes: Optionally specifies the number of different target
+        classes: Optionally specifies the different target
             classes for classification tasks. If this is not set manually,
             the ``Trainer`` checks if the ``train_dataset`` provides this
             value. If available, ``self.num_classes`` is set to
-            ``self.train_dataset.num_classes``. Otherwise, it is set to
+            ``self.train_dataset.classes``. Otherwise, it is set to
             ``None``.
-            The num_classes attribute is used for plotting purposes and is
+            The ``classes`` attribute is used for plotting purposes and is
             not strictly required for training.
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
@@ -157,7 +157,7 @@ class Trainer:
             tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
             ipython_on_error: bool = False,
-            num_classes: Optional[int] = None,
+            classes: Optional[Sequence[int]] = None,
     ):
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
@@ -195,9 +195,11 @@ class Trainer:
         self.schedulers = schedulers
 
         # Determine optional dataset properties
+        self.classes = classes
         self.num_classes = None
-        if hasattr(self.train_dataset, 'num_classes'):
-            self.num_classes = self.train_dataset.num_classes
+        if hasattr(self.train_dataset, 'classes'):
+            self.classes = self.train_dataset.classes
+            self.num_classes = len(self.train_dataset.classes)
         self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
             and valid_dataset.preview_shape is not None
 
@@ -240,8 +242,8 @@ class Trainer:
                 'accuracy': metrics._rb_accuracy,
                 'DSC': metrics._rb_dice_coefficient,
                 'IoU': metrics._rb_iou,
-                'AP': metrics._rb_average_precision,
-                'AUROC': metrics._rb_auroc,
+                'AP': metrics._rb_average_precision,  # expensive
+                'AUROC': metrics._rb_auroc,  # expensive
             }
 
     # TODO: Modularize, make some general parts reusable for other trainers.
@@ -422,8 +424,8 @@ class Trainer:
         for key, value in scalars.items():
             self.tb.log_scalar(f'{tag}/{key}', value, self.step)
 
+    @staticmethod
     def _get_batch2img_function(
-            self,
             batch: torch.Tensor,
             z_plane: Optional[int] = None
     ) -> Callable[[torch.Tensor], np.ndarray]:
