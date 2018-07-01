@@ -204,9 +204,6 @@ def average_precision(target, probs, mean=False):
     return ap * 100
 
 
-# Metric evaluator shortcuts for raw network outputs in binary classification
-#  tasks ("raw binary", "rb"). "Raw" means not softmaxed or argmaxed.
-
 @lru_cache(maxsize=128)
 def _softmax(x, dim=1):
     return torch.nn.functional.softmax(x, dim)
@@ -217,58 +214,55 @@ def _argmax(x, dim=1):
     return x.argmax(dim)
 
 
-def _rb_precision(target, out):
+# Metric evaluator shortcuts for raw network outputs in binary classification
+#  tasks ("bin_*"). "Raw" means not softmaxed or argmaxed.
+
+def bin_precision(target, out):
     pred = _argmax(out)
     return precision(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
-def _rb_recall(target, out):
+def bin_recall(target, out):
     pred = _argmax(out)
     return recall(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
-def _rb_accuracy(target, out):
+def bin_accuracy(target, out, fast=False):
     pred = _argmax(out)
+    # return torch.sum(target == pred).item() / target.numel() * 100
     return accuracy(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
-def _rb_dice_coefficient(target, out):
+def bin_dice_coefficient(target, out):
     pred = _argmax(out)
     return dice_coefficient(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
-def _rb_iou(target, out):
+def bin_iou(target, out):
     pred = _argmax(out)
     return iou(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
 
 
-def _rb_average_precision(target, out):
+def bin_average_precision(target, out):
     probs = _softmax(out)
     return average_precision(
         target, probs, mean=False
     )[1]  # Take only the score for class 1
 
 
-def _rb_auroc(target, out):
+def bin_auroc(target, out):
     probs = _softmax(out)
     return auroc(
         target, probs, mean=False
     )[1]  # Take only the score for class 1
 
-
-def __rb_error(target, out):
-    """Ratio of misclassified elements."""
-    pred = _argmax(out)
-    incorrect = torch.sum(pred != target).item()
-    err = incorrect / target.numel()
-    return err * 100

@@ -236,13 +236,13 @@ class Trainer:
 
         if self.valid_metrics is None and self.num_classes == 2:
             self.valid_metrics = {
-                'val_precision': metrics._rb_precision,
-                'val_recall': metrics._rb_recall,
-                'val_accuracy': metrics._rb_accuracy,
-                'val_DSC': metrics._rb_dice_coefficient,
-                'val_IoU': metrics._rb_iou,
-                'val_AP': metrics._rb_average_precision,  # expensive
-                'val_AUROC': metrics._rb_auroc,  # expensive
+                'val_precision': metrics.bin_precision,
+                'val_recall': metrics.bin_recall,
+                'val_accuracy': metrics.bin_accuracy,
+                'val_DSC': metrics.bin_dice_coefficient,
+                'val_IoU': metrics.bin_iou,
+                'val_AP': metrics.bin_average_precision,  # expensive
+                'val_AUROC': metrics.bin_auroc,  # expensive
             }
 
     # TODO: Modularize, make some general parts reusable for other trainers.
@@ -290,7 +290,7 @@ class Trainer:
 
                     # get training performance
                     stats['tr_loss'] += float(loss)
-                    acc = metrics._rb_accuracy(target, out)  # TODO
+                    acc = metrics.bin_accuracy(target, out)  # TODO
                     mean_target = target.to(torch.float32).mean()
                     print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
                     self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
