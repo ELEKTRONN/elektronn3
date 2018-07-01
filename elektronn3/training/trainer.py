@@ -26,7 +26,7 @@ from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.training import collect_env
 from elektronn3.training import metrics
-from elektronn3.data.utils import save_to_h5, squash01
+from elektronn3.data.utils import squash01
 from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
@@ -236,14 +236,13 @@ class Trainer:
 
         if self.valid_metrics is None and self.num_classes == 2:
             self.valid_metrics = {
-                'error': error,
-                'precision': metrics._rb_precision,
-                'recall': metrics._rb_recall,
-                'accuracy': metrics._rb_accuracy,
-                'DSC': metrics._rb_dice_coefficient,
-                'IoU': metrics._rb_iou,
-                'AP': metrics._rb_average_precision,  # expensive
-                'AUROC': metrics._rb_auroc,  # expensive
+                'val_precision': metrics._rb_precision,
+                'val_recall': metrics._rb_recall,
+                'val_accuracy': metrics._rb_accuracy,
+                'val_DSC': metrics._rb_dice_coefficient,
+                'val_IoU': metrics._rb_iou,
+                'val_AP': metrics._rb_average_precision,  # expensive
+                'val_AUROC': metrics._rb_auroc,  # expensive
             }
 
     # TODO: Modularize, make some general parts reusable for other trainers.
@@ -264,7 +263,7 @@ class Trainer:
                 # Hold image tensors for real-time training sample visualization in tensorboard
                 images: Dict[str, torch.Tensor] = {}
 
-                running_error = 0
+                running_acc = 0
                 running_mean_target = 0
                 running_vx_size = 0
                 timer = Timer()
@@ -291,7 +290,7 @@ class Trainer:
 
                     # get training performance
                     stats['tr_loss'] += float(loss)
-                    err = error(target, out)
+                    acc = metrics._rb_accuracy(target, out)  # TODO
                     mean_target = target.to(torch.float32).mean()
                     print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
                     self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
@@ -311,23 +310,24 @@ class Trainer:
                         else:
                             sched.step()
 
-                    running_error += err
+                    running_acc += acc
                     running_mean_target += mean_target
                     running_vx_size += inp.numel()
 
                     self.step += 1
                     if self.step >= max_steps:
                         break
-                stats['tr_err'] = running_error / len(self.train_loader)
+                stats['tr_accuracy'] = running_acc / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
                 mean_target = running_mean_target / len(self.train_loader)
                 if self.valid_dataset is None:
-                    stats['val_loss'], stats['val_err'] = float('nan'), float('nan')
+                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
                 else:
-                    stats['val_loss'], stats['val_err'] = self.validate()
-                # TODO: Report more metrics, e.g. dice error
+                    valid_stats = self.validate()
+                    stats.update(valid_stats)
+
 
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.
@@ -337,14 +337,14 @@ class Trainer:
                     tr_loss_gain = 0
                 self._tracker.update_history([
                     self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
-                    tr_loss_gain, stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0
+                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
                 ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
                 loss_smooth = self._tracker.loss._ema
 
                 # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_err'])
-                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
+                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
+                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", mean_target * 100, tr_loss_gain)
                 text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
 
@@ -393,28 +393,30 @@ class Trainer:
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
 
-    def validate(self) -> Tuple[float, float]:
+    def validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
-        metrics = {name: 0 for name in self.valid_metrics.keys()}
+        stats = {name: 0 for name in self.valid_metrics.keys()}
         for inp, target in self.valid_loader:
             inp, target = inp.to(self.device), target.to(self.device)
             with torch.no_grad():
                 out = self.model(inp)
                 val_loss += self.criterion(out, target).item() / len(self.valid_loader)
                 for name, evaluator in self.valid_metrics.items():
-                    metrics[name] += evaluator(target, out) / len(self.valid_loader)
+                    stats[name] += evaluator(target, out) / len(self.valid_loader)
 
         self.tb_log_sample_images(
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
-        self.tb_log_scalars(metrics, 'metrics')
+
+        stats['val_loss'] = val_loss
 
         self.model.train()  # Reset model to training mode
 
-        return val_loss, metrics['error']
+        # TODO: Refactor: Either remove side effects (plotting)
+        return stats
 
     def tb_log_scalars(
             self,
@@ -540,36 +542,6 @@ class Trainer:
         #       This normalization issue gets worse with higher alpha values
         #       (i.e. with more contribution of the overlayed label map).
         #       Don't know how to fix this currently.
-
-
-# TODO: Bring this more in line with new metrics
-def error(target, out):
-    """Ratio of misclassified elements."""
-    numel = target.numel()
-    pred = out.argmax(1)
-    incorrect = pred.ne(target).sum().item()
-    err = 100. * incorrect / numel
-    return err
-
-
-
-# TODO: Move all the functions below out of trainer.py
-
-# TODO
-def save_to_h5(fname: str, model_output: torch.Tensor):
-    raise NotImplementedError
-
-    maxcl = model_output.argmax(1)  # TODO: Ensure correct shape
-    save_to_h5(
-        [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
-        fname,
-        hdf5_names=["pred", "raw"]
-    )
-    save_to_h5(
-        [np.exp(model_output.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
-        fname+"prob.h5",
-        hdf5_names=["prob"]
-    )
 
 
 def preview_inference(
