@@ -203,3 +203,59 @@ def average_precision(target, probs, mean=False):
     if mean:
         ap = ap.mean().item()
     return ap
+
+
+# Metric evaluator shortcuts for raw network outputs in binary classification
+#  tasks ("raw binary", "rb"). "Raw" means not softmaxed or argmaxed.
+
+# Redundant argmax and softmax calculations have neglegible
+#  computation times (typically << 1 ms), so to be more clear
+#  they are not cached and re-used here.
+
+def _rb_precision(target, out):
+    pred = out.argmax(1)
+    return precision(
+        target, pred, num_classes=2, mean=False
+    )[1]  # Take only the score for class 1
+
+
+def _rb_recall(target, out):
+    pred = out.argmax(1)
+    return recall(
+        target, pred, num_classes=2, mean=False
+    )[1]  # Take only the score for class 1
+
+
+def _rb_accuracy(target, out):
+    pred = out.argmax(1)
+    return accuracy(
+        target, pred, num_classes=2, mean=False
+    )[1]  # Take only the score for class 1
+
+
+def _rb_dice_coefficient(target, out):
+    pred = out.argmax(1)
+    return dice_coefficient(
+        target, pred, num_classes=2, mean=False
+    )[1]  # Take only the score for class 1
+
+
+def _rb_iou(target, out):
+    pred = out.argmax(1)
+    return iou(
+        target, pred, num_classes=2, mean=False
+    )[1]  # Take only the score for class 1
+
+
+def _rb_average_precision(target, out):
+    probs = torch.nn.functional.softmax(out, 1)
+    return average_precision(
+        target, probs, mean=False
+    )[1]  # Take only the score for class 1
+
+
+def _rb_auroc(target, out):
+    probs = torch.nn.functional.softmax(out, 1)
+    return auroc(
+        target, probs, mean=False
+    )[1]  # Take only the score for class 1

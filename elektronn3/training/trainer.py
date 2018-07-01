@@ -25,6 +25,7 @@ from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.training import collect_env
+from elektronn3.training import metrics
 from elektronn3.data.utils import save_to_h5, squash01
 from elektronn3 import __file__ as arch_src
 
@@ -73,6 +74,9 @@ class Trainer:
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
+        valid_metrics: Validation metrics to be calculated on
+            validation data after each training epoch. All metrics are logged
+            to tensorboard.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -143,6 +147,7 @@ class Trainer:
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            valid_metrics: Optional[Dict] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -162,6 +167,7 @@ class Trainer:
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.valid_metrics = valid_metrics
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -226,6 +232,17 @@ class Trainer:
                 timeout=30
             )
 
+        if self.valid_metrics is None and self.num_classes == 2:
+            self.valid_metrics = {
+                'error': error,
+                'precision': metrics._rb_precision,
+                'recall': metrics._rb_recall,
+                'accuracy': metrics._rb_accuracy,
+                'DSC': metrics._rb_dice_coefficient,
+                'IoU': metrics._rb_iou,
+                'AP': metrics._rb_average_precision,
+                'AUROC': metrics._rb_auroc,
+            }
 
     # TODO: Modularize, make some general parts reusable for other trainers.
     def train(self, max_steps: int = 1) -> None:
@@ -272,7 +289,7 @@ class Trainer:
 
                     # get training performance
                     stats['tr_loss'] += float(loss)
-                    error = calculate_error(out, target)
+                    err = error(target, out)
                     mean_target = target.to(torch.float32).mean()
                     print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
                     self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
@@ -292,7 +309,7 @@ class Trainer:
                         else:
                             sched.step()
 
-                    running_error += error
+                    running_error += err
                     running_mean_target += mean_target
                     running_vx_size += inp.numel()
 
@@ -334,7 +351,8 @@ class Trainer:
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self.tb_log_scalars(stats, misc)
+                    self.tb_log_scalars(stats, 'stats')
+                    self.tb_log_scalars(misc, 'misc')
                     if self.previews_enabled:
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
@@ -377,36 +395,32 @@ class Trainer:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
-        incorrect = 0
-        numel = 0
+        metrics = {name: 0 for name in self.valid_metrics.keys()}
         for inp, target in self.valid_loader:
             inp, target = inp.to(self.device), target.to(self.device)
             with torch.no_grad():
                 out = self.model(inp)
-                numel += int(target.numel())
-                val_loss += float(self.criterion(out, target))
-                maxcl = out.argmax(1)  # get the index of the max log-probability
-                incorrect += int(maxcl.ne(target).long().sum())
-        val_loss /= len(self.valid_loader)  # loss function already averages over batch size
-        val_err = 100. * incorrect / numel
+                val_loss += self.criterion(out, target).item() / len(self.valid_loader)
+                for name, evaluator in self.valid_metrics.items():
+                    metrics[name] += evaluator(target, out) / len(self.valid_loader)
+
         self.tb_log_sample_images(
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
+        self.tb_log_scalars(metrics, 'metrics')
 
         self.model.train()  # Reset model to training mode
 
-        return val_loss, val_err
+        return val_loss, metrics['error']
 
     def tb_log_scalars(
             self,
-            stats: Dict[str, float],
-            misc: Dict[str, float]
+            scalars: Dict[str, float],
+            tag: str = 'default'
     ) -> None:
-        for key, value in stats.items():
-            self.tb.log_scalar(f'stats/{key}', value, self.step)
-        for key, value in misc.items():
-            self.tb.log_scalar(f'misc/{key}', value, self.step)
+        for key, value in scalars.items():
+            self.tb.log_scalar(f'{tag}/{key}', value, self.step)
 
     def _get_batch2img_function(
             self,
@@ -526,12 +540,15 @@ class Trainer:
         #       Don't know how to fix this currently.
 
 
-def calculate_error(out, target):
-    numel = int(target.numel())
-    maxcl = out.argmax(1)
-    incorrect = maxcl.ne(target).sum()
-    error = 100. * incorrect / numel
-    return error.item()
+# TODO: Bring this more in line with new metrics
+def error(target, out):
+    """Ratio of misclassified elements."""
+    numel = target.numel()
+    pred = out.argmax(1)
+    incorrect = pred.ne(target).sum().item()
+    err = 100. * incorrect / numel
+    return err
+
 
 
 # TODO: Move all the functions below out of trainer.py
