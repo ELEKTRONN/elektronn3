@@ -89,7 +89,9 @@ dataset_std = (42.599973,)
 common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
-train_transform = transforms.Compose(common_transforms + [])
+train_transform = transforms.Compose(common_transforms + [
+    # transforms.RandomBlurring({'probability': 0.5})
+])
 valid_transform = transforms.Compose(common_transforms + [])
 
 # Specify data set
