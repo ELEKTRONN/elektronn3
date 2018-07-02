@@ -20,7 +20,7 @@ from typing import Sequence, Tuple, Optional, Dict, Any, Union
 
 import numpy as np
 
-from elektronn3.data.random_blurring import apply_random_blurring, check_random_data_blurring_config
+from elektronn3.data import random_blurring
 
 
 # Transformation = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
@@ -67,6 +67,7 @@ class Normalize:
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
         normalized = np.empty_like(inp)
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
@@ -78,14 +79,30 @@ class Normalize:
 
 
 class RandomBlurring:  # Warning: This operates in-place!
+
+    _default_scheduler = random_blurring.ScalarScheduler(
+        value=0.1,
+        max_value=0.5,
+        growth_type="lin",
+        interval=500000,
+        steps_per_report=1000
+    )
+    _default_config = {
+        "probability": 0.5,
+        "threshold": _default_scheduler,
+        "lower_lim_region_size": [3, 6, 6],
+        "upper_lim_region_size": [8, 16, 16],
+        "verbose": False,
+    }
+
     def __init__(
             self,
             config: Dict[str, Any],
             patch_shape: Optional[Sequence[int]] = None
     ):
-        self.config = config
+        self.config = {**self._default_config, **config}
         if patch_shape is not None:
-            check_random_data_blurring_config(patch_shape, **config)
+            random_blurring.check_random_data_blurring_config(patch_shape, **config)
 
     def __call__(
             self,
@@ -94,7 +111,7 @@ class RandomBlurring:  # Warning: This operates in-place!
     ) -> Tuple[np.ndarray, np.ndarray]:
         # In-place, overwrites inp!
         assert inp.ndim == 4, 'Currently only (C, D, H, W) inputs are supported.'
-        apply_random_blurring(inp_sample=inp, **self.config)
+        random_blurring.apply_random_blurring(inp_sample=inp, **self.config)
         return inp, target
 
 
