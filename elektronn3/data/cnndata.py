@@ -161,7 +161,6 @@ class PatchCreator(data.Dataset):
         self.input_h5data = input_h5data
         self.target_h5data = target_h5data
         self.cube_prios = cube_prios
-        # TODO: Support separate validation data? (Not using indices, but an own validation list)
         self.aniso_factor = aniso_factor
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
@@ -185,11 +184,8 @@ class PatchCreator(data.Dataset):
         self.offsets = np.array([0, 0, 0])
         self.target_ps = self.patch_shape  - self.offsets * 2
         self._target_dtype = np.int64
-        self.mode = 'img-img'  # TODO: what would change for img-scalar? Is that even neccessary?
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
-        self.c_input = None  # Number of input channels
-        self.c_target = None  # Number of target channels
 
         # Actual data fields
         self.inputs = []
@@ -287,13 +283,14 @@ class PatchCreator(data.Dataset):
     def __len__(self) -> int:
         return self.epoch_size
 
-    def __repr__(self) -> str:
-        s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
-            "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
-            "pixels."
-        s = s.format(self.c_target, self.c_input, self._training_count,
-                     self._valid_count, self.n_labelled_pixels)
-        return s
+    # TODO: Write a good __repr__(). The version below is completely outdated.
+    # def __repr__(self) -> str:
+    #     s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
+    #         "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
+    #         "pixels."
+    #     s = s.format(self.c_target, self.c_input, self._training_count,
+    #                  self._valid_count, self.n_labelled_pixels)
+    #     return s
 
     def _create_preview_batch(
             self,
@@ -502,16 +499,6 @@ class PatchCreator(data.Dataset):
             inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
 
-            # assert inp_h5.ndim == 4
-            # assert target_h5.ndim == 4
-            if inp_h5.ndim == 4:
-                self.c_input = inp_h5.shape[0]
-                self.c_target = target_h5.shape[0]
-                self.n_labelled_pixels += target_h5[0].size
-            elif inp_h5.ndim == 3:
-                self.c_input = 1
-                self.c_target = 1
-                self.n_labelled_pixels += target_h5.size
             print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
             print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
             inp_h5sets.append(inp_h5)

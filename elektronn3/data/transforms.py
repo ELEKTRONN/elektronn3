@@ -166,3 +166,6 @@ class SqueezeTarget:
             target: np.ndarray,
     ):
         return inp, target.squeeze(axis=self.dim)
+
+
+# TODO: Handle target striding and offsets via transforms?
