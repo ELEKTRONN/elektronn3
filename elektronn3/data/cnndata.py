@@ -111,10 +111,6 @@ class PatchCreator(data.Dataset):
             validation/logging/plotting are performed by the training loop
             that uses this data set (e.g.
             ``elektronn3.training.trainer.Trainer``).
-        squeeze_target: If ``True``, target tensors will be squeezed in their
-            channel axis if it is empty. This workaround and will be removed
-            later. It is currently needed to support targets that have an
-            extra channel axis which doesn't exist in the network outputs.
         transform: Transformation function to be applied to ``(inp, target)``
             samples (for normalization, data augmentation etc.). The signature
             is always ``inp, target = transform(inp, target)``, where ``inp``
@@ -139,7 +135,6 @@ class PatchCreator(data.Dataset):
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
-            squeeze_target: bool = False,
             transform: Callable = transforms.Identity(),
             classes: Optional[Sequence[int]] = None
     ):
@@ -159,14 +154,6 @@ class PatchCreator(data.Dataset):
         self.train = train
         self.warp = warp
         self.warp_kwargs = warp_kwargs
-        self.squeeze_target = squeeze_target
-        # TODO: Instead of overly specific hacks like squeeze_target, we should
-        #       make "transformations" like this fully customizable, similar to
-        #       the `torchvision.transforms` interface.
-        #       E.g. squeeze_target could then be implemented as a
-        #       `lambda x: x.squeeze(0)` transformation that can be combined
-        #       with others. Non-geometric augmentations and normalization could
-        #       also be implemented as pluggable transformations.
 
         # general properties
         input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
@@ -293,17 +280,6 @@ class PatchCreator(data.Dataset):
             inp, target = self.transform(inp, target)
             break
 
-        # target is now of shape (K, D, H, W), where K is the number of
-        #  target channels (not to be confused with the number of classes
-        #  for the classification problem, C.
-        if self.squeeze_target:
-            # If K == 1, K is squeezed here to match common network output
-            #  shapes (which usually lack a K axis).
-            # Make sure it's actually the channel axis we're squeezing here,
-            #  not a spatial dimension that's coincidentally of size 1:
-            assert len(self.target_ps) == target_src.ndim - 1
-            target = target.squeeze(0)  # (K, (D,) H, W) -> ((D,) H, W)
-
         # inp, target are still numpy arrays here. Relying on auto-conversion to
         #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
         return inp, target
@@ -357,13 +333,6 @@ class PatchCreator(data.Dataset):
 
         inp = torch.from_numpy(inp_np)
         target = torch.from_numpy(target_np)
-
-        # See comments at the end of PatchCreator.__getitem__()
-        # Note that here it's the dimension index 1 that we're squeezing,
-        #  because index 0 is the batch dimension.
-        if self.squeeze_target:
-            assert len(self.target_ps) == target_source.ndim - 1
-            target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, (D,) H, W)
 
         return inp, target
 

@@ -87,6 +87,7 @@ dataset_std = (42.599973,)
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
+    transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
@@ -98,7 +99,6 @@ valid_transform = transforms.Compose(common_transforms + [])
 common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
-    'squeeze_target': True,  # Workaround for neuro_data_cdhw,
     'classes': [0, 1],
 }
 train_dataset = PatchCreator(

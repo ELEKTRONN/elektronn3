@@ -150,3 +150,19 @@ class RandomCrop:
             full_slice = full_slice[1:]  # Remove C axis from slice because target doesn't have it
         target_cropped = target[full_slice]
         return inp_cropped, target_cropped
+
+
+class SqueezeTarget:
+    """Squeeze a specified dimension in target tensors.
+
+    (This is just needed as a workaround for the example neuro_data_cdhw data
+    set, because its targets have a superfluous first dimension.)"""
+    def __init__(self, dim, inplace=True):
+        self.dim = dim
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # Returned without modifications
+            target: np.ndarray,
+    ):
+        return inp, target.squeeze(axis=self.dim)
