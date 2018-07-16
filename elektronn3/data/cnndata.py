@@ -182,7 +182,7 @@ class PatchCreator(data.Dataset):
         #   could mess up targets in unfortunate cases:
         #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
         self.offsets = np.array([0, 0, 0])
-        self.target_ps = self.patch_shape  - self.offsets * 2
+        self.target_patch_size = self.patch_shape - self.offsets * 2
         self._target_dtype = np.int64
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
@@ -223,7 +223,7 @@ class PatchCreator(data.Dataset):
         return self._get_random_sample()
 
     def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray]:
-        #                                      np.float32, self._target_dtype
+        #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
         self._reseed()
@@ -413,15 +413,23 @@ class PatchCreator(data.Dataset):
             warp_kwargs = dict(warp_kwargs)
             warp_kwargs['warp_amount'] = 0
 
-        inp, target = coord_transforms.get_warped_slice(
-            inp_src,
-            self.patch_shape,
+        M = coord_transforms.get_warped_coord_transform(
+            inp_src=inp_src,
+            patch_shape=self.patch_shape,
             aniso_factor=self.aniso_factor,
             target_src=target_src,
-            target_ps=self.target_ps,
-            target_discrete_ix=self.target_discrete_ix,
+            target_patch_size=self.target_patch_size,
             rng=self.rng,
             **warp_kwargs
+        )
+
+        inp, target = coord_transforms.warp_slice(
+            inp_src=inp_src,
+            patch_shape=self.patch_shape,
+            M=M,
+            target_src=target_src,
+            target_patch_shape=self.target_patch_size,
+            target_discrete_ix=self.target_discrete_ix
         )
 
         return inp, target

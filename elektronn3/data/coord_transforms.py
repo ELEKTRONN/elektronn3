@@ -4,10 +4,10 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
 
-
-__all__ = ['warp_slice', 'get_warped_slice', 'WarpingOOBError']
+__all__ = ['warp_slice', 'get_warped_coord_transform', 'WarpingOOBError']
 
 import itertools
+from typing import Tuple
 from functools import reduce, lru_cache
 import numpy as np
 import numba
@@ -214,8 +214,9 @@ class WarpingOOBError(ValueError):
         super(WarpingOOBError, self).__init__( *args, **kwargs)
 
 
-def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
-               target_discrete_ix=None):
+def warp_slice(
+        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
     Warping is applied by multiplying the original source coordinates with
@@ -236,15 +237,15 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
     ----------
     inp_src: h5py.Dataset
         Input image source (in HDF5)
-    ps: tuple
-        (spatial only) Patch size ``(D, H, W)``
+    patch_shape: tuple or np.ndarray
+        (spatial only) Patch shape ``(D, H, W)``
         (spatial shape of the neural network's input node)
     M: np.ndarray
         Forward warping tansformation matrix (4x4).
         Must contain translations in source and target_src array.
     target_src: h5py.Dataset or None
         Optional target source array to be extracted from in the same way.
-    target_ps: tuple
+    target_patch_shape: tuple or np.ndarray
         Patch size for the ``target_src`` array.
     target_discrete_ix: list
         List of target channels that contain discrete values.
@@ -264,7 +265,7 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         or ``None``, if ``target_src is None``.
     """
 
-    ps = tuple(ps)
+    patch_shape = tuple(patch_shape)
     if len(inp_src.shape) == 3:
         print(f'inp_src.shape: {inp_src.shape}')
         raise NotImplementedError(
@@ -279,7 +280,7 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         raise ValueError('inp_src wrong dim/shape')
 
     M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
-    dest_corners = make_dest_corners(ps)
+    dest_corners = make_dest_corners(patch_shape)
     src_corners = np.dot(M_inv, dest_corners.T).T
     if np.any(M[3,:3] != 0): # homogeneous divide
         src_corners /= src_corners[:,3][:,None]
@@ -291,7 +292,7 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
     if np.any(lo < 0) or np.any(hi >= sh):
         raise WarpingOOBError("Out of bounds")
     # compute/transform dense coords
-    dest_coords = make_dest_coords(ps)
+    dest_coords = make_dest_coords(patch_shape)
     src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1],[1]])
     if np.any(M[3,:3] != 0): # homogeneous divide
         src_coords /= src_coords[...,3][...,None]
@@ -300,12 +301,12 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
     # Add 1 to hi to include this coordinate!
     img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
 
-    inp = np.zeros((n_f,)+ps, dtype=floatX)
+    inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
     lo = lo.astype(floatX)
     for k in range(n_f):
         map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
     if target_src is not None:
-        target_ps = tuple(target_ps)
+        target_patch_shape = tuple(target_patch_shape)
         n_f_t = target_src.shape[0]
 
         off = np.subtract(sh, target_src.shape[1:])
@@ -313,15 +314,15 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
             raise ValueError("targets must be centered w.r.t. images")
         off //= 2
 
-        off_ps = np.subtract(ps, target_ps)
+        off_ps = np.subtract(patch_shape, target_patch_shape)
         if np.any(np.mod(off_ps, 2)):
             raise ValueError("targets must be centered w.r.t. images")
         off_ps //= 2
 
         src_coords_target = src_coords[
-            off_ps[0]:off_ps[0]+target_ps[0],
-            off_ps[1]:off_ps[1]+target_ps[1],
-            off_ps[2]:off_ps[2]+target_ps[2]
+            off_ps[0]:off_ps[0] + target_patch_shape[0],
+            off_ps[1]:off_ps[1] + target_patch_shape[1],
+            off_ps[2]:off_ps[2] + target_patch_shape[2]
         ]
         # shift coords to be w.r.t. to origin of target_src array
         lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - off).astype(np.int)
@@ -336,7 +337,7 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
         # TODO: This and the checks below only make sense for discrete targets. Continuous targets are currently BROKEN.
         n_target_classes = target_cut.max()
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
-        target = np.zeros((n_f_t,) + target_ps, dtype=floatX)
+        target = np.zeros((n_f_t,) + target_patch_shape, dtype=floatX)
         lo_targ = (lo_targ + off).astype(floatX)
         if target_discrete_ix is None:
             target_discrete_ix = [True for i in range(n_f_t)]
@@ -358,25 +359,23 @@ def warp_slice(inp_src, ps, M, target_src=None, target_ps=None,
     return inp, target
 
 
-def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
-                     warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
-                     target_src=None, target_ps=None,
-                     target_discrete_ix=None, rng=None):
+def get_warped_coord_transform(
+        inp_src, patch_shape, aniso_factor=2, sample_aniso=True,
+        warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
+        target_src=None, target_patch_size=None, rng=None
+) -> np.ndarray:
     """
     (Wraps :py:meth:`elektronn2.data.coord_transforms.warp_slice()`)
 
     Generates the warping transformation parameters and composes them into a
     single 4D homogeneous transformation matrix ``M``.
-    Then this transformation is applied to ``inp_source`` and ``target`` in the
-    ``warp_slice()`` function and the transformed input and target image are
-    returned.
 
     Parameters
     ----------
     inp_src: h5py.Dataset
         Input image source (in HDF5)
-    ps: np.array
-        Patch size (spatial shape of the neural network's input node)
+    patch_shape: np.array
+        Patch shape (spatial shape of the neural network's input node)
     aniso_factor: float
         Anisotropy factor that determines an additional scaling in ``z``
         direction.
@@ -393,16 +392,8 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
         Apply perspective transformations (in addition to affine ones).
     target_src: h5py.Dataset
         Target image source (in HDF5)
-    target_ps: np.array
+    target_patch_size: np.array
         Target patch size
-    target_discrete_ix:
-        List of target channels that contain discrete values.
-        By default (``None``), every channel is is seen as discrete (this is
-        generally the case for classification tasks).
-        This information is used to decide what kind of interpolation should
-        be used for reading target data:
-        - discrete targets are obtained by nearest-neighbor interpolation
-        - non-discrete (continuous) targets are linearly interpolated.
     rng: np.random.mtrand.RandomState
         Random number generator state (obtainable by
         ``np.random.RandomState()``). Passing a known state makes the random
@@ -410,27 +401,17 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
 
     Returns
     -------
-    inp: np.ndarray
-        (Warped) input image slice
-    target: np.ndarray
-        (Warped) target slice
+    M: np.ndarray
+        Coordinate transformation matrix.
     """
-    # TODO: Ensure everything assumes (f, z, x, y) shape
 
     rng = np.random.RandomState() if rng is None else rng
 
-    strip_2d = False
-    if len(ps)==2:
-        strip_2d = True
-        ps = np.array([1]+list(ps))
-        if target_src is not None:
-            target_ps = np.array([1]+list(target_ps))
+    dest_center = np.array(patch_shape, dtype=np.float) / 2
+    src_remainder = np.array(np.mod(patch_shape, 2), dtype=np.float) / 2
 
-    dest_center = np.array(ps, dtype=np.float) / 2
-    src_remainder = np.array(np.mod(ps, 2), dtype=np.float) / 2
-
-    if target_ps is not None:
-        t_center = np.array(target_ps, dtype=np.float) / 2
+    if target_patch_size is not None:
+        t_center = np.array(target_patch_size, dtype=np.float) / 2
         off = np.subtract(inp_src.shape[1:], target_src.shape[1:])
         off //= 2
         lo_pos = np.maximum(dest_center, t_center+off)
@@ -466,18 +447,4 @@ def get_warped_slice(inp_src, ps, aniso_factor=2, sample_aniso=True,
 
     M = chain_matrices([T_dest, S_dest, R, W, F, S, S_src, T_src])
 
-    inp, target = warp_slice(
-        inp_src,
-        ps,
-        M,
-        target_src=target_src,
-        target_ps=target_ps,
-        target_discrete_ix=target_discrete_ix
-    )
-
-    if strip_2d:
-        inp = inp[:,0]
-        if target_src is not None:
-            target = target[:,0]
-
-    return inp, target
+    return M
