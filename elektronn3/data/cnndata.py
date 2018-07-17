@@ -414,11 +414,11 @@ class PatchCreator(data.Dataset):
             warp_kwargs['warp_amount'] = 0
 
         M = coord_transforms.get_warped_coord_transform(
-            inp_src=inp_src,
+            inp_src_shape=inp_src.shape,
             patch_shape=self.patch_shape,
             aniso_factor=self.aniso_factor,
-            target_src=target_src,
-            target_patch_size=self.target_patch_size,
+            target_src_shape=target_src.shape,
+            target_patch_shape=self.target_patch_size,
             rng=self.rng,
             **warp_kwargs
         )

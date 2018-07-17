@@ -7,7 +7,7 @@
 __all__ = ['warp_slice', 'get_warped_coord_transform', 'WarpingOOBError']
 
 import itertools
-from typing import Tuple
+from typing import Tuple, Union, Optional
 from functools import reduce, lru_cache
 import numpy as np
 import numba
@@ -360,69 +360,94 @@ def warp_slice(
 
 
 def get_warped_coord_transform(
-        inp_src, patch_shape, aniso_factor=2, sample_aniso=True,
-        warp_amount=1.0, lock_z=True, no_x_flip=False, perspective=False,
-        target_src=None, target_patch_size=None, rng=None
+        inp_src_shape: Union[Tuple, np.ndarray],
+        patch_shape: Union[Tuple, np.ndarray],
+        aniso_factor: int = 2,
+        sample_aniso: bool = True,
+        warp_amount: float = 1.0,
+        lock_z: bool = True,
+        no_x_flip: bool = False,
+        perspective: bool = False,
+        target_src_shape: Optional[Union[Tuple, np.ndarray]] = None,
+        target_patch_shape: Optional[Union[Tuple, np.ndarray]] = None,
+        rng: Optional[np.random.RandomState] = None
 ) -> np.ndarray:
     """
-    (Wraps :py:meth:`elektronn2.data.coord_transforms.warp_slice()`)
-
     Generates the warping transformation parameters and composes them into a
     single 4D homogeneous transformation matrix ``M``.
+    Assumes 3-dimensional (volumetric) source data with shape (D, H, W) or
+    (..., D, H, W).
+    Preceding dimensions before the last three dimensions are ignored, if there
+    are any (e.g. a C dimension that contains input channels).
 
     Parameters
     ----------
-    inp_src: h5py.Dataset
-        Input image source (in HDF5)
-    patch_shape: np.array
+    inp_src_shape
+        Input data source shape
+    patch_shape
         Patch shape (spatial shape of the neural network's input node)
-    aniso_factor: float
+    aniso_factor
         Anisotropy factor that determines an additional scaling in ``z``
         direction.
-    sample_aniso: bool
-        Scale coordinates by ``1 / aniso_factor`` while warping.
-    warp_amount: float
+    sample_aniso
+        Scale ``z`` coordinates by ``1 / aniso_factor`` while warping.
+    warp_amount
         Strength of the random warping transformation. A lower ``warp_amount``
         will lead to less distorted images.
-    lock_z: bool
+    lock_z
         Exclude ``z`` coordinates from the random warping transformations.
-    no_x_flip: bool
+    no_x_flip
         Don't flip ``x`` axis during random warping.
-    perspective: bool
+    perspective
         Apply perspective transformations (in addition to affine ones).
-    target_src: h5py.Dataset
-        Target image source (in HDF5)
-    target_patch_size: np.array
-        Target patch size
-    rng: np.random.mtrand.RandomState
+    target_src_shape
+        Target data source shape
+    target_patch_shape
+        Target patch shape
+    rng
         Random number generator state (obtainable by
         ``np.random.RandomState()``). Passing a known state makes the random
         transformations reproducible.
 
     Returns
     -------
-    M: np.ndarray
+    M
         Coordinate transformation matrix.
     """
 
     rng = np.random.RandomState() if rng is None else rng
+    patch_shape = np.array(patch_shape)
+    target_patch_shape = np.array(target_patch_shape)
 
-    dest_center = np.array(patch_shape, dtype=np.float) / 2
-    src_remainder = np.array(np.mod(patch_shape, 2), dtype=np.float) / 2
+    # The last three dimensions of the data source shapes are interpreted as
+    #  spatial dimensions (D, H, W). All preciding dimensions are ignored.
+    spatial_inp_src_shape = np.array(inp_src_shape[-3:])
+    spatial_target_src_shape = np.array(target_src_shape[-3:])
 
-    if target_patch_size is not None:
-        t_center = np.array(target_patch_size, dtype=np.float) / 2
-        off = np.subtract(inp_src.shape[1:], target_src.shape[1:])
-        off //= 2
-        lo_pos = np.maximum(dest_center, t_center+off)
-        hi_pos = np.minimum(inp_src.shape[1:] - dest_center, target_src.shape[1:] - t_center + off)
+    # Determine a random coordinate region where data should be read from the
+    #  source. The size of the region is statically defined by the patch_shape.
+    #  All region bounds lie within the source data shape.
+    # "dest" refers to the destination coordinates which the "src" (source)
+    #   coordinates will be mapped to.
+    dest_center = patch_shape / 2
+    src_remainder = (patch_shape % 2) / 2
+    if target_patch_shape is not None:
+        target_center = target_patch_shape / 2
+        offset = (spatial_inp_src_shape - spatial_target_src_shape) // 2
+        lo_pos = np.maximum(dest_center, target_center + offset)
+        hi_pos = np.minimum(
+            spatial_inp_src_shape - dest_center,
+            spatial_target_src_shape - target_center + offset
+        )
     else:
         lo_pos = dest_center
-        hi_pos = inp_src.shape[1:] - dest_center
+        hi_pos = spatial_inp_src_shape - dest_center
     assert np.all([lo_pos[i] < hi_pos[i] for i in range(3)])
     z = rng.randint(lo_pos[0], hi_pos[0]) + src_remainder[0]
     y = rng.randint(lo_pos[1], hi_pos[1]) + src_remainder[1]
     x = rng.randint(lo_pos[2], hi_pos[2]) + src_remainder[2]
+
+    # Generate coordinate transformation matrices that express the region
     F = get_random_flipmat(no_x_flip, rng)
     if no_x_flip:
         S = np.eye(4, dtype=floatX)
@@ -436,6 +461,9 @@ def get_warped_coord_transform(
         R = get_random_rotmat(lock_z, warp_amount, rng)
         W = get_random_warpmat(lock_z, perspective, warp_amount, rng)
 
+    # Using negative translations and inverse anisotropic scaling because of
+    #  later matrix inversion? (see M_inv in warp_slice())
+    #  TODO: Clear this up / explain this better.
     T_src = translate(-z, -y, -x)
     S_src = scale(aniso_factor, 1, 1)
 
@@ -445,6 +473,10 @@ def get_warped_coord_transform(
         S_dest = identity()
     T_dest = translate(dest_center[0], dest_center[1], dest_center[2])
 
+    # Reduce all transformations into a single matrix M by applying consecutive
+    #  matrix multiplications. Applying M to a homogeneous coordinate vector
+    #  is mathematically equivalent to consecutively applying each matrix to it.
+    #  See https://en.wikipedia.org/wiki/Transformation_matrix#Composing_and_inverting_transformations
     M = chain_matrices([T_dest, S_dest, R, W, F, S, S_src, T_src])
 
     return M
