@@ -309,7 +309,7 @@ def warp_slice(
         target_patch_shape = tuple(target_patch_shape)
         n_f_t = target_src.shape[0]
 
-        off = np.subtract(sh, target_src.shape[1:])
+        off = np.subtract(sh, target_src.shape[-3:])
         if np.any(np.mod(off, 2)):
             raise ValueError("targets must be centered w.r.t. images")
         off //= 2
@@ -328,7 +328,7 @@ def warp_slice(
         lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - off).astype(np.int)
         # add 1 because linear interp
         hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
-        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[1:]):
+        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[-3:]):
              raise WarpingOOBError("Out of bounds for target_src")
         # dtype is float as well here because of the static typing of the
         # numba-compiled map_coordinates functions
