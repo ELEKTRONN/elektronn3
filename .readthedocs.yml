@@ -1,11 +1,2 @@
-build:
-  image: latest
-
-python:
-  version: 3.6
-  pip_install: true
-
-# conda:
-    # file: environment.yml
-
-requirements_file: docs/sphinx-requirements.txt
+conda:
+    file: docs/sphinx-environment.yml
