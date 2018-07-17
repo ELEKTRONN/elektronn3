@@ -8,9 +8,10 @@ import datetime
 import logging
 import os
 import traceback
+import shutil
 
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence
 
 import inspect
 import IPython
@@ -23,7 +24,10 @@ from torch.optim.lr_scheduler import StepLR
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
-from elektronn3.data.utils import save_to_h5, squash01
+from elektronn3.training import collect_env
+from elektronn3.training import metrics
+from elektronn3.data.utils import squash01
+from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
 
@@ -61,6 +65,7 @@ class Trainer:
         optimizer: PyTorch optimizer that shall be used to update
             ``model`` weights according to the ``criterion`` in each
             iteration.
+        device: The device on which the network shall be trained.
         train_dataset: PyTorch dataset (``data.Dataset``) which produces
             training samples when iterated over.
             :py:class:`elektronn3.data.cnndata.PatchCreator` is currently
@@ -69,6 +74,9 @@ class Trainer:
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
+        valid_metrics: Validation metrics to be calculated on
+            validation data after each training epoch. All metrics are logged
+            to tensorboard.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -98,7 +106,6 @@ class Trainer:
             ``exp_name``.
             If ``tensorboard_root_path`` is not set, tensorboard logs are
             written to ``save_path`` (next to model checkpoints, plots etc.).
-        device: The device on which the network shall be trained.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -108,6 +115,14 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
+        classes: Optionally specifies the different target
+            classes for classification tasks. If this is not set manually,
+            the ``Trainer`` checks if the ``train_dataset`` provides this
+            value. If available, ``self.num_classes`` is set to
+            ``self.train_dataset.classes``. Otherwise, it is set to
+            ``None``.
+            The ``classes`` attribute is used for plotting purposes and is
+            not strictly required for training.
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
@@ -121,25 +136,28 @@ class Trainer:
     valid_loader: torch.utils.data.DataLoader
     exp_name: str
     save_path: str  # Full path to where training files are stored
+    num_classes: Optional[int]  # Number of different target classes in the train_dataset
 
     def __init__(
             self,
             model: torch.nn.Module,
             criterion: torch.nn.Module,
             optimizer: torch.optim.Optimizer,
-            device,  # torch.Device type is not available
+            device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            valid_metrics: Optional[Dict] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
-            schedulers: Optional[Dict[Any, Any]] = None,  # TODO: Define a Scheduler protocol. This needs typing_extensions.
+            schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
-            ipython_on_error: bool = True
+            ipython_on_error: bool = False,
+            classes: Optional[Sequence[int]] = None,
     ):
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
@@ -149,6 +167,7 @@ class Trainer:
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.valid_metrics = valid_metrics
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -175,6 +194,12 @@ class Trainer:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
 
+        # Determine optional dataset properties
+        self.classes = classes
+        self.num_classes = None
+        if hasattr(self.train_dataset, 'classes'):
+            self.classes = self.train_dataset.classes
+            self.num_classes = len(self.train_dataset.classes)
         self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
             and valid_dataset.preview_shape is not None
 
@@ -209,13 +234,14 @@ class Trainer:
                 timeout=30
             )
 
-    # Yeah I know this is an abomination, but this monolithic function makes
-    # it possible to access all important locals from within the
-    # KeyboardInterrupt-triggered IPython shell.
-    # TODO: Try to modularize it as well as possible while keeping the
-    #       above-mentioned requirement. E.g. the history tracking stuff can
-    #       be refactored into smaller functions
+        self.valid_metrics = {} if valid_metrics is None else valid_metrics
+
+    # TODO: Modularize, make some general parts reusable for other trainers.
     def train(self, max_steps: int = 1) -> None:
+        """Train the network for ``max_steps`` steps.
+
+        After each training epoch, validation performance is measured and
+        visualizations are computed and logged to tensorboard."""
         while self.step < max_steps:
             try:
                 # --> self.train()
@@ -228,10 +254,9 @@ class Trainer:
                 # Hold image tensors for real-time training sample visualization in tensorboard
                 images: Dict[str, torch.Tensor] = {}
 
-                numel = 0
-                target_sum = 0
-                incorrect = 0
-                vx_size = 0
+                running_acc = 0
+                running_mean_target = 0
+                running_vx_size = 0
                 timer = Timer()
                 for inp, target in self.train_loader:
                     inp, target = inp.to(self.device), target.to(self.device)
@@ -240,7 +265,7 @@ class Trainer:
                     out = self.model(inp)
                     loss = self.criterion(out, target)
                     if torch.isnan(loss):
-                        logger.error('NaN loss detected! Check your hyperparams.')
+                        logger.error('NaN loss detected! Aborting training.')
                         raise NaNException
 
                     # update step
@@ -248,26 +273,23 @@ class Trainer:
                     loss.backward()
                     self.optimizer.step()
 
-                    # get training performance
-                    numel += int(target.numel())
-                    target_sum += int(target.sum())
-                    vx_size += inp.numel()
-                    maxcl = maxclass(out)
-                    # .ne() creates a ByteTensor, which leads to integer
-                    # overflows when it is sum-reduced. Therefore it's
-                    # necessary to cast to a LongTensor before reducing.
-                    incorrect += int(maxcl.ne(target).long().sum())
-                    stats['tr_loss'] += float(loss)
-                    print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
-                    self._tracker.update_timeline([self._timer.t_passed, float(loss), target_sum / numel])
+                    # Prevent accidental autograd overheads after optimizer step
+                    inp.detach_()
+                    target.detach_()
+                    out.detach_()
+                    loss.detach_()
 
-                    # Preserve training batch and network output for later
-                    # visualization (detached from the implicit autograd
-                    # graph, so operations on them are not recorded and
-                    # differentiated).
-                    images['inp'] = inp.detach()
-                    images['target'] = target.detach()
-                    images['out'] = out.detach()
+                    # get training performance
+                    stats['tr_loss'] += float(loss)
+                    acc = metrics.bin_accuracy(target, out)  # TODO
+                    mean_target = target.to(torch.float32).mean()
+                    print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
+                    self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
+
+                    # Preserve training batch and network output for later visualization
+                    images['inp'] = inp
+                    images['target'] = target
+                    images['out'] = out
                     # this was changed to support ReduceLROnPlateau which does not implement get_lr
                     misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
                     # update schedules
@@ -278,57 +300,67 @@ class Trainer:
                             sched.step(metrics=float(loss))
                         else:
                             sched.step()
+
+                    running_acc += acc
+                    running_mean_target += mean_target
+                    running_vx_size += inp.numel()
+
                     self.step += 1
                     if self.step >= max_steps:
                         break
-                stats['tr_err'] = 100. * incorrect / numel
+                stats['tr_accuracy'] = running_acc / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
-                mean_target = target_sum / numel
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
-                misc['tr_speed_vx'] = vx_size / timer.t_passed / 1e6  # MVx
+                misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
+                mean_target = running_mean_target / len(self.train_loader)
                 if self.valid_dataset is None:
-                    # TODO: Don't pretend those are 0 if they are not available:
-                    stats['val_loss'], stats['val_err'] = 0, 0
+                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
                 else:
-                    stats['val_loss'], stats['val_err'] = self.validate()
+                    valid_stats = self.validate()
+                    stats.update(valid_stats)
 
+
+                # Update history tracker (kind of made obsolete by tensorboard)
+                # TODO: Decide what to do with this, now that most things are already in tensorboard.
                 if self.step // len(self.train_dataset) > 1:
                     tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
                 else:
                     tr_loss_gain = 0
-                self._tracker.update_history([self.step, self._timer.t_passed, stats['tr_loss'],
-                                              stats['val_loss'], tr_loss_gain,
-                                              stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0])  # 0's correspond to mom and gradnet (?)
+                self._tracker.update_history([
+                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
+                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
+                ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
                 loss_smooth = self._tracker.loss._ema
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % \
-                       (self.step, loss_smooth, stats['tr_loss'],
-                        stats['tr_err'])
-                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " \
-                    % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
-                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" \
-                        % (misc['learning_rate'], misc['tr_speed'],
-                           misc['tr_speed_vx'], t)
-                # TODO: Log voxels/s
+
+                # Logging to stdout, text log file
+                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
+                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", mean_target * 100, tr_loss_gain)
+                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
+
+                # Plot tracker stats to pngs in save_path
+                self._tracker.plot(self.save_path)
+
+                # Reporting to tensorboard logger
                 if self.tb:
-                    self.tb_log_scalars(stats, misc)
+                    self.tb_log_scalars(stats, 'stats')
+                    self.tb_log_scalars(misc, 'misc')
                     if self.previews_enabled:
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
-                if self.save_path is not None:
-                    self._tracker.plot(self.save_path)
-                if self.save_path is not None:
-                    torch.save(
-                        self.model.state_dict(),
-                        # os.path.join(self.save_path, f'model-{self.step:06d}.pth')  # Saving with different file names leads to heaps of large files,
-                        os.path.join(self.save_path, 'model-checkpoint.pth')
-                    )
-                    # TODO: Also save "best" model, not only the latest one, which is often overfitted.
-                    #       -> "best" in which regard? Lowest validation loss, validation error?
-                    #          We can't blindly trust these metrics and may have to calculate
-                    #          additional metrics (with focus on object boundary correctness).
+
+                # Save trained model state
+                torch.save(
+                    self.model.state_dict(),
+                    # os.path.join(self.save_path, f'model-{self.step:06d}.pth')  # Saving with different file names leads to heaps of large files,
+                    os.path.join(self.save_path, 'model-checkpoint.pth')
+                )
+                # TODO: Also save "best" model, not only the latest one, which is often overfitted.
+                #       -> "best" in which regard? Lowest validation loss, validation error?
+                #          We can't blindly trust these metrics and may have to calculate
+                #          additional metrics (with focus on object boundary correctness).
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
@@ -352,43 +384,41 @@ class Trainer:
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
 
-    def validate(self) -> Tuple[float, float]:
+    def validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
-        incorrect = 0
-        numel = 0
+        stats = {name: 0 for name in self.valid_metrics.keys()}
         for inp, target in self.valid_loader:
             inp, target = inp.to(self.device), target.to(self.device)
             with torch.no_grad():
                 out = self.model(inp)
-                numel += int(target.numel())
-                val_loss += float(self.criterion(out, target))
-                maxcl = maxclass(out)  # get the index of the max log-probability
-                incorrect += int(maxcl.ne(target).long().sum())
-        val_loss /= len(self.valid_loader)  # loss function already averages over batch size
-        val_err = 100. * incorrect / numel
+                val_loss += self.criterion(out, target).item() / len(self.valid_loader)
+                for name, evaluator in self.valid_metrics.items():
+                    stats[name] += evaluator(target, out) / len(self.valid_loader)
+
         self.tb_log_sample_images(
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
 
+        stats['val_loss'] = val_loss
+
         self.model.train()  # Reset model to training mode
 
-        return val_loss, val_err
+        # TODO: Refactor: Either remove side effects (plotting)
+        return stats
 
     def tb_log_scalars(
             self,
-            stats: Dict[str, float],
-            misc: Dict[str, float]
+            scalars: Dict[str, float],
+            tag: str = 'default'
     ) -> None:
-        for key, value in stats.items():
-            self.tb.log_scalar(f'stats/{key}', value, self.step)
-        for key, value in misc.items():
-            self.tb.log_scalar(f'misc/{key}', value, self.step)
+        for key, value in scalars.items():
+            self.tb.log_scalar(f'{tag}/{key}', value, self.step)
 
+    @staticmethod
     def _get_batch2img_function(
-            self,
             batch: torch.Tensor,
             z_plane: Optional[int] = None
     ) -> Callable[[torch.Tensor], np.ndarray]:
@@ -442,7 +472,7 @@ class Trainer:
 
         for c in range(out.shape[0]):
             self.tb.log_image(f'{group}/c{c}', out[c], self.step)
-        self.tb.log_image(f'{group}/pred', pred, self.step)
+        self.tb.log_image(f'{group}/pred', pred, self.step, num_classes=self.num_classes)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
@@ -453,9 +483,9 @@ class Trainer:
                 # Unsqueeze C dimension in target so it matches batch2dim()'s expected shape
                 preview_target = preview_target[:, None]
             target = batch2img(preview_target)[0]
-            self.tb.log_image(f'{group}/inp', inp, step=0)
+            self.tb.log_image(f'{group}/inp', inp, step=0, cmap='gray')
             # Ground truth target for direct comparison with preview prediction
-            self.tb.log_image(f'{group}/target', target, step=0)
+            self.tb.log_image(f'{group}/target', target, step=0, num_classes=self.num_classes)
             self._first_plot = False
 
     # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
@@ -485,54 +515,24 @@ class Trainer:
         out = batch2img(out_batch)
         pred = out.argmax(0)
 
-        self.tb.log_image(f'{group}/inp', inp, step=self.step)
-        self.tb.log_image(f'{group}/target', target, step=self.step)
+        self.tb.log_image(f'{group}/inp', inp, step=self.step, cmap='gray')
+        self.tb.log_image(f'{group}/target', target, step=self.step, num_classes=self.num_classes)
 
         for c in range(out.shape[0]):
             self.tb.log_image(f'{group}/c{c}', out[c], step=self.step)
-        self.tb.log_image(f'{group}/pred', pred, step=self.step)
+        self.tb.log_image(f'{group}/pred', pred, step=self.step, num_classes=self.num_classes)
 
         inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
         target_ov = label2rgb(target, inp01, bg_label=0, alpha=self.overlay_alpha)
         pred_ov = label2rgb(pred, inp01, bg_label=0, alpha=self.overlay_alpha)
-        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.step)
-        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.step)
+        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.step, colorbar=False)
+        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.step, colorbar=False)
+        # TODO: Synchronize overlay colors with pred- and target colors
+        # TODO: What's up with the colorbar in overlay plots?
         # TODO: When plotting overlay images, they appear darker than they should.
         #       This normalization issue gets worse with higher alpha values
         #       (i.e. with more contribution of the overlayed label map).
         #       Don't know how to fix this currently.
-
-# TODO: Move all the functions below out of trainer.py
-
-
-def maxclass(class_predictions: torch.Tensor):
-    """For each point in a tensor, determine the class with max. probability.
-
-    Args:
-        class_predictions: Tensor of shape (N, C, ...)
-
-    Returns:
-        Tensor of shape (N, ...)
-    """
-    maxcl = class_predictions.max(dim=1)[1]  # TODO: Use argmax instead
-    return maxcl
-
-
-# TODO
-def save_to_h5(fname: str, model_output: torch.Tensor):
-    raise NotImplementedError
-
-    maxcl = maxclass(model_output)  # TODO: Ensure correct shape
-    save_to_h5(
-        [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
-        fname,
-        hdf5_names=["pred", "raw"]
-    )
-    save_to_h5(
-        [np.exp(model_output.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
-        fname+"prob.h5",
-        hdf5_names=["prob"]
-    )
 
 
 def preview_inference(
@@ -547,3 +547,50 @@ def preview_inference(
     model.train()  # Reset model to training mode
 
     return out_batch
+
+
+class Backup:
+    """ Backup class for archiving training script, src folder and environment info.
+    Should be used for any future archiving needs.
+
+    Args:
+        script_path: The path to the training script. Eg. train_unet_neurodata.py
+        save_path: The path where the information is archived.
+
+    """
+    def __init__(self, script_path, save_path):
+        self.script_path = script_path
+        self.save_path = save_path
+
+    def archive_backup(self):
+        """Archiving the source folder, the training script and environment info.
+
+        The training script is saved with the prefix '0-' to distinguish from regular scripts.
+        Some of the information saved in the env info is:
+        PyTorch version: 0.4.0
+        Is debug build: No
+        CUDA used to build PyTorch: 8.0.61
+        OS: CentOS Linux release 7.3.1611 (Core)
+        GCC version: (GCC) 5.2.0
+        CMake version: Could not collect
+        Python version: 3.6
+        Is CUDA available: Yes
+        CUDA runtime version: 8.0.44
+        GPU models and configuration:
+        GPU 0: GeForce GTX 980 Ti
+        GPU 1: GeForce GTX 980 Ti
+        .
+        """
+
+        # Archiving the Training script
+        shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
+        os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
+        # Archiving the src folder
+        pkg_path = os.path.dirname(arch_src)
+        backup_path = os.path.join(self.save_path, 'src_backup')
+        shutil.make_archive(backup_path, 'gztar', pkg_path)
+
+        # Archiving the Environment Info
+        env_info = collect_env.get_pretty_env_info()
+        with open(self.save_path + '/env_info.txt', 'w') as f:
+            f.write(env_info)

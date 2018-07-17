@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 import traceback
-from typing import Sequence
+from typing import Sequence, Tuple
 
 import h5py
 import numpy as np
@@ -17,6 +17,91 @@ import numpy as np
 from elektronn3 import floatX
 
 logger = logging.getLogger("elektronn3log")
+
+
+def _to_full_numpy(seq):
+    if isinstance(seq, np.ndarray):
+        return seq
+    elif isinstance(seq[0], np.ndarray):
+        return np.array(seq)
+    elif isinstance(seq[0], h5py.Dataset):
+        # Explicitly pre-load all dataset values into ndarray format
+        return np.array([x.value for x in seq])
+    else:
+        raise ValueError('inputs must be an ndarray, a sequence of ndarrays '
+                         'or a sequence of h5py.Datasets.')
+
+
+def calculate_means(inputs: Sequence) -> Tuple[float]:
+    # TODO: This implementation can surely be optimized (esp. memory usage)
+    inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
+    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
+    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
+    means = flat.mean(axis=1)  # For each channel, calculate mean of all values
+    return tuple(means)
+
+
+# TODO: Respect separate channels
+def calculate_stds(inputs: Sequence) -> Tuple[float]:
+    # TODO: This implementation can surely be optimized (esp. memory usage)
+    inputs = _to_full_numpy(inputs)
+    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
+    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
+    stds = flat.std(axis=1)  # For each channel, calculate std of all values
+    return tuple(stds)
+
+
+def calculate_class_weights(
+        targets: Sequence[np.ndarray],
+        mode='binmean'
+) -> np.ndarray:
+    """Calulate class weights that assign more weight to less common classes.
+
+    The weights can then be used for loss function rebalancing (e.g. for
+    CrossEntropyLoss it's very important to do this when training on
+    datasets with high class imbalance."""
+
+    def __inverse(targets):
+        raise NotImplementedError  # TODO
+        # Weight of each class c1, c2, c3, ... with element counts n1, n2, n3, ... is assigned by:
+        # weight[i] = 1 / n[i]
+
+    def __binmean(targets):
+        # This assumes a binary segmentation problem (background/foreground)
+        target_mean = np.mean(targets)
+        bg_weight = target_mean / (1. + target_mean)
+        fg_weight = 1. - bg_weight
+        # class_weights = torch.tensor([bg_weight, fg_weight])
+        class_weights = np.array([bg_weight, fg_weight], dtype=np.float32)
+        return class_weights
+
+    if mode == 'inverse':
+        return __inverse(targets)
+    elif mode == 'inversesquared':
+        return __inverse(targets) ** 2
+    elif mode == 'binmean':
+        return __binmean(targets)
+
+
+def calculate_nd_slice(src, coords_lo, coords_hi):
+    """Calculate the ``slice`` object list that is used as indices for
+    reading from a data source.
+
+    Unfortunately, this kind of slice list is not yet supported by h5py.
+    It only works with numpy arrays."""
+    # Separate spatial dimensions (..., H, W) from nonspatial dimensions (C, ...)
+    spatial_dims = len(coords_lo)  # Assuming coords_lo addresses all spatial dims
+    nonspatial_dims = src.ndim - spatial_dims  # Assuming every other dim is nonspatial
+
+    # Calculate necessary slice indices for reading the file
+    nonspatial_slice = [  # Slicing all available content in these dims.
+        slice(0, src.shape[i]) for i in range(nonspatial_dims)
+    ]
+    spatial_slice = [  # Slice only the content within the coordinate bounds
+        slice(coords_lo[i], coords_hi[i]) for i in range(spatial_dims)
+    ]
+    full_slice = nonspatial_slice + spatial_slice
+    return full_slice
 
 
 def slice_h5(
@@ -30,15 +115,9 @@ def slice_h5(
     """ Slice a patch of image data out of a h5py dataset.
 
     Args:
-        src: Source data set from which to read data. All non-spatial
-            dimensions (e.g. "channel" C) must first.
-            The last n dimensions must be spatial data (image pixels/voxels),
-            where n is the length of the coordinate vectors below.
-            Examples for supported shapes are:
-            - (C, D, H, W) for 3D images
-            - (C, H, W) for 2D images
-            - (C, D, H, W) for separate 2D images stacked along the D axis.
-            The C axis in the above examples is not strictly required.
+        src: Source data set from which to read data.
+            The expected data shape is (C, D, H, W), so 3D images with a
+            channel-first layout (standard for most PyTorch code).
         coords_lo: Lower bound of the coordinates where data should be read
             from in ``src``.
         coords_hi: Upper bound of the coordinates where data should be read
@@ -58,23 +137,21 @@ def slice_h5(
             f'slice_h5(): max_retries exceeded at {coords_lo}, {coords_hi}. Aborting...'
         )
         raise ValueError
-    # Separate spatial dimensions (..., H, W) from nonspatial dimensions (C, ...)
-    spatial_dims = len(coords_lo)  # Assuming coords_lo addresses all spatial dims
-    nonspatial_dims = src.ndim - spatial_dims  # Assuming every other dim is nonspatial
-
-    # Calculate necessary slice indices for reading the file
-    nonspatial_slice = [  # Slicing all available content in these dims.
-        slice(0, src.shape[i]) for i in range(nonspatial_dims)
-    ]
-    spatial_slice = [  # Slice only the content within the coordinate bounds
-        slice(coords_lo[i], coords_hi[i]) for i in range(spatial_dims)
-    ]
-    full_slice = nonspatial_slice + spatial_slice
 
     try:
-        # TODO: Use a better workaround or fix this in h5py:
-        srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
-        cut = srcv[full_slice]
+        # Generalized n-d slicing code (temporarily disabled because of the
+        #  performance issue described in the comment below):
+        ## full_slice = calculate_nd_slice(src, coords_lo, coords_hi)
+        ## # # TODO: Use a better workaround or fix this in h5py:
+        ## srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
+        ## cut = srcv[full_slice]
+
+        cut = src[
+            :,
+            coords_lo[0]:coords_hi[0],
+            coords_lo[1]:coords_hi[1],
+            coords_lo[2]:coords_hi[2]
+        ]
     # Work around mysterious random HDF5 read errors by recursively calling
     #  this function from within itself until it works again or until
     #  max_retries is exceeded.

@@ -9,6 +9,7 @@ h5py
 matplotlib
 seaborn
 numba
+scikit-learn
 ipython
 tqdm
 pillow

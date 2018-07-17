@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert, Marius Killinger
+# Authors: Ravil Dorozhinskii, Martin Drawitsch
 
 import numpy as np
 from itertools import product

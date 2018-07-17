@@ -15,7 +15,6 @@ from matplotlib import pyplot as plt
 from scipy import stats
 
 from elektronn3 import floatX
-from elektronn3.data.locking import FileLock
 
 logger = logging.getLogger('elektronn3log')
 
@@ -372,8 +371,7 @@ def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
         plt.ylabel('Loss')
 
         plt.tight_layout()
-        with FileLock('plotting'):
-            plt.savefig(os.path.join(save_path, 'timeline.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'timeline.png'), bbox_inches='tight')
 
         ###################################################################
         ### History Loss ###
@@ -459,8 +457,7 @@ def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
         plt.legend(loc=0)
         plt.xlabel('Update steps %s, total runtime %s' % (N - 1, runtime))
         plt.tight_layout()
-        with FileLock('plotting'):
-            plt.savefig(os.path.join(save_path, 'history.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'history.png'), bbox_inches='tight')
 
     except ValueError:
         # When arrays are empty
@@ -484,8 +481,7 @@ def plot_var(var, save_path):
     plt.plot(var[:, 0], sma(var[:, 3] - var[:, 4], 100), 'r:', linewidth=2)
     plt.title("Concentration")
 
-    with FileLock('plotting'):
-        plt.savefig(os.path.join(save_path, 'beta1.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, 'beta1.png'), bbox_inches='tight')
 
     plt.figure(figsize=(12, 12))
     c = 1.0 - ((var[:, 0]).astype(floatX) / var[-1, 0])
@@ -510,8 +506,7 @@ def plot_var(var, save_path):
                 edgecolors='face')
     plt.title("NLL vs. NLL.std")
 
-    with FileLock('plotting'):
-        plt.savefig(os.path.join(save_path, 'beta2.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, 'beta2.png'), bbox_inches='tight')
 
 
 def plot_debug(var, debug_output_names, save_path):
@@ -546,8 +541,7 @@ def plot_debug(var, debug_output_names, save_path):
     plt.hlines(0, var[0, 0], var[-1, 0], linewidth=1)
     plt.grid()
 
-    with FileLock('plotting'):
-        plt.savefig(os.path.join(save_path, 'debug.png'), bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, 'debug.png'), bbox_inches='tight')
 
 
 def plot_regression(pred, target, save_path, loss_smoothing_length=200,
@@ -574,8 +568,7 @@ def plot_regression(pred, target, save_path, loss_smoothing_length=200,
         plt.xlabel('Prediction')
         plt.ylabel('Target')
         plt.tight_layout()
-        with FileLock('plotting'):
-            plt.savefig(os.path.join(save_path, 'regression.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'regression.png'), bbox_inches='tight')
     except ValueError:
         # When arrays are empty
         logger.warning("An error occurred during regression plotting.")
@@ -621,8 +614,7 @@ def plot_kde(pred, target, save_path, limit=90, scale='same', grid=50,
         plt.contour(pg, tg, f)
         plt.plot([mt, Mt], [mt, Mt], 'r:')
         plt.tight_layout()
-        with FileLock('plotting'):
-            plt.savefig(os.path.join(save_path, 'regression_kde.png'), bbox_inches='tight')
+        plt.savefig(os.path.join(save_path, 'regression_kde.png'), bbox_inches='tight')
     except ValueError:
         # When arrays are empty
         logger.warning("An error occurred during regression kde plotting.")
@@ -728,5 +720,4 @@ def plot_exectimes(exectimes, save_path='~/exectimes.png', max_items=32):
     plt.ylabel('Node')
     plt.xlabel('Time (in ms)')
     ax = sns.barplot(y=node_names, x=node_exectimes)
-    with FileLock('plotting'):
-        ax.get_figure().savefig(os.path.expanduser(save_path), bbox_inches='tight')
+    ax.get_figure().savefig(os.path.expanduser(save_path), bbox_inches='tight')
