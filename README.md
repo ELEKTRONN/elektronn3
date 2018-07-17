@@ -1,3 +1,5 @@
+[![Read the Docs](https://readthedocs.org/projects/elektronn3/badge/?version=latest)](https://elektronn3.readthedocs.io/en/latest/)
+
 # elektronn3
 
 A PyTorch-based library for research on
