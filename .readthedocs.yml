@@ -1,2 +1,4 @@
 conda:
     file: docs/sphinx-environment.yml
+
+formats: []  # Disable htmlzip, pdf and epub builds to save resources
