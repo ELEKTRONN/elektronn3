@@ -33,17 +33,17 @@ class InferenceModel(object):
             start = time.time()
         if type(inp) is np.ndarray:
             inp = torch.Tensor(inp)
-        inp = inp.to(torch.float32).to(self.device)
         with torch.no_grad():
             # get output shape shape
-            out = self.model(inp[:1])
+            out = self.model(inp[:1].to(torch.float32).to(self.device))
             # change sample number according to input
             out = np.zeros([len(inp)] + list(out.shape)[1:], dtype=np.float32)
             for ii in range(0, int(np.ceil(len(inp) / bs))):
                 low = bs * ii
                 high = bs * (ii + 1)
-                inp_stride = inp[low:high]
+                inp_stride = inp[low:high].to(torch.float32).to(self.device)
                 out[low:high] = self.model(inp_stride)
+                del inp_stride
             assert high >= len(inp), "Prediction less samples then given" \
                                      " in input."
         if verbose:

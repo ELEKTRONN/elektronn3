@@ -141,14 +141,17 @@ class RandomFlip:
     def __call__(
             self,
             inp: np.ndarray,
-            target: Optional[np.ndarray]  # returned without modifications
+            target: Optional[np.ndarray] = None  # returned without modifications
     ) -> Tuple[np.ndarray, np.ndarray]:
         flip_dims = np.random.randint(0, 2, self.ndim_spatial)
         # flip all images at once
-        slices_inp = tuple([slice(None, None, 1) for ii in range(len(inp.shape) - self.ndim_spatial)] + \
-                 [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
-        slices_target = tuple([slice(None, None, 1) for ii in range(len(target.shape) - self.ndim_spatial)] + \
+        slices_inp = tuple([slice(None, None, 1) for _ in range(len(inp.shape) - self.ndim_spatial)] + \
                  [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
         inp_flipped = inp[slices_inp].copy()
-        target_flipped = target[slices_target].copy()
+        if target is not None:
+            slices_target = tuple([slice(None, None, 1) for _ in range(len(target.shape) - self.ndim_spatial)] + \
+                     [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+            target_flipped = target[slices_target].copy()
+        else:
+            target_flipped = None
         return inp_flipped, target_flipped

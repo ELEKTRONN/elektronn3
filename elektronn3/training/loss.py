@@ -135,6 +135,7 @@ class BlurryBoarderLoss(torch.nn.Module):
     # to label boundaries are reduced by applying weights which
     # are highest inside a class region and blurred at the boundaries
     # by Gaussian smoothing towards 0
+    # TODO: GPU support ->
     def __init__(self, softmax=True, sigma=2.5):
         super().__init__()
         self.sigma = sigma
@@ -153,7 +154,10 @@ class BlurryBoarderLoss(torch.nn.Module):
 
 
 def blurry_boarder_weights(output_shape, target, sigma):
-    boarder_w = target.cpu().numpy() # vigra.taggedView(target.numpy(), 'xcyz') ISSUE: gaussianSmoothing does not support t-axis which should be used as batch axis
+    boarder_w = target.cpu().numpy()
+    # vigra.taggedView(target.numpy(), 'xcyz') ISSUE: gaussianSmoothing does not
+    # support t-axis which should be used as batch axis
+    # conflicting python 3.5/.6 dependencies of vigra vs E3
     # smoothing is applied per-channel
     n_classes = output_shape[1]
     if np.isscalar(sigma):
