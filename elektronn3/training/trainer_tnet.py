@@ -3,7 +3,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert
+# Authors: Philipp Schubert, Martin Drawitsch
 import os
 import traceback
 from typing import Tuple, Dict, Optional
@@ -14,6 +14,7 @@ from torch.autograd import Variable
 import torch.utils.data
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.trainer import Trainer, logger, NaNException
+import numpy as np
 
 
 class TripletNetTrainer(Trainer):
@@ -149,7 +150,7 @@ class TripletNetTrainer(Trainer):
                     self.step += 1
                     if self.step >= max_steps:
                         break
-                stats['tr_err'] = float(running_error) / len(self.train_loader) * 100. / self.batchsize
+                stats['tr_err'] = float(running_error) / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
@@ -226,22 +227,21 @@ class TripletNetTrainer(Trainer):
     def validate(self) -> Tuple[float, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
-        val_loss = 0
-        incorrect = 0
-        numel = 0
+        val_loss = 0.
+        incorrect = 0.
         for inp in self.valid_loader:
-            inp0 = inp[0].to(self.device)
-            inp1 = inp[1].to(self.device)
-            inp2 = inp[2].to(self.device)
+            inp0 = inp[:, 0].to(self.device)
+            inp1 = inp[:, 1].to(self.device)
+            inp2 = inp[:, 2].to(self.device)
             with torch.no_grad():
                 dA, dB, _, _, _ = self.model(inp0, inp1, inp2)
                 target = torch.FloatTensor(dA.size()).fill_(1).to(self.device)
                 target = Variable(target)
                 val_loss += self.criterion(dA, dB, target)
-                numel += int(target.size()[0])
                 incorrect += calculate_error(dA, dB)
+                print(calculate_error(dA, dB), incorrect)
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
-        val_err = incorrect / float(numel) * 100.
+        val_err = incorrect / len(self.valid_loader)
         self.tb_log_sample_images(
             {'inp_ref': inp0, 'inp_+': inp1, 'inp_-': inp2},
             group='val_samples'
@@ -280,4 +280,4 @@ class TripletNetTrainer(Trainer):
 def calculate_error(dista, distb):
     margin = 0
     pred = (dista - distb - margin).cpu().data
-    return (pred < 0).sum()
+    return np.array((pred < 0).sum(), dtype=np.float32) / np.prod(dista.size()) * 100.
