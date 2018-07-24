@@ -23,7 +23,7 @@ class InferenceModel(object):
             self.model = load_model(src)
         else:
             self.model = src
-            self.model.eval()
+        self.model.eval()
         if multi_gpu:
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
@@ -35,16 +35,34 @@ class InferenceModel(object):
             inp = torch.Tensor(inp)
         with torch.no_grad():
             # get output shape shape
-            out = self.model(inp[:1].to(torch.float32).to(self.device))
+            if type(inp) is tuple:
+                out = self.model(*(torch.Tensor(ii[:1]).to(torch.float32).to(self.device) for ii in inp))
+                n_samples = len(inp[0])
+            else:
+                out = self.model(inp[:1].to(torch.float32).to(self.device))
+                n_samples = len(inp)
             # change sample number according to input
-            out = np.zeros([len(inp)] + list(out.shape)[1:], dtype=np.float32)
-            for ii in range(0, int(np.ceil(len(inp) / bs))):
+            if type(out) is tuple:
+                out = tuple(np.zeros([n_samples] + list(out[ii].shape)[1:],
+                               dtype=np.float32) for ii in range(len(out)))
+            else:
+                out = np.zeros([n_samples] + list(out.shape)[1:], dtype=np.float32)
+            for ii in range(0, int(np.ceil(n_samples / bs))):
                 low = bs * ii
                 high = bs * (ii + 1)
-                inp_stride = inp[low:high].to(torch.float32).to(self.device)
-                out[low:high] = self.model(inp_stride)
+                if type(inp) is tuple:
+                    inp_stride = tuple(torch.Tensor(ii[low:high]).to(torch.float32).to(self.device) for ii in inp)
+                    res = self.model(*inp_stride)
+                else:
+                    inp_stride = inp[low:high].to(torch.float32).to(self.device)
+                    res = self.model(inp_stride)
+                if type(res) is tuple:
+                    for ii in range(len(res)):
+                        out[ii][low:high] = res[ii]
+                else:
+                    out[low:high] = self.model(inp_stride)
                 del inp_stride
-            assert high >= len(inp), "Prediction less samples then given" \
+            assert high >=n_samples, "Prediction less samples then given" \
                                      " in input."
         if verbose:
             dtime = time.time() - start
@@ -72,6 +90,10 @@ def load_model(src: str) -> nn.Module:
     assert "get_model" in globals(), "'get_model' not defiend in trainer script."
     model = get_model()
     state_dict_p = glob.glob(f'{src}/*.pth')
+    if len(state_dict_p) > 1:
+        final_p = ["final" in sp for sp in state_dict_p]
+        if np.sum(final_p) == 1:
+            state_dict_p = [state_dict_p[np.argmax(final_p)]]
     assert len(state_dict_p) == 1, "Multiple/None state dict file(s). " \
                                    "Ill-defined state dict file."
     state_dict = torch.load(state_dict_p[0])
