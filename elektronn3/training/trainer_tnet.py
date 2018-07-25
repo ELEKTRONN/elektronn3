@@ -20,10 +20,11 @@ import numpy as np
 class TripletNetTrainer(Trainer):
     """
     Args:
-        alpha: l2-norm regularization weight of latent space results
+        alpha: l2-norm regularization weight
 
     """
-    def __init__(self, alpha=1e-3, alpha2=1, *args, **kwargs):
+    def __init__(self, alpha=1e-3, alpha2=1, latent_distr=None,
+                 *args, **kwargs):
         if len(args) > 0:
             raise ValueError("Please provide keyword arguments for "
                              "TripletNetTrainer init only.")
@@ -36,6 +37,9 @@ class TripletNetTrainer(Trainer):
         self.alpha2 = alpha2
         self.model_discr = model_discr.to(self.device)
         self.optimizer_discr = optim_discr
+        if latent_distr is None:
+            latent_distr = lambda n, z: torch.randn(n, z) * 5  # draw from N(0,5)
+        self.latent_distr = latent_distr
 
     # overwrite train and validate method
     def train(self, max_steps: int = 1) -> None:
@@ -61,7 +65,7 @@ class TripletNetTrainer(Trainer):
                 running_mean_target = 0
                 running_vx_size = 0
                 timer = Timer()
-                for inp in self.train_loader:
+                for inp in self.train_loader:  # ref., pos., neg. samples
                     if inp.size()[1] != 3:
                         raise ValueError("Data must not contain targets. "
                                          "Input data shape is assumed to be "
@@ -75,12 +79,11 @@ class TripletNetTrainer(Trainer):
 
                     # forward pass
                     dA, dB, z0, z1, z2 = self.model(inp0, inp1, inp2)
-                    target = torch.FloatTensor(dA.size()).fill_(1).to(self.device)
+                    target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                     target = Variable(target)
                     loss = self.criterion(dA, dB, target)
                     stats['tr_loss_distance'] += float(loss)
-                    loss_z = torch.sum(z0.norm(2, dim=1) + z1.norm(2, dim=1) +
-                                       z2.norm(2, dim=1))
+                    loss_z = torch.sum(z0.norm(2, dim=1) + z1.norm(2, dim=1) + z2.norm(2, dim=1))
                     stats['tr_loss_z'] += self.alpha * float(loss_z)
                     loss = loss + self.alpha * loss_z
                     if torch.isnan(loss):
@@ -93,30 +96,35 @@ class TripletNetTrainer(Trainer):
                     self.optimizer.step()
 
                     # Adversarial part to enforce latent variable distribution
-                    # to be Normal
-                    # generate latent representations
-                    self.model.eval()
-                    # generate 3 * latent space size Gaussian samples and compare to; draw from N(0, 2)
-                    z_real_gauss = Variable(torch.randn(inp0.size()[0], z0.size()[-1] * 3) * 2).to(self.device)
-                    _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
-                    z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
-                    # Compute discriminator outputs and loss
-                    D_real_gauss = self.model_discr(z_real_gauss)
-                    D_fake_gauss = self.model_discr(z_fake_gauss)
-                    D_loss = -torch.mean(torch.log(D_real_gauss) + torch.log(1 - D_fake_gauss))
-                    D_loss.backward()  # Backprop loss
-                    self.optimizer_discr.step()  # Apply optimization step
+                    if self.alpha2 > 0:
+                        # to be Normal
+                        # generate latent representations
+                        self.model.eval()
+                        # generate 3 * latent space size Gaussian samples and compare to; draw from N(0, 2)
+                        z_real_gauss = Variable(self.latent_distr(inp0.size()[0], z0.size()[-1] * 3)).to(self.device)
+                        _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
+                        z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
+                        # Compute discriminator outputs and loss
+                        D_real_gauss = self.model_discr(z_real_gauss)
+                        D_fake_gauss = self.model_discr(z_fake_gauss)
+                        D_loss = -torch.mean(torch.log(D_real_gauss) + torch.log(1 - D_fake_gauss))
+                        D_loss.backward()  # Backprop loss
+                        self.optimizer_discr.step()  # Apply optimization step
 
-                    # calculate loss of representation network and update weights
-                    self.model.train()  # Back to use dropout
-                    # rebuild graph (model output) to get clean backprop.
-                    _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
-                    z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
-                    D_fake_gauss = self.model_discr(z_fake_gauss)
+                        # calculate loss of representation network and update weights
+                        self.model.train()  # Back to use dropout
+                        # rebuild graph (model output) to get clean backprop.
+                        _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
+                        z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
+                        D_fake_gauss = self.model_discr(z_fake_gauss)
 
-                    R_loss = self.alpha2 * -torch.mean(torch.log(D_fake_gauss))
-                    R_loss.backward()
-                    self.optimizer.step()
+                        R_loss = self.alpha2 * -torch.mean(torch.log(D_fake_gauss))
+                        R_loss.backward()
+                        self.optimizer.step()
+                        R_loss.detach_()
+                        D_loss.detach_()
+                        stats['tr_loss_rep'] += float(R_loss)
+                        stats['tr_loss_discr'] += float(D_loss)
 
                     # Prevent accidental autograd overheads after optimizer step
                     inp.detach_()
@@ -128,13 +136,9 @@ class TripletNetTrainer(Trainer):
                     z2.detach_()
                     loss.detach_()
                     loss_z.detach_()
-                    R_loss.detach_()
-                    D_loss.detach_()
+
 
                     # get training performance
-                    stats['tr_loss'] += float(loss)
-                    stats['tr_loss_rep'] += float(R_loss)
-                    stats['tr_loss_discr'] += float(D_loss)
                     stats['tr_loss'] += float(loss)
                     error = calculate_error(dA, dB)
                     mean_target = target.to(torch.float32).mean()
@@ -258,7 +262,7 @@ class TripletNetTrainer(Trainer):
                     logger.warning("Difference between reference and negative sample"
                                 " is almost zero: {} and {}"
                                 "".format(diff_ref, diff_neg))
-                target = torch.FloatTensor(dA.size()).fill_(1).to(self.device)
+                target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                 target = Variable(target)
                 val_loss += float(self.criterion(dA, dB, target))
                 incorrect += calculate_error(dA, dB)
@@ -301,5 +305,5 @@ class TripletNetTrainer(Trainer):
 
 def calculate_error(dista, distb):
     margin = 0
-    pred = (dista - distb - margin).cpu().data
+    pred = (distb - dista - margin).cpu().data
     return np.array((pred <= 0).sum(), dtype=np.float32) / np.prod(dista.size()) * 100.
