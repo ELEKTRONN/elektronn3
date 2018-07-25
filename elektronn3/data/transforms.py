@@ -8,12 +8,11 @@
 Transformations (data augmentation, normalization etc.) for semantic segmantation.
 
 Important note: The transformations here have a similar interface to
- torchvsion.transforms, but there are two key differences:
- 1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
-    pairs instead of just inp to inp.
-    Most transforms don't change the target, though.
- 2. They exclusively operate on numpy.ndarray data instead of PIL or
-    torch.Tensor data.
+torchvsion.transforms, but there are two key differences:
+
+1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
+  pairs instead of just inp to inp. Most transforms don't change the target, though.
+2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
 from typing import Sequence, Tuple, Optional, Dict, Any, Union
@@ -78,6 +77,41 @@ class Normalize:
         return normalized, target
 
 
+class AdditiveGaussianNoise:
+    """Adds random gaussian noise to the input.
+
+    Args:
+        sigma: Sigma parameter of the gaussian distribution to draw from
+        channels: If ``channels`` is ``None``, the noise is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, noise is only applied
+            to the specified channels.
+        rng: Optional random state for deterministic execution
+    """
+    def __init__(
+            self,
+            sigma: float = 0.1,
+            channels: Optional[Sequence[int]] = None,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.sigma = sigma
+        self.channels = channels
+        self.rng = np.random.RandomState() if rng is None else rng
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        noise = np.zeros_like(inp)
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        for c in channels:
+            noise[c] = self.rng.normal(0, self.sigma, inp[c].shape)
+        noisy_inp = inp + noise
+        return noisy_inp, target
+
+
 class RandomBlurring:  # Warning: This operates in-place!
 
     _default_scheduler = random_blurring.ScalarScheduler(
@@ -101,6 +135,7 @@ class RandomBlurring:  # Warning: This operates in-place!
             patch_shape: Optional[Sequence[int]] = None
     ):
         self.config = {**self._default_config, **config}
+        # TODO: support random state
         if patch_shape is not None:
             random_blurring.check_random_data_blurring_config(patch_shape, **config)
 
@@ -117,6 +152,7 @@ class RandomBlurring:  # Warning: This operates in-place!
 
 class RandomCrop:
     def __init__(self, size: Sequence[int]):
+        # TODO: support random state
         self.size = np.array(size)
 
     def __call__(
