@@ -1,11 +1,4 @@
-build:
-  image: latest
+conda:
+    file: docs/sphinx-environment.yml
 
-python:
-  version: 3.6
-  pip_install: true
-
-# conda:
-    # file: environment.yml
-
-requirements_file: docs/sphinx-requirements.txt
+formats: []  # Disable htmlzip, pdf and epub builds to save resources

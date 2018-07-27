@@ -69,19 +69,6 @@ class LovaszLoss(torch.nn.Module):
         return self.lovasz(probs, target)
 
 
-# TODO: Move this to a dedicated metrics submodule?
-def dice_error(probs, target, softmax=True, *args, **kwargs):
-    """Calculate dice loss without accumulating gradients.
-
-    You can use this function if the dice loss is just used as a performance
-    metric, but not as the direct optimizer objective.
-    """
-    probs, target = probs.detach(), target.detach()
-    if softmax:
-        probs = F.softmax(probs, dim=1)
-    return dice_loss(probs.detach(), target.detach(), *args, **kwargs)
-
-
 ##### ALTERNATIVE VERSIONS OF DICE LOSS #####
 
 # Version with features that are untested and currently not needed

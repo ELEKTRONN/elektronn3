@@ -111,10 +111,6 @@ class PatchCreator(data.Dataset):
             validation/logging/plotting are performed by the training loop
             that uses this data set (e.g.
             ``elektronn3.training.trainer.Trainer``).
-        squeeze_target: If ``True``, target tensors will be squeezed in their
-            channel axis if it is empty. This workaround and will be removed
-            later. It is currently needed to support targets that have an
-            extra channel axis which doesn't exist in the network outputs.
         transform: Transformation function to be applied to ``(inp, target)``
             samples (for normalization, data augmentation etc.). The signature
             is always ``inp, target = transform(inp, target)``, where ``inp``
@@ -122,7 +118,7 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-        num_classes: The total number of different target classes that exist
+        classes: The different target classes that exist
             in the data set. Setting this is optional, but some features might
             only work if this is specified.
     """
@@ -139,9 +135,8 @@ class PatchCreator(data.Dataset):
             warp: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
-            squeeze_target: bool = False,
             transform: Callable = transforms.Identity(),
-            num_classes: Optional[int] = None
+            classes: Optional[Sequence[int]] = None
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
@@ -159,14 +154,6 @@ class PatchCreator(data.Dataset):
         self.train = train
         self.warp = warp
         self.warp_kwargs = warp_kwargs
-        self.squeeze_target = squeeze_target
-        # TODO: Instead of overly specific hacks like squeeze_target, we should
-        #       make "transformations" like this fully customizable, similar to
-        #       the `torchvision.transforms` interface.
-        #       E.g. squeeze_target could then be implemented as a
-        #       `lambda x: x.squeeze(0)` transformation that can be combined
-        #       with others. Non-geometric augmentations and normalization could
-        #       also be implemented as pluggable transformations.
 
         # general properties
         input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
@@ -174,12 +161,16 @@ class PatchCreator(data.Dataset):
         self.input_h5data = input_h5data
         self.target_h5data = target_h5data
         self.cube_prios = cube_prios
-        # TODO: Support separate validation data? (Not using indices, but an own validation list)
         self.aniso_factor = aniso_factor
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
-        self.num_classes = num_classes
+        # TODO: This is currently only used for determining num_classes. It
+        #       could be used for adding support for targets that are not
+        #       labelled in the expected order [0, 1, ..., num_classes - 1] or
+        #       as a whitelist that excludes classes that should be ignored.
+        self.classes = classes
+        self.num_classes = None if classes is None else len(classes)
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
@@ -191,13 +182,10 @@ class PatchCreator(data.Dataset):
         #   could mess up targets in unfortunate cases:
         #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
         self.offsets = np.array([0, 0, 0])
-        self.target_ps = self.patch_shape  - self.offsets * 2
+        self.target_patch_size = self.patch_shape - self.offsets * 2
         self._target_dtype = np.int64
-        self.mode = 'img-img'  # TODO: what would change for img-scalar? Is that even neccessary?
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
-        self.c_input = None  # Number of input channels
-        self.c_target = None  # Number of target channels
 
         # Actual data fields
         self.inputs = []
@@ -235,7 +223,7 @@ class PatchCreator(data.Dataset):
         return self._get_random_sample()
 
     def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray]:
-        #                                      np.float32, self._target_dtype
+        #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
         self._reseed()
@@ -288,17 +276,6 @@ class PatchCreator(data.Dataset):
             inp, target = self.transform(inp, target)
             break
 
-        # target is now of shape (K, D, H, W), where K is the number of
-        #  target channels (not to be confused with the number of classes
-        #  for the classification problem, C.
-        if self.squeeze_target:
-            # If K == 1, K is squeezed here to match common network output
-            #  shapes (which usually lack a K axis).
-            # Make sure it's actually the channel axis we're squeezing here,
-            #  not a spatial dimension that's coincidentally of size 1:
-            assert len(self.target_ps) == target_src.ndim - 1
-            target = target.squeeze(0)  # (K, (D,) H, W) -> ((D,) H, W)
-
         # inp, target are still numpy arrays here. Relying on auto-conversion to
         #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
         return inp, target
@@ -306,13 +283,14 @@ class PatchCreator(data.Dataset):
     def __len__(self) -> int:
         return self.epoch_size
 
-    def __repr__(self) -> str:
-        s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
-            "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
-            "pixels."
-        s = s.format(self.c_target, self.c_input, self._training_count,
-                     self._valid_count, self.n_labelled_pixels)
-        return s
+    # TODO: Write a good __repr__(). The version below is completely outdated.
+    # def __repr__(self) -> str:
+    #     s = "{0:,d}-target Data Set with {1:,d} input channel(s):\n" + \
+    #         "#train cubes: {2:,d} and #valid cubes: {3:,d}, {4:,d} labelled " + \
+    #         "pixels."
+    #     s = s.format(self.c_target, self.c_input, self._training_count,
+    #                  self._valid_count, self.n_labelled_pixels)
+    #     return s
 
     def _create_preview_batch(
             self,
@@ -352,13 +330,6 @@ class PatchCreator(data.Dataset):
 
         inp = torch.from_numpy(inp_np)
         target = torch.from_numpy(target_np)
-
-        # See comments at the end of PatchCreator.__getitem__()
-        # Note that here it's the dimension index 1 that we're squeezing,
-        #  because index 0 is the batch dimension.
-        if self.squeeze_target:
-            assert len(self.target_ps) == target_source.ndim - 1
-            target = target.squeeze(1)  # (N, K, (D,), H, W) -> (N, (D,) H, W)
 
         return inp, target
 
@@ -442,15 +413,23 @@ class PatchCreator(data.Dataset):
             warp_kwargs = dict(warp_kwargs)
             warp_kwargs['warp_amount'] = 0
 
-        inp, target = coord_transforms.get_warped_slice(
-            inp_src,
-            self.patch_shape,
+        M = coord_transforms.get_warped_coord_transform(
+            inp_src_shape=inp_src.shape,
+            patch_shape=self.patch_shape,
             aniso_factor=self.aniso_factor,
-            target_src=target_src,
-            target_ps=self.target_ps,
-            target_discrete_ix=self.target_discrete_ix,
+            target_src_shape=target_src.shape,
+            target_patch_shape=self.target_patch_size,
             rng=self.rng,
             **warp_kwargs
+        )
+
+        inp, target = coord_transforms.warp_slice(
+            inp_src=inp_src,
+            patch_shape=self.patch_shape,
+            M=M,
+            target_src=target_src,
+            target_patch_shape=self.target_patch_size,
+            target_discrete_ix=self.target_discrete_ix
         )
 
         return inp, target
@@ -528,16 +507,6 @@ class PatchCreator(data.Dataset):
             inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
 
-            # assert inp_h5.ndim == 4
-            # assert target_h5.ndim == 4
-            if inp_h5.ndim == 4:
-                self.c_input = inp_h5.shape[0]
-                self.c_target = target_h5.shape[0]
-                self.n_labelled_pixels += target_h5[0].size
-            elif inp_h5.ndim == 3:
-                self.c_input = 1
-                self.c_target = 1
-                self.n_labelled_pixels += target_h5.size
             print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
             print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
             inp_h5sets.append(inp_h5)

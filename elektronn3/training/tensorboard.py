@@ -86,7 +86,7 @@ class TensorBoardLogger:
         specify the global number of possible classes in ``num_classes``."""
 
         # Determine colormap and set discrete color values if needed.
-        vmax = None
+        vmin, vmax = None, None
         ticks = None
         if cmap is None and num_classes is not None:
             # Assume label matrix with qualitative classes, no meaningful order
@@ -101,13 +101,14 @@ class TensorBoardLogger:
             #  values of the image to be plotted. This could lead to misleading
             #  visualizations if the maximum value of the array to be plotted
             #  is less than the global maximum of classes.
+            vmin = 0
             vmax = num_classes
 
         def image_summary(img: np.ndarray) -> tf.Summary.Image:
             image_bytes = BytesIO()  # Bytestring for storing the image
 
             fig, ax = plt.subplots()
-            aximg = ax.imshow(img, cmap=cmap, vmax=vmax)
+            aximg = ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
             if colorbar:
                 fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
             fig.savefig(image_bytes, format='png')

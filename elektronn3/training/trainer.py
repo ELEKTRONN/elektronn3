@@ -11,7 +11,7 @@ import traceback
 import shutil
 
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence
 
 import inspect
 import IPython
@@ -25,7 +25,8 @@ from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 from elektronn3.training import collect_env
-from elektronn3.data.utils import save_to_h5, squash01
+from elektronn3.training import metrics
+from elektronn3.data.utils import squash01
 from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
@@ -73,6 +74,9 @@ class Trainer:
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
+        valid_metrics: Validation metrics to be calculated on
+            validation data after each training epoch. All metrics are logged
+            to tensorboard.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -111,13 +115,13 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
-        num_classes: Optionally specifies the number of different target
+        classes: Optionally specifies the different target
             classes for classification tasks. If this is not set manually,
             the ``Trainer`` checks if the ``train_dataset`` provides this
             value. If available, ``self.num_classes`` is set to
-            ``self.train_dataset.num_classes``. Otherwise, it is set to
+            ``self.train_dataset.classes``. Otherwise, it is set to
             ``None``.
-            The num_classes attribute is used for plotting purposes and is
+            The ``classes`` attribute is used for plotting purposes and is
             not strictly required for training.
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
@@ -143,6 +147,7 @@ class Trainer:
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            valid_metrics: Optional[Dict] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -152,7 +157,7 @@ class Trainer:
             tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
             ipython_on_error: bool = False,
-            num_classes: Optional[int] = None,
+            classes: Optional[Sequence[int]] = None,
     ):
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
@@ -162,6 +167,7 @@ class Trainer:
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.valid_metrics = valid_metrics
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -189,9 +195,11 @@ class Trainer:
         self.schedulers = schedulers
 
         # Determine optional dataset properties
+        self.classes = classes
         self.num_classes = None
-        if hasattr(self.train_dataset, 'num_classes'):
-            self.num_classes = self.train_dataset.num_classes
+        if hasattr(self.train_dataset, 'classes'):
+            self.classes = self.train_dataset.classes
+            self.num_classes = len(self.train_dataset.classes)
         self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
             and valid_dataset.preview_shape is not None
 
@@ -226,6 +234,7 @@ class Trainer:
                 timeout=30
             )
 
+        self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
     # TODO: Modularize, make some general parts reusable for other trainers.
     def train(self, max_steps: int = 1) -> None:
@@ -245,7 +254,7 @@ class Trainer:
                 # Hold image tensors for real-time training sample visualization in tensorboard
                 images: Dict[str, torch.Tensor] = {}
 
-                running_error = 0
+                running_acc = 0
                 running_mean_target = 0
                 running_vx_size = 0
                 timer = Timer()
@@ -272,7 +281,7 @@ class Trainer:
 
                     # get training performance
                     stats['tr_loss'] += float(loss)
-                    error = calculate_error(out, target)
+                    acc = metrics.bin_accuracy(target, out)  # TODO
                     mean_target = target.to(torch.float32).mean()
                     print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
                     self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
@@ -292,23 +301,24 @@ class Trainer:
                         else:
                             sched.step()
 
-                    running_error += error
+                    running_acc += acc
                     running_mean_target += mean_target
                     running_vx_size += inp.numel()
 
                     self.step += 1
                     if self.step >= max_steps:
                         break
-                stats['tr_err'] = running_error / len(self.train_loader)
+                stats['tr_accuracy'] = running_acc / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
                 mean_target = running_mean_target / len(self.train_loader)
                 if self.valid_dataset is None:
-                    stats['val_loss'], stats['val_err'] = float('nan'), float('nan')
+                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
                 else:
-                    stats['val_loss'], stats['val_err'] = self.validate()
-                # TODO: Report more metrics, e.g. dice error
+                    valid_stats = self.validate()
+                    stats.update(valid_stats)
+
 
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.
@@ -318,14 +328,14 @@ class Trainer:
                     tr_loss_gain = 0
                 self._tracker.update_history([
                     self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
-                    tr_loss_gain, stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0
+                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
                 ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
                 loss_smooth = self._tracker.loss._ema
 
                 # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_err'])
-                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
+                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
+                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", mean_target * 100, tr_loss_gain)
                 text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
 
@@ -334,7 +344,8 @@ class Trainer:
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self.tb_log_scalars(stats, misc)
+                    self.tb_log_scalars(stats, 'stats')
+                    self.tb_log_scalars(misc, 'misc')
                     if self.previews_enabled:
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
@@ -373,43 +384,41 @@ class Trainer:
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
 
-    def validate(self) -> Tuple[float, float]:
+    def validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
-        incorrect = 0
-        numel = 0
+        stats = {name: 0 for name in self.valid_metrics.keys()}
         for inp, target in self.valid_loader:
             inp, target = inp.to(self.device), target.to(self.device)
             with torch.no_grad():
                 out = self.model(inp)
-                numel += int(target.numel())
-                val_loss += float(self.criterion(out, target))
-                maxcl = out.argmax(1)  # get the index of the max log-probability
-                incorrect += int(maxcl.ne(target).long().sum())
-        val_loss /= len(self.valid_loader)  # loss function already averages over batch size
-        val_err = 100. * incorrect / numel
+                val_loss += self.criterion(out, target).item() / len(self.valid_loader)
+                for name, evaluator in self.valid_metrics.items():
+                    stats[name] += evaluator(target, out) / len(self.valid_loader)
+
         self.tb_log_sample_images(
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
 
+        stats['val_loss'] = val_loss
+
         self.model.train()  # Reset model to training mode
 
-        return val_loss, val_err
+        # TODO: Refactor: Either remove side effects (plotting)
+        return stats
 
     def tb_log_scalars(
             self,
-            stats: Dict[str, float],
-            misc: Dict[str, float]
+            scalars: Dict[str, float],
+            tag: str = 'default'
     ) -> None:
-        for key, value in stats.items():
-            self.tb.log_scalar(f'stats/{key}', value, self.step)
-        for key, value in misc.items():
-            self.tb.log_scalar(f'misc/{key}', value, self.step)
+        for key, value in scalars.items():
+            self.tb.log_scalar(f'{tag}/{key}', value, self.step)
 
+    @staticmethod
     def _get_batch2img_function(
-            self,
             batch: torch.Tensor,
             z_plane: Optional[int] = None
     ) -> Callable[[torch.Tensor], np.ndarray]:
@@ -524,33 +533,6 @@ class Trainer:
         #       This normalization issue gets worse with higher alpha values
         #       (i.e. with more contribution of the overlayed label map).
         #       Don't know how to fix this currently.
-
-
-def calculate_error(out, target):
-    numel = int(target.numel())
-    maxcl = out.argmax(1)
-    incorrect = maxcl.ne(target).sum()
-    error = 100. * incorrect / numel
-    return error.item()
-
-
-# TODO: Move all the functions below out of trainer.py
-
-# TODO
-def save_to_h5(fname: str, model_output: torch.Tensor):
-    raise NotImplementedError
-
-    maxcl = model_output.argmax(1)  # TODO: Ensure correct shape
-    save_to_h5(
-        [maxcl, dataset.valid_d[0][0, :shape[0], :shape[1], :shape[2]].astype(np.float32)],
-        fname,
-        hdf5_names=["pred", "raw"]
-    )
-    save_to_h5(
-        [np.exp(model_output.view([1, 2, shape[0], shape[1], shape[2]])[0, 1].cpu().numpy(), dtype=np.float32)],
-        fname+"prob.h5",
-        hdf5_names=["prob"]
-    )
 
 
 def preview_inference(

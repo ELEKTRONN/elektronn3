@@ -8,19 +8,18 @@
 Transformations (data augmentation, normalization etc.) for semantic segmantation.
 
 Important note: The transformations here have a similar interface to
- torchvsion.transforms, but there are two key differences:
- 1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
-    pairs instead of just inp to inp.
-    Most transforms don't change the target, though.
- 2. They exclusively operate on numpy.ndarray data instead of PIL or
-    torch.Tensor data.
+torchvsion.transforms, but there are two key differences:
+
+1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
+  pairs instead of just inp to inp. Most transforms don't change the target, though.
+2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
 from typing import Sequence, Tuple, Optional, Dict, Any, Union
 
 import numpy as np
 
-from elektronn3.data.random_blurring import apply_random_blurring, check_random_data_blurring_config
+from elektronn3.data import random_blurring
 
 
 # Transformation = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
@@ -67,6 +66,7 @@ class Normalize:
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
         normalized = np.empty_like(inp)
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
@@ -77,15 +77,67 @@ class Normalize:
         return normalized, target
 
 
+class AdditiveGaussianNoise:
+    """Adds random gaussian noise to the input.
+
+    Args:
+        sigma: Sigma parameter of the gaussian distribution to draw from
+        channels: If ``channels`` is ``None``, the noise is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, noise is only applied
+            to the specified channels.
+        rng: Optional random state for deterministic execution
+    """
+    def __init__(
+            self,
+            sigma: float = 0.1,
+            channels: Optional[Sequence[int]] = None,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.sigma = sigma
+        self.channels = channels
+        self.rng = np.random.RandomState() if rng is None else rng
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        noise = np.zeros_like(inp)
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        for c in channels:
+            noise[c] = self.rng.normal(0, self.sigma, inp[c].shape)
+        noisy_inp = inp + noise
+        return noisy_inp, target
+
+
 class RandomBlurring:  # Warning: This operates in-place!
+
+    _default_scheduler = random_blurring.ScalarScheduler(
+        value=0.1,
+        max_value=0.5,
+        growth_type="lin",
+        interval=500000,
+        steps_per_report=1000
+    )
+    _default_config = {
+        "probability": 0.5,
+        "threshold": _default_scheduler,
+        "lower_lim_region_size": [3, 6, 6],
+        "upper_lim_region_size": [8, 16, 16],
+        "verbose": False,
+    }
+
     def __init__(
             self,
             config: Dict[str, Any],
             patch_shape: Optional[Sequence[int]] = None
     ):
-        self.config = config
+        self.config = {**self._default_config, **config}
+        # TODO: support random state
         if patch_shape is not None:
-            check_random_data_blurring_config(patch_shape, **config)
+            random_blurring.check_random_data_blurring_config(patch_shape, **config)
 
     def __call__(
             self,
@@ -94,12 +146,13 @@ class RandomBlurring:  # Warning: This operates in-place!
     ) -> Tuple[np.ndarray, np.ndarray]:
         # In-place, overwrites inp!
         assert inp.ndim == 4, 'Currently only (C, D, H, W) inputs are supported.'
-        apply_random_blurring(inp_sample=inp, **self.config)
+        random_blurring.apply_random_blurring(inp_sample=inp, **self.config)
         return inp, target
 
 
 class RandomCrop:
     def __init__(self, size: Sequence[int]):
+        # TODO: support random state
         self.size = np.array(size)
 
     def __call__(
@@ -133,6 +186,25 @@ class RandomCrop:
             full_slice = full_slice[1:]  # Remove C axis from slice because target doesn't have it
         target_cropped = target[full_slice]
         return inp_cropped, target_cropped
+
+
+class SqueezeTarget:
+    """Squeeze a specified dimension in target tensors.
+
+    (This is just needed as a workaround for the example neuro_data_cdhw data
+    set, because its targets have a superfluous first dimension.)"""
+    def __init__(self, dim, inplace=True):
+        self.dim = dim
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # Returned without modifications
+            target: np.ndarray,
+    ):
+        return inp, target.squeeze(axis=self.dim)
+
+
+# TODO: Handle target striding and offsets via transforms?
 
 
 class RandomFlip:
