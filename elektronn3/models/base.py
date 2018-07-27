@@ -13,7 +13,7 @@ from elektronn3.training.train_utils import pretty_string_time
 
 
 class InferenceModel(object):
-    def __init__(self, src, disable_cuda=False, multi_gpu=True):
+    def __init__(self, src, disable_cuda=False, multi_gpu=False):
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -36,10 +36,10 @@ class InferenceModel(object):
         with torch.no_grad():
             # get output shape shape
             if type(inp) is tuple:
-                out = self.model(*(torch.Tensor(ii[:1]).to(torch.float32).to(self.device) for ii in inp))
+                out = self.model(*(torch.Tensor(ii[:2]).to(torch.float32).to(self.device) for ii in inp))
                 n_samples = len(inp[0])
             else:
-                out = self.model(inp[:1].to(torch.float32).to(self.device))
+                out = self.model(inp[:2].to(torch.float32).to(self.device))
                 n_samples = len(inp)
             # change sample number according to input
             if type(out) is tuple:

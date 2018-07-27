@@ -38,7 +38,7 @@ class TripletNetTrainer(Trainer):
         self.model_discr = model_discr.to(self.device)
         self.optimizer_discr = optim_discr
         if latent_distr is None:
-            latent_distr = lambda n, z: torch.randn(n, z) * 5  # draw from N(0,5)
+            latent_distr = lambda n, z: torch.randn(n, z)  # draw from N(0, 1)
         self.latent_distr = latent_distr
 
     # overwrite train and validate method
@@ -256,12 +256,12 @@ class TripletNetTrainer(Trainer):
             inp2 = inp[:, 2].to(self.device)
             with torch.no_grad():
                 dA, dB, z0, z1, z2 = self.model(inp0, inp1, inp2)
-                diff_ref = np.linalg.norm(z0-z1)
-                diff_neg = np.linalg.norm(z0-z2)
-                if diff_ref < 1e-7 and diff_neg < 1e-7:
-                    logger.warning("Difference between reference and negative sample"
-                                " is almost zero: {} and {}"
-                                "".format(diff_ref, diff_neg))
+                # diff_ref = np.linalg.norm(z0-z1)
+                # diff_neg = np.linalg.norm(z0-z2)
+                # if diff_ref < 1e-7 and diff_neg < 1e-7:
+                #     logger.warning("Difference between reference and negative sample"
+                #                 " is almost zero: {} and {}"
+                #                 "".format(diff_ref, diff_neg))
                 target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                 target = Variable(target)
                 val_loss += float(self.criterion(dA, dB, target))
