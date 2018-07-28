@@ -18,6 +18,7 @@ torchvsion.transforms, but there are two key differences:
 from typing import Sequence, Tuple, Optional, Dict, Any, Union
 
 import numpy as np
+import skimage.exposure
 
 from elektronn3.data import random_blurring
 
@@ -77,6 +78,65 @@ class Normalize:
         return normalized, target
 
 
+# TODO: Per-channel gamma_std, infer channels from gamma_std shape? Same with AdditiveGaussianNoise
+# TODO: Sample from a more suitable distribution. Due to clipping to gamma_min,
+#       there is currently a strong bias towards this value.
+class RandomGammaCorrection:
+    """Applies random gamma correction to the input.
+
+    Args:
+        gamma_std: standard deviation of the gamma value.
+        channels: If ``channels`` is ``None``, the noise is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, noise is only applied
+            to the specified channels.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``.
+        rng: Optional random state for deterministic execution
+    """
+    def __init__(
+            self,
+            gamma_std: float = 0.5,
+            channels: Optional[Sequence[int]] = None,
+            prob: float = 1.0,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.gamma_std = gamma_std
+        self.channels = channels
+        self.prob = prob
+        self.rng = np.random.RandomState() if rng is None else rng
+        self.gamma_min = 0.25
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.rng.rand() > self.prob:
+            return inp, target
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        gcorr = np.empty_like(inp)
+        for c in channels:
+            gamma = self.rng.normal(1.0, self.gamma_std)
+            gamma = max(self.gamma_min, gamma)  # Prevent gamma <= 0 (0 causes zero division)
+            # adjust_gamma() requires inputs in the (0, 1) range, so the
+            #  image intensity values are rescaled to (0, 1) and after
+            #  applying gamma correction they are rescaled back to the original
+            #  intensity range.
+            orig_intensity_range = inp[c].min(), inp[c].max()
+            rescaled = skimage.exposure.rescale_intensity(inp[c], out_range=(0, 1))
+            gcorr01c = skimage.exposure.adjust_gamma(rescaled, gamma)  # still in (0, 1) range
+            # Rescale to original (normalized) intensity range
+            gcorr[c] = skimage.exposure.rescale_intensity(gcorr01c, out_range=orig_intensity_range)
+
+        return gcorr, target
+
+
+# TODO: [Random]GaussianBlur
+
+
 class AdditiveGaussianNoise:
     """Adds random gaussian noise to the input.
 
@@ -86,16 +146,21 @@ class AdditiveGaussianNoise:
             all channels of the input tensor.
             If ``channels`` is a ``Sequence[int]``, noise is only applied
             to the specified channels.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``.
         rng: Optional random state for deterministic execution
     """
     def __init__(
             self,
             sigma: float = 0.1,
             channels: Optional[Sequence[int]] = None,
+            prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
         self.sigma = sigma
         self.channels = channels
+        self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
 
     def __call__(
@@ -104,7 +169,9 @@ class AdditiveGaussianNoise:
             target: Optional[np.ndarray] = None  # returned without modifications
             # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        noise = np.zeros_like(inp)
+        if self.rng.rand() > self.prob:
+            return inp, target
+        noise = np.empty_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         for c in channels:
             noise[c] = self.rng.normal(0, self.sigma, inp[c].shape)
@@ -205,3 +272,15 @@ class SqueezeTarget:
 
 
 # TODO: Handle target striding and offsets via transforms?
+
+# TODO: Meta-transform that performs a wrapped transform with a certain
+#       probability, replacing prob params?
+
+# TODO: Functional API (transforms.functional).
+#       The current object-oriented interface should be rewritten as a wrapper
+#       for the functional API (see implementation in torchvision).
+
+# TODO: Extract a non-random version from each random transform.
+#       E.g. RandomGammaCorrection should wrap GammaCorrection, which takes
+#       the actual gamma value as an argument instead of a parametrization
+#       of the random distribution from which gamma is sampled.
