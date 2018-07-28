@@ -91,6 +91,8 @@ common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
+    transforms.RandomGrayAugment(channels=[0], prob=0.8),
+    # transforms.AdditiveGaussianNoise(sigma=0.2, channels=[0], prob=0.1)
     # transforms.RandomBlurring({'probability': 0.5})
 ])
 valid_transform = transforms.Compose(common_transforms + [])
