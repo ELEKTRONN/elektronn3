@@ -134,6 +134,76 @@ class RandomGammaCorrection:
         return gcorr, target
 
 
+# TODO: The current necessity of intensity rescaling for normalized
+#       (zero mean, unit std) inputs is really uncool. Can we circumvent this?
+class RandomGrayAugment:
+    r"""Performs gray value augmentations in the same way as ELEKTRONN2's
+    ``greyAugment()`` function, but with additional support for inputs
+    outside of the :math:`[0, 1]` intensity value range. Targets are not
+    modified.
+
+    This augmentation method randomly selects the values ``alpha``, ``beta``
+    and ``gamma`` within *sensible* ranges and subsequently performs:
+
+    - Temporarily rescaling image intensities to the :math:`[0, 1]` range
+      (necessary for gamma correction).
+    - Linear intensity scaling (contrast) by multiplying the input with
+      :math:`\alpha = 1 + 0.3r`, where :math:`r \in \mathcal{U}[-0.5, 0.5]`.
+      Value range: :math:`\alpha \in [0.85, 1.15]`.
+    - Adding a constant value :math:`\beta = 0.3r`, where
+      :math:`r \in \mathcal{U}[-0.5, 0.5]`.
+      Value range: :math:`\beta \in [-0.15, 0.15]`.
+    - Gamma correction with :math:`\gamma = 2^r`, where
+      :math:`r \in \mathcal{U}[-1, 1]`.
+    - Clipping all image intensity values to the range :math:`[0, 1]`.
+    - Re-rescaling intensities back to the original input value range.
+    """
+    def __init__(
+            self,
+            channels: Optional[Sequence[int]] = None,
+            prob: float = 1.0,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.channels = channels
+        self.prob = prob
+        self.rng = np.random.RandomState() if rng is None else rng
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.rng.rand() > self.prob:
+            return inp, target
+
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+
+        nc = len(channels)
+        aug = inp.copy()  # Copy so we don't overwrite inp
+
+        # The calculations below have to be performed on inputs that have a
+        #  value range of (0, 1), so they have to be rescaled.
+        #  The augmented image will be re-rescaled to the original input value
+        #  range at the end of the function.
+        orig_intensity_ranges = [(inp[c].min(), inp[c].max()) for c in channels]
+        for c in channels:  # TODO: Can we vectorize this?
+            aug[c] = skimage.exposure.rescale_intensity(inp[c], out_range=(0, 1))
+
+        alpha = 1 + (self.rng.rand(nc) - 0.5) * 0.3  # ~ contrast
+        beta = (self.rng.rand(nc) - 0.5) * 0.3  # Mediates whether values are clipped for shadows or lights
+        gamma = 2.0 ** (self.rng.rand(nc) * 2 - 1)  # Sample from [0.5, 2]
+
+        aug[channels] = aug[channels] * alpha[:, None, None] + beta[:, None, None]
+        aug[channels] = np.clip(aug[channels], 0, 1)
+        aug[channels] = aug[channels] ** gamma[:, None, None]
+
+        for c in channels:  # Rescale to original (normalized) intensity range
+            aug[c] = skimage.exposure.rescale_intensity(aug[c], out_range=orig_intensity_ranges[c])
+
+        return aug, target
+
+
 # TODO: [Random]GaussianBlur
 
 
