@@ -57,7 +57,7 @@ class TripletNetTrainer(Trainer):
                                            'tr_loss_z': .0, 'tr_loss_rep': .0,
                                            'tr_loss_discr': .0}
                 # Other scalars to be logged
-                misc: Dict[str, float] = {}
+                misc: Dict[str, float] = {'learning_rate_discr': .0}
                 # Hold image tensors for real-time training sample visualization in tensorboard
                 images: Dict[str, torch.Tensor] = {}
 
@@ -87,7 +87,8 @@ class TripletNetTrainer(Trainer):
                     stats['tr_loss_z'] += self.alpha * float(loss_z)
                     loss = loss + self.alpha * loss_z
                     if torch.isnan(loss):
-                        logger.error('NaN loss detected! Aborting training.')
+                        logger.error('NaN loss detected after {self.step} '
+                                     'steps! Aborting training.')
                         raise NaNException
 
                     # Normal update step using triplet loss
@@ -100,7 +101,7 @@ class TripletNetTrainer(Trainer):
                         # to be Normal
                         # generate latent representations
                         self.model.eval()
-                        # generate 3 * latent space size Gaussian samples and compare to; draw from N(0, 2)
+                        # generate 3 * latent space size Gaussian samples and compare
                         z_real_gauss = Variable(self.latent_distr(inp0.size()[0], z0.size()[-1] * 3)).to(self.device)
                         _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
                         z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
@@ -151,6 +152,7 @@ class TripletNetTrainer(Trainer):
                     images['inp_-'] = inp2
                     # this was changed to support ReduceLROnPlateau which does not implement get_lr
                     misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
+                    misc['learning_rate_discr'] = self.optimizer_discr.param_groups[0]["lr"] # .get_lr()[-1]
                     # update schedules
                     for sched in self.schedulers.values():
                         # support ReduceLROnPlateau; doc. uses validation loss instead
@@ -159,7 +161,6 @@ class TripletNetTrainer(Trainer):
                             sched.step(metrics=float(loss))
                         else:
                             sched.step()
-
                     running_error += error
                     running_mean_target += mean_target
                     running_vx_size += inp.numel()
@@ -206,7 +207,8 @@ class TripletNetTrainer(Trainer):
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self.tb_log_scalars(stats, misc)
+                    self.tb_log_scalars(stats, 'stats')
+                    self.tb_log_scalars(misc, 'misc')
                     if self.previews_enabled:
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')

@@ -66,7 +66,11 @@ class InferenceModel(object):
                                      " in input."
         if verbose:
             dtime = time.time() - start
-            speed = float(np.prod(inp.shape)) / dtime / 1e6
+            if type(inp) is tuple:
+                inp_el = np.sum([float(np.prod(inp[kk].shape)) for kk in range(len(inp))])
+            else:
+                inp_el = float(np.prod(inp.shape))
+            speed = inp_el / dtime / 1e6
             dtime = pretty_string_time(dtime)
             print(f'Inference speed: {speed:.2f} MB or MPix /s, time: {dtime}.')
         return out
