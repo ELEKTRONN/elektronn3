@@ -106,6 +106,12 @@ class Trainer:
             ``exp_name``.
             If ``tensorboard_root_path`` is not set, tensorboard logs are
             written to ``save_path`` (next to model checkpoints, plots etc.).
+        model_has_softmax_outputs: If ``False`` (default),
+            the softmax operation is performed on network outputs before
+            plotting them, so raw network outputs get converted into predicted
+            class probabilities.
+            Set this to ``True`` if the output of ``model`` is already a
+            softmax output.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -155,6 +161,7 @@ class Trainer:
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
+            model_has_softmax_outputs: bool = False,
             ignore_errors: bool = False,
             ipython_on_error: bool = False,
             classes: Optional[Sequence[int]] = None,
@@ -172,6 +179,8 @@ class Trainer:
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
         self.num_workers = num_workers
+        # TODO: This could be automatically determined by parsing the model
+        self.model_has_softmax_outputs = model_has_softmax_outputs
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -439,19 +448,18 @@ class Trainer:
                 the size of the D dimension.
 
         Returns:
-            Numpy array of shape (C, H, W), representing a single HxW 2D image
-            with channel dimension C.
+            Function that slices a plottable 2D image out of a torch.Tensor
+            with batch and channel dimensions.
         """
         if batch.dim() == 5:  # (N, C, D, H, W)
             if z_plane is None:
                 z_plane = batch.shape[2] // 2
             assert z_plane in range(batch.shape[2])
-            batch2img = lambda x: x[0, :, z_plane].cpu().numpy()
+            return lambda x: x[0, :, z_plane].cpu().numpy()
         elif batch.dim() == 4:  # (N, C, H, W)
-            batch2img = lambda x: x[0, :].cpu().numpy()
+            return lambda x: x[0, :].cpu().numpy()
         else:
             raise ValueError('Only 4D and 5D tensors are supported.')
-        return batch2img
 
     def tb_log_preview(
             self,
@@ -464,6 +472,8 @@ class Trainer:
         """
         inp_batch = self.valid_dataset.preview_batch[0].to(self.device)
         out_batch = preview_inference(self.model, inp_batch=inp_batch)
+        if not self.model_has_softmax_outputs:
+            out_batch = out_batch.softmax(1)  # Apply softmax before plotting
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
@@ -471,7 +481,7 @@ class Trainer:
         pred = out.argmax(0)
 
         for c in range(out.shape[0]):
-            self.tb.log_image(f'{group}/c{c}', out[c], self.step)
+            self.tb.log_image(f'{group}/c{c}', out[c], self.step, cmap='gray')
         self.tb.log_image(f'{group}/pred', pred, self.step, num_classes=self.num_classes)
 
         # This is only run once per training, because the ground truth for
@@ -505,6 +515,8 @@ class Trainer:
         """
 
         out_batch = images['out']
+        if not self.model_has_softmax_outputs:
+            out_batch = out_batch.softmax(1)  # Apply softmax before plotting
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
@@ -519,7 +531,7 @@ class Trainer:
         self.tb.log_image(f'{group}/target', target, step=self.step, num_classes=self.num_classes)
 
         for c in range(out.shape[0]):
-            self.tb.log_image(f'{group}/c{c}', out[c], step=self.step)
+            self.tb.log_image(f'{group}/c{c}', out[c], step=self.step, cmap='gray')
         self.tb.log_image(f'{group}/pred', pred, step=self.step, num_classes=self.num_classes)
 
         inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
