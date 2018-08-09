@@ -15,6 +15,11 @@ import torch.utils.data
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.trainer import Trainer, logger, NaNException
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import time
+from PIL import Image
+import io
 
 
 class TripletNetTrainer(Trainer):
@@ -23,20 +28,23 @@ class TripletNetTrainer(Trainer):
         alpha: l2-norm regularization weight
 
     """
-    def __init__(self, alpha=1e-3, alpha2=1, latent_distr=None,
+    def __init__(self, alpha=1e-3, alpha2=.05, latent_distr=None,
                  *args, **kwargs):
         if len(args) > 0:
             raise ValueError("Please provide keyword arguments for "
                              "TripletNetTrainer init only.")
         model_discr = kwargs["model"][1]
         optim_discr = kwargs["optimizer"][1]
+        criterion_discr = kwargs["criterion"][1]
         kwargs["model"] = kwargs["model"][0]
         kwargs["optimizer"] = kwargs["optimizer"][0]
+        kwargs["criterion"] = kwargs["criterion"][0]
         super().__init__(**kwargs)
         self.alpha = alpha
         self.alpha2 = alpha2
         self.model_discr = model_discr.to(self.device)
         self.optimizer_discr = optim_discr
+        self.criterion_discr = criterion_discr
         if latent_distr is None:
             latent_distr = lambda n, z: torch.randn(n, z)  # draw from N(0, 1)
         self.latent_distr = latent_distr
@@ -53,11 +61,15 @@ class TripletNetTrainer(Trainer):
                 self.model.train()
 
                 # Scalar training stats that should be logged and written to tensorboard later
-                stats: Dict[str, float] = {'tr_loss': .0, 'tr_loss_distance': .0,
-                                           'tr_loss_z': .0, 'tr_loss_rep': .0,
-                                           'tr_loss_discr': .0}
+                stats: Dict[str, float] = {'tr_loss_G': .0,
+                                           'tr_loss_D': .0}
                 # Other scalars to be logged
-                misc: Dict[str, float] = {'learning_rate_discr': .0}
+                misc: Dict[str, float] = {'G_loss_advreg': .0,
+                                          'G_loss_tnet': .0,
+                                          'G_loss_l2': .0,
+                                          'D_loss_fake': .0,
+                                          'D_loss_real': .0
+                                          }
                 # Hold image tensors for real-time training sample visualization in tensorboard
                 images: Dict[str, torch.Tensor] = {}
 
@@ -65,6 +77,8 @@ class TripletNetTrainer(Trainer):
                 running_mean_target = 0
                 running_vx_size = 0
                 timer = Timer()
+                latent_points_fake = []
+                latent_points_real = []
                 for inp in self.train_loader:  # ref., pos., neg. samples
                     if inp.size()[1] != 3:
                         raise ValueError("Data must not contain targets. "
@@ -76,58 +90,75 @@ class TripletNetTrainer(Trainer):
                     inp0 = Variable(inp[:, 0].to(self.device))
                     inp1 = Variable(inp[:, 1].to(self.device))
                     inp2 = Variable(inp[:, 2].to(self.device))
-
+                    self.optimizer.zero_grad()
                     # forward pass
                     dA, dB, z0, z1, z2 = self.model(inp0, inp1, inp2)
+                    z_fake_gauss = torch.squeeze(torch.cat((z0, z1, z2), dim=1))
                     target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                     target = Variable(target)
                     loss = self.criterion(dA, dB, target)
-                    stats['tr_loss_distance'] += float(loss)
-                    loss_z = torch.sum(z0.norm(2, dim=1) + z1.norm(2, dim=1) + z2.norm(2, dim=1))
-                    stats['tr_loss_z'] += self.alpha * float(loss_z)
-                    loss = loss + self.alpha * loss_z
+                    L_l2 = torch.mean(torch.cat((z0.norm(2, dim=1), z1.norm(2, dim=1), z2.norm(2, dim=1)), dim=0))
+                    misc['G_loss_l2'] += self.alpha * float(L_l2)
+                    loss = loss + self.alpha * L_l2
+                    misc['G_loss_tnet'] += (1 - self.alpha2) * float(loss)  # log actual loss
                     if torch.isnan(loss):
                         logger.error('NaN loss detected after {self.step} '
                                      'steps! Aborting training.')
                         raise NaNException
 
-                    # Normal update step using triplet loss
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    self.optimizer.step()
 
                     # Adversarial part to enforce latent variable distribution
+                    # to be Normal / whatever prior is used
                     if self.alpha2 > 0:
-                        # to be Normal
-                        # generate latent representations
+                        self.optimizer_discr.zero_grad()
+                        # adversarial labels
+                        valid = Variable(torch.Tensor(inp0.size()[0], 1).fill_(1.0),
+                                         requires_grad=False).to(self.device)
+                        fake = Variable(torch.Tensor(inp0.shape[0], 1).fill_(0.0),
+                                        requires_grad=False).to(self.device)
+
+                        # --- Generator / TripletNet
+                        self.model_discr.eval()
+                        # TripletNet latent space should be classified as valid
+                        L_advreg = self.criterion_discr(self.model_discr(z_fake_gauss), valid)
+                        # average adversarial reg. and triplet-loss
+                        loss = (1 - self.alpha2) * loss + self.alpha2 * L_advreg
+                        # perform generator step
+                        loss.backward()
+                        self.optimizer.step()
+
+                        # --- Discriminator
                         self.model.eval()
-                        # generate 3 * latent space size Gaussian samples and compare
+                        self.model_discr.train()
+                        # rebuild graph (model output) to get clean backprop.
                         z_real_gauss = Variable(self.latent_distr(inp0.size()[0], z0.size()[-1] * 3)).to(self.device)
                         _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
                         z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
                         # Compute discriminator outputs and loss
-                        D_real_gauss = self.model_discr(z_real_gauss)
-                        D_fake_gauss = self.model_discr(z_fake_gauss)
-                        D_loss = -torch.mean(torch.log(D_real_gauss) + torch.log(1 - D_fake_gauss))
-                        D_loss.backward()  # Backprop loss
+                        L_real_gauss = self.criterion_discr(self.model_discr(z_real_gauss), valid)
+                        L_fake_gauss = self.criterion_discr(self.model_discr(z_fake_gauss), fake)
+                        L_discr = 0.5 * (L_real_gauss + L_fake_gauss)
+                        L_discr.backward()  # Backprop loss
                         self.optimizer_discr.step()  # Apply optimization step
+                        self.model.train()  # set back to training mode
 
-                        # calculate loss of representation network and update weights
-                        self.model.train()  # Back to use dropout
-                        # rebuild graph (model output) to get clean backprop.
-                        _, _, z_fake_gauss0, z_fake_gauss1, z_fake_gauss2 = self.model(inp0, inp1, inp2)
-                        z_fake_gauss = torch.squeeze(torch.cat((z_fake_gauss0, z_fake_gauss1, z_fake_gauss2), dim=1))
-                        D_fake_gauss = self.model_discr(z_fake_gauss)
 
-                        R_loss = self.alpha2 * -torch.mean(torch.log(D_fake_gauss))
-                        R_loss.backward()
+                        # # clean and report
+                        L_discr.detach_()
+                        L_advreg.detach_()
+                        L_real_gauss.detach_()
+                        L_fake_gauss.detach_()
+                        stats['tr_loss_D'] += float(L_discr)
+                        misc['G_loss_advreg'] += self.alpha2 * float(L_advreg) # log actual part of advreg
+                        misc['D_loss_real'] += float(L_real_gauss)
+                        misc['D_loss_fake'] += float(L_fake_gauss)
+                        latent_points_real.append(z_real_gauss.detach().cpu().numpy())
+                    else:
+                        loss.backward()
                         self.optimizer.step()
-                        R_loss.detach_()
-                        D_loss.detach_()
-                        stats['tr_loss_rep'] += float(R_loss)
-                        stats['tr_loss_discr'] += float(D_loss)
 
-                    # Prevent accidental autograd overheads after optimizer step
+                    latent_points_fake.append(z_fake_gauss.detach().cpu().numpy())
+                    # # Prevent accidental autograd overheads after optimizer step
                     inp.detach_()
                     target.detach_()
                     dA.detach_()
@@ -136,11 +167,10 @@ class TripletNetTrainer(Trainer):
                     z1.detach_()
                     z2.detach_()
                     loss.detach_()
-                    loss_z.detach_()
-
+                    L_l2.detach_()
 
                     # get training performance
-                    stats['tr_loss'] += float(loss)
+                    stats['tr_loss_G'] += float(loss)
                     error = calculate_error(dA, dB)
                     mean_target = target.to(torch.float32).mean()
                     print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
@@ -151,8 +181,8 @@ class TripletNetTrainer(Trainer):
                     images['inp_+'] = inp1
                     images['inp_-'] = inp2
                     # this was changed to support ReduceLROnPlateau which does not implement get_lr
-                    misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
-                    misc['learning_rate_discr'] = self.optimizer_discr.param_groups[0]["lr"] # .get_lr()[-1]
+                    misc['learning_rate_G'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
+                    misc['learning_rate_D'] = self.optimizer_discr.param_groups[0]["lr"] # .get_lr()[-1]
                     # update schedules
                     for sched in self.schedulers.values():
                         # support ReduceLROnPlateau; doc. uses validation loss instead
@@ -168,38 +198,40 @@ class TripletNetTrainer(Trainer):
                     self.step += 1
                     if self.step >= max_steps:
                         break
-                stats['tr_err'] = float(running_error) / len(self.train_loader)
-                stats['tr_loss'] /= len(self.train_loader)
-                stats['tr_loss_rep'] /= len(self.train_loader)
-                stats['tr_loss_discr'] /= len(self.train_loader)
-                stats['tr_loss_distance'] /= len(self.train_loader)
-                stats['tr_loss_z'] /= len(self.train_loader)
+                stats['tr_err_G'] = float(running_error) / len(self.train_loader)
+                stats['tr_loss_G'] /= len(self.train_loader)
+                stats['tr_loss_D'] /= len(self.train_loader)
+                misc['G_loss_advreg'] /= len(self.train_loader)
+                misc['G_loss_tnet'] /= len(self.train_loader)
+                misc['G_loss_l2'] /= len(self.train_loader)
+                misc['D_loss_fake'] /= len(self.train_loader)
+                misc['D_loss_real'] /= len(self.train_loader)
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
                 misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
                 mean_target = running_mean_target / len(self.train_loader)
-                if self.valid_dataset is None:
-                    stats['val_loss'], stats['val_err'] = float('nan'), float('nan')
+                if (self.valid_dataset is None) or (1 != np.random.randint(0, 10)): # only validate 10% of the times
+                    stats['val_loss_G'], stats['val_err_G'] = float('nan'), float('nan')
                 else:
-                    stats['val_loss'], stats['val_err'] = self.validate()
+                    stats['val_loss_G'], stats['val_err_G'] = self.validate()
                 # TODO: Report more metrics, e.g. dice error
 
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.
                 if self.step // len(self.train_dataset) > 1:
-                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
+                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss_G']
                 else:
                     tr_loss_gain = 0
                 self._tracker.update_history([
-                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
-                    tr_loss_gain, stats['tr_err'], stats['val_err'], misc['learning_rate'], 0, 0
+                    self.step, self._timer.t_passed, stats['tr_loss_G'], stats['val_loss_G'],
+                    tr_loss_gain, stats['tr_err_G'], stats['val_err_G'], misc['learning_rate_G'], 0, 0
                 ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
                 loss_smooth = self._tracker.loss._ema
 
                 # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_err'])
-                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_err'], "%", mean_target * 100, tr_loss_gain)
-                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
+                text = "%05i L_m=%.3f, L=%.2f, tr=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss_G'], stats['tr_err_G'])
+                text += "vl=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_err_G'], "%", mean_target * 100, tr_loss_gain)
+                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate_G'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
 
                 # Plot tracker stats to pngs in save_path
@@ -213,6 +245,35 @@ class TripletNetTrainer(Trainer):
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
+
+                # save histrograms
+                if len(latent_points_fake) > 0:
+                    fig, ax = plt.subplots()
+                    sns.distplot(np.concatenate(latent_points_fake).flatten())
+                    # plt.savefig(os.path.join(self.save_path,
+                    #                          'latent_fake_{}.png'.format(self.step)))
+                    fig.canvas.draw()
+                    img_data = np.array(fig.canvas.renderer._renderer)
+                    self.tb.log_image(f'latent_distr/latent_fake', img_data,
+                                      step=self.step)
+                    plt.close()
+
+                if len(latent_points_real) > 0:
+                    fig, ax = plt.subplots()
+                    sns.distplot(np.concatenate(latent_points_real).flatten())
+                    # plt.savefig(os.path.join(self.save_path,
+                    #                          'latent_real_{}.png'.format(self.step)))
+                    fig.canvas.draw()
+                    img_data = np.array(fig.canvas.renderer._renderer)
+                    self.tb.log_image(f'latent_distr/latent_real', img_data,
+                                      step=self.step)
+                    plt.close()
+
+
+
+
+                    # grab the pixel buffer and dump it into a numpy array
+
 
                 # Save trained model state
                 torch.save(
@@ -249,7 +310,7 @@ class TripletNetTrainer(Trainer):
 
     def validate(self) -> Tuple[float, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
-
+        start = time.time()
         val_loss = 0.
         incorrect = 0.
         for inp in self.valid_loader:
@@ -258,12 +319,6 @@ class TripletNetTrainer(Trainer):
             inp2 = inp[:, 2].to(self.device)
             with torch.no_grad():
                 dA, dB, z0, z1, z2 = self.model(inp0, inp1, inp2)
-                # diff_ref = np.linalg.norm(z0-z1)
-                # diff_neg = np.linalg.norm(z0-z2)
-                # if diff_ref < 1e-7 and diff_neg < 1e-7:
-                #     logger.warning("Difference between reference and negative sample"
-                #                 " is almost zero: {} and {}"
-                #                 "".format(diff_ref, diff_neg))
                 target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                 target = Variable(target)
                 val_loss += float(self.criterion(dA, dB, target))
@@ -276,7 +331,8 @@ class TripletNetTrainer(Trainer):
         )
 
         self.model.train()  # Reset model to training mode
-
+        dtime = time.time() - start
+        print("Validation of {} samples took {}s.".format(len(self.valid_loader), dtime))
         return val_loss, val_err
 
     # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1

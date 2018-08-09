@@ -13,7 +13,7 @@ from elektronn3.training.train_utils import pretty_string_time
 
 
 class InferenceModel(object):
-    def __init__(self, src, disable_cuda=False, multi_gpu=False):
+    def __init__(self, src, disable_cuda=False, multi_gpu=True):
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -21,8 +21,10 @@ class InferenceModel(object):
         self.device = device
         if type(src) is str:
             self.model = load_model(src)
+            self.model_p = src
         else:
             self.model = src
+            self.model_p = None
         self.model.eval()
         if multi_gpu:
             self.model = nn.DataParallel(self.model)
