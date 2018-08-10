@@ -20,6 +20,10 @@ from typing import Sequence, Tuple, Optional, Dict, Any, Union
 import numpy as np
 import skimage.exposure
 
+import scipy
+import scipy.ndimage
+from scipy.ndimage.filters import gaussian_filter
+
 from elektronn3.data import random_blurring
 
 
@@ -181,7 +185,6 @@ class RandomGrayAugment:
 
         nc = len(channels)
         aug = inp.copy()  # Copy so we don't overwrite inp
-
         # The calculations below have to be performed on inputs that have a
         #  value range of (0, 1), so they have to be rescaled.
         #  The augmented image will be re-rescaled to the original input value
@@ -205,6 +208,85 @@ class RandomGrayAugment:
 
 
 # TODO: [Random]GaussianBlur
+class RandomGaussianBlur:
+    """Adds random gaussian  to the input.
+
+    Args:
+        sigma: Sigma parameter of the gaussian distribution to draw from
+        channels: If ``channels`` is ``None``, the noise is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, noise is only applied
+            to the specified channels.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``.
+        rng: Optional random state for deterministic execution
+    """
+    def __init__(
+            self,
+            sigma: float = 0.1,
+            channels: Optional[Sequence[int]] = None,
+            prob: float = 1.0,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.sigma = sigma
+        self.channels = channels
+        self.prob = prob
+        self.rng = np.random.RandomState() if rng is None else rng
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.rng.rand() > self.prob:
+            return inp, target
+        #noise = np.empty_like(inp)
+        print("printing here")
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        # for c in channels:
+        #     noise[c] = self.rng.normal(0, self.sigma, inp[c].shape)
+        blurred_inp = gaussian_filter(inp, sigma = self.sigma)
+        return blurred_inp, target
+
+
+class RandomBlurring:  # Warning: This operates in-place!
+
+    _default_scheduler = random_blurring.ScalarScheduler(
+        value=0.1,
+        max_value=0.5,
+        growth_type="lin",
+        interval=500000,
+        steps_per_report=1000
+    )
+    _default_config = {
+        "probability": 0.5,
+        "threshold": _default_scheduler,
+        "lower_lim_region_size": [3, 6, 6],
+        "upper_lim_region_size": [8, 16, 16],
+        "verbose": False,
+    }
+
+    def __init__(
+            self,
+            config: Dict[str, Any],
+            patch_shape: Optional[Sequence[int]] = None
+    ):
+        self.config = {**self._default_config, **config}
+        # TODO: support random state
+        if patch_shape is not None:
+            random_blurring.check_random_data_blurring_config(patch_shape, **config)
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        # In-place, overwrites inp!
+        assert inp.ndim == 4, 'Currently only (C, D, H, W) inputs are supported.'
+        random_blurring.apply_random_blurring(inp_sample=inp, **self.config)
+        return inp, target
 
 
 class AdditiveGaussianNoise:
@@ -249,42 +331,6 @@ class AdditiveGaussianNoise:
         return noisy_inp, target
 
 
-class RandomBlurring:  # Warning: This operates in-place!
-
-    _default_scheduler = random_blurring.ScalarScheduler(
-        value=0.1,
-        max_value=0.5,
-        growth_type="lin",
-        interval=500000,
-        steps_per_report=1000
-    )
-    _default_config = {
-        "probability": 0.5,
-        "threshold": _default_scheduler,
-        "lower_lim_region_size": [3, 6, 6],
-        "upper_lim_region_size": [8, 16, 16],
-        "verbose": False,
-    }
-
-    def __init__(
-            self,
-            config: Dict[str, Any],
-            patch_shape: Optional[Sequence[int]] = None
-    ):
-        self.config = {**self._default_config, **config}
-        # TODO: support random state
-        if patch_shape is not None:
-            random_blurring.check_random_data_blurring_config(patch_shape, **config)
-
-    def __call__(
-            self,
-            inp: np.ndarray,
-            target: Optional[np.ndarray] = None  # returned without modifications
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        # In-place, overwrites inp!
-        assert inp.ndim == 4, 'Currently only (C, D, H, W) inputs are supported.'
-        random_blurring.apply_random_blurring(inp_sample=inp, **self.config)
-        return inp, target
 
 
 class RandomCrop:
