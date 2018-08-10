@@ -209,14 +209,11 @@ class RandomGrayAugment:
 
 # TODO: [Random]GaussianBlur
 class RandomGaussianBlur:
-    """Adds random gaussian  to the input.
+    """Adds random gaussian blur to the input.
 
     Args:
         sigma: Sigma parameter of the gaussian distribution to draw from
-        channels: If ``channels`` is ``None``, the noise is applied to
-            all channels of the input tensor.
-            If ``channels`` is a ``Sequence[int]``, noise is only applied
-            to the specified channels.
+
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
             of ``1 - prob``.
