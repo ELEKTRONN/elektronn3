@@ -212,7 +212,7 @@ class RandomGaussianBlur:
     """Adds random gaussian blur to the input.
 
     Args:
-        sigma: Sigma parameter of the gaussian distribution to draw from
+        sigma:
 
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
@@ -239,8 +239,12 @@ class RandomGaussianBlur:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
             return inp, target
-
-        blurred_inp = gaussian_filter(inp, sigma = self.sigma)
+        #adding randomness by drawing the std for the gaussian filter from a log_normal distribution
+        #not sure if mu=0 for the log_normal is appropriate 
+        mu =0
+        gaussian_std = np.random.lognormal(mu, sigma=self.sigma)
+        print("sigma used for the gaussian_filter:", gaussian_std)
+        blurred_inp = gaussian_filter(inp, sigma = gaussian_std)
         return blurred_inp, target
 
 
