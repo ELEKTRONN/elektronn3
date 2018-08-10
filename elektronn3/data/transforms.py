@@ -242,11 +242,7 @@ class RandomGaussianBlur:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
             return inp, target
-        #noise = np.empty_like(inp)
-        print("printing here")
-        channels = range(inp.shape[0]) if self.channels is None else self.channels
-        # for c in channels:
-        #     noise[c] = self.rng.normal(0, self.sigma, inp[c].shape)
+
         blurred_inp = gaussian_filter(inp, sigma = self.sigma)
         return blurred_inp, target
 
