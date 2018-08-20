@@ -15,7 +15,7 @@ torchvsion.transforms, but there are two key differences:
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
-from typing import Sequence, Tuple, Optional, Dict, Any, Union
+from typing import Sequence, Tuple, Optional, Dict, Any, Callable
 
 import numpy as np
 import skimage.exposure
@@ -23,7 +23,7 @@ import skimage.exposure
 from elektronn3.data import random_blurring
 
 
-# Transformation = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
 
 
 class Identity:
@@ -33,15 +33,18 @@ class Identity:
 
 class Compose:
     """Composes several transforms together.
+
     Args:
         transforms (list of ``Transform`` objects): list of transforms to compose.
+
+
     Example:
         >>> Compose([
         >>>     Normalize(mean=(155.291411,), std=(41.812504,)),
         >>> ])
     """
 
-    def __init__(self, transforms):
+    def __init__(self, transforms: Sequence[Transform]):
         self.transforms = transforms
 
     def __call__(self, inp, target):
@@ -55,6 +58,36 @@ class Compose:
             format_string += '\n    {0}'.format(t)
         format_string += '\n)'
         return format_string
+
+
+class Lambda:
+    """Wraps a function of the form f(x, y) = (x', y') into a transform.
+
+    Args:
+        func: A function that takes two arrays and returns a
+            tuple of two arrays.
+
+    Example:
+        >>> # Multiplies inputs (x) by 255, leaves target (y) unchanged
+        >>> t = Lambda(lambda x, y: (x * 255, y))
+
+        >>> # You can also pass regular Python functions to Lambda
+        >>> def flatten(x, y):
+        >>>     return x.reshape(-1), y.reshape(-1)
+        >>> t = Lambda(flatten)
+    """
+    def __init__(
+            self,
+            func: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+    ):
+        self.func = func
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        return self.func(inp, target)
 
 
 class Normalize:
