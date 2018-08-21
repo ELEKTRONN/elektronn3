@@ -9,7 +9,7 @@ from itertools import product
 from scipy import ndimage
 import os
 from elektronn3.data.utils import save_to_h5
-from elektronn3.data.region_generator import RegionGenerator
+from elektronn3.data.transforms.region_generator import RegionGenerator
 import logging
 
 logger = logging.getLogger('elektronn3log')

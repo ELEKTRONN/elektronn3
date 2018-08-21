@@ -20,8 +20,8 @@ from typing import Sequence, Tuple, Optional, Dict, Any, Callable
 import numpy as np
 import skimage.exposure
 
-from elektronn3.data import random_blurring
-
+from elektronn3.data.transforms import random_blurring
+from elektronn3.data.transforms.random import Normal, HalfNormal
 
 Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
 
