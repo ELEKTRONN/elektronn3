@@ -20,8 +20,9 @@ class RandomSampler:
         self.bounds = bounds
         self.rng = np.random.RandomState() if rng is None else rng
 
-    def __call__(self):
-        rand = self.rv.rvs(size=self.shape, random_state=self.rng)
+    def __call__(self, shape=None):
+        shape = self.shape if shape is None else shape
+        rand = self.rv.rvs(size=shape, random_state=self.rng)
         if self.bounds is not None:
             lo, hi = self.bounds
             rand = np.clip(rand, lo, hi)

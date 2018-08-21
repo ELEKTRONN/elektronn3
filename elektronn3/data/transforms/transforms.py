@@ -131,15 +131,17 @@ class RandomGammaCorrection:
     def __init__(
             self,
             gamma_std: float = 0.5,
+            gamma_min: float = 0.25,  # Prevent gamma <= 0 (0 causes zero division)
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
-        self.gamma_std = gamma_std
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
-        self.gamma_min = 0.25
+        self.gamma_generator = Normal(
+            mean=1.0, sigma=gamma_std, bounds=(gamma_min, np.inf), rng=rng
+        )
 
     def __call__(
             self,
@@ -152,8 +154,7 @@ class RandomGammaCorrection:
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         gcorr = np.empty_like(inp)
         for c in channels:
-            gamma = self.rng.normal(1.0, self.gamma_std)
-            gamma = max(self.gamma_min, gamma)  # Prevent gamma <= 0 (0 causes zero division)
+            gamma = self.gamma_generator()
             # adjust_gamma() requires inputs in the (0, 1) range, so the
             #  image intensity values are rescaled to (0, 1) and after
             #  applying gamma correction they are rescaled back to the original
@@ -261,10 +262,10 @@ class AdditiveGaussianNoise:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
-        self.sigma = sigma
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
+        self.noise_generator = Normal(mean=0, sigma=sigma, rng=rng)
 
     def __call__(
             self,
@@ -277,7 +278,7 @@ class AdditiveGaussianNoise:
         noise = np.empty_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         for c in channels:
-            noise[c] = self.rng.normal(0, self.sigma, inp[c].shape)
+            noise[c] = self.noise_generator(shape=inp[c].shape)
         noisy_inp = inp + noise
         return noisy_inp, target
 
