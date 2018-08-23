@@ -29,8 +29,9 @@ dependencies:
   - numpy >=1.14.2
   - scikit-learn >=0.19.1
   - scipy >=1.1.0
-  - pytorch >=0.4.0  # pytorch-cpu also works, but it's not recommended.
+  - pytorch >=0.4.1  # pytorch-cpu also works, but it's not recommended.
 #  - cudatoolkit =8.*  # Uncomment/modify for a specific CUDA version
+#  - cuda80
   - tensorboard >=1.8.0
   - tensorflow >=1.8.0
 
