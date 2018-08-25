@@ -24,7 +24,7 @@ from torch.optim.lr_scheduler import StepLR
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
-from elektronn3.training import collect_env
+from torch.utils import collect_env
 from elektronn3.training import metrics
 from elektronn3.data.utils import squash01
 from elektronn3 import __file__ as arch_src
