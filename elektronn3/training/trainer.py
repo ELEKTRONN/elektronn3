@@ -242,6 +242,7 @@ class Trainer:
                 self.valid_dataset, self.batchsize, num_workers=0, pin_memory=False,
                 timeout=30
             )
+        self.best_val_loss = np.inf  # Best recorded validation loss
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -361,15 +362,10 @@ class Trainer:
                     self.tb.writer.flush()
 
                 # Save trained model state
-                torch.save(
-                    self.model.state_dict(),
-                    # os.path.join(self.save_path, f'model-{self.step:06d}.pth')  # Saving with different file names leads to heaps of large files,
-                    os.path.join(self.save_path, 'model-checkpoint.pth')
-                )
-                # TODO: Also save "best" model, not only the latest one, which is often overfitted.
-                #       -> "best" in which regard? Lowest validation loss, validation error?
-                #          We can't blindly trust these metrics and may have to calculate
-                #          additional metrics (with focus on object boundary correctness).
+                self.save_model()
+                if stats['val_loss'] < self.best_val_loss:
+                    self.best_val_loss = stats['val_loss']
+                    self.save_model(suffix='_best')
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
@@ -392,6 +388,31 @@ class Trainer:
             self.model.state_dict(),
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
+
+    def save_model(self, suffix=''):
+        """Save/serialize trained model state to files.
+
+        Writes to two files in the ``self.save_path``:
+
+        - ``state_dict.pth`` contains the ``state_dict`` of the trained model.
+          The included parameters can be read and used to overwrite another
+          model's ``state_dict``. The model code (architecture) itself is not
+          included in this file.
+        - ``model.pt`` contains a pickled version of the complete model, including
+          the trained weights. You can simply
+          ``model = torch.load('model.pt')`` to obtain the full model and its
+          training state. This will not work if the source code relevant to de-
+          serializing the model object has changed! If this is is the case,
+          you will need to use the ``state_dict.pth`` to extract parameters and
+          manually load them into a model.
+
+        If ``suffix`` is defined, it will be added before the file extension.
+        """
+        torch.save(
+            self.model.state_dict(),
+            os.path.join(self.save_path, f'state_dict{suffix}.pth')
+        )
+        torch.save(self.model, os.path.join(self.save_path, f'model{suffix}.pt'))
 
     def validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
