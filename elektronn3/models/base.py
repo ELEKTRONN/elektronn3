@@ -9,11 +9,20 @@ import glob
 from collections import OrderedDict
 import numpy as np
 import time
+from typing import Union
 from elektronn3.training.train_utils import pretty_string_time
 
 
 class InferenceModel(object):
-    def __init__(self, src, disable_cuda=False, multi_gpu=True):
+    """Class to perform inference using a trained elektronn3 model or nn.Module object.
+
+    Args:
+        src: Path to training folder of e3 model or already loaded/initialized nn.Module defining the model.
+        disable_cuda: use cpu only
+        multi_gpu: enable multi-gpu support of pytorch
+    """
+    def __init__(self, src: Union[str, nn.Module], disable_cuda: bool = False,
+                 multi_gpu: bool = True):
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -30,7 +39,18 @@ class InferenceModel(object):
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
-    def predict_proba(self, inp, bs=10, verbose=False):
+    def predict_proba(self, inp: np.ndarray, bs: int = 10,
+                      verbose: bool = False):
+        """
+
+        Args:
+            inp: Input data, e.g. of shape [N, C, H, W]
+            bs: batch size
+            verbose: report inference speed
+
+        Returns:
+
+        """
         if verbose:
             start = time.time()
         if type(inp) is np.ndarray:

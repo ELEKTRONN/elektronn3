@@ -375,6 +375,36 @@ class SqueezeTarget:
         return inp, target.squeeze(axis=self.dim)
 
 
+class RandomFlip:
+    """Randomly flips spatial input and target dimensions respectively. Spatial
+    dimensions are considered to occur last in the input/target shape and are
+    flipped with probability p=0.5 (iid).
+
+    Args:
+        ndim_spatial: Number of spatial dimension in input, e.g. ndim_spatial=2
+        for input shape (N, C, H, W)
+    """
+    def __init__(self, ndim_spatial: int = 2):
+        self.ndim_spatial = ndim_spatial
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        flip_dims = np.random.randint(0, 2, self.ndim_spatial)
+        # flip all images at once
+        slices_inp = tuple([slice(None, None, 1) for _ in range(len(inp.shape) - self.ndim_spatial)] + \
+                 [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+        inp_flipped = inp[slices_inp].copy()
+        if target is not None:
+            slices_target = tuple([slice(None, None, 1) for _ in range(len(target.shape) - self.ndim_spatial)] + \
+                     [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+            target_flipped = target[slices_target].copy()
+        else:
+            target_flipped = None
+        return inp_flipped, target_flipped
+
+
 # TODO: Handle target striding and offsets via transforms?
 
 # TODO: Meta-transform that performs a wrapped transform with a certain
