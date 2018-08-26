@@ -43,7 +43,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils
-from elektronn3.training import Trainer, Backup, DiceLoss, LovaszLoss
+from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.training import metrics
 from elektronn3.models.unet import UNet
 
@@ -91,6 +91,8 @@ common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
+    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
+    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
     # transforms.RandomBlurring({'probability': 0.5})
 ])
 valid_transform = transforms.Compose(common_transforms + [])
@@ -152,9 +154,8 @@ valid_metrics = {
 # Class weights for imbalanced dataset
 class_weights = torch.tensor([0.2653,  0.7347])
 
-criterion = nn.CrossEntropyLoss(weight=class_weights)
-# criterion = DiceLoss()
-# criterion = LovaszLoss()
+# criterion = nn.CrossEntropyLoss(weight=class_weights)
+criterion = DiceLoss()
 
 # Create trainer
 trainer = Trainer(

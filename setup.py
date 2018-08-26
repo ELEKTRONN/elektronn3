@@ -18,7 +18,7 @@ setup(
     packages=find_packages(exclude=['scripts']),
 
     install_requires=[
-        'torch==0.4.0',
+        'torch>=0.4.1',
         'numpy',
         'scipy',
         'h5py',
