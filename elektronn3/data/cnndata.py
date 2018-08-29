@@ -549,7 +549,6 @@ class SimpleNeuroData2d(data.Dataset):
         self.inp = self.inp_file[inp_key].value.astype(np.float32)
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[0]  # Squeeze superfluous first dimension
-
         self.target = self.target[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (dirty hack TODO)
 
         # Cut inp and target to same size
@@ -580,3 +579,4 @@ class SimpleNeuroData2d(data.Dataset):
     def close_files(self):
         self.inp_file.close()
         self.target_file.close()
+

@@ -247,7 +247,7 @@ class Trainer:
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
     # TODO: Modularize, make some general parts reusable for other trainers.
-    def train(self, max_steps: int = 1, max_runtime=np.inf) -> None:
+    def train(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
 
         After each training epoch, validation performance is measured and
@@ -555,7 +555,6 @@ class Trainer:
 
         out = batch2img(out_batch)
         pred = out.argmax(0)
-
         self.tb.log_image(f'{group}/inp', inp, step=self.step, cmap='gray')
         self.tb.log_image(f'{group}/target', target, step=self.step, num_classes=self.num_classes)
 

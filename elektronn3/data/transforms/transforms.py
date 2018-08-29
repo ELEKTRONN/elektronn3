@@ -21,7 +21,7 @@ import numpy as np
 import skimage.exposure
 
 from elektronn3.data.transforms import random_blurring
-from elektronn3.data.transforms.random import Normal, HalfNormal
+from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 
 Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
 
@@ -373,6 +373,35 @@ class SqueezeTarget:
             target: np.ndarray,
     ):
         return inp, target.squeeze(axis=self.dim)
+
+
+class RandomFlip:
+    """Randomly flips spatial input and target dimensions respectively. Spatial
+    dimensions are considered to occur last in the input/target shape and are
+    flipped with probability p=0.5 (iid).
+
+    Args:
+        ndim_spatial: Number of spatial dimension in input, e.g. ndim_spatial=2
+        for input shape (N, C, H, W)
+    """
+    def __init__(self, ndim_spatial: int = 2,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.noise_generator = RandInt(rng=rng)
+        self.ndim_spatial = ndim_spatial
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        flip_dims = self.noise_generator(self.ndim_spatial)
+        for dim in range(self.ndim_spatial):
+            if flip_dims[dim]:
+                inp = np.flip(inp, dim)
+                if target is not None:
+                    target = np.flip(target, dim)
+        return inp, target
 
 
 # TODO: Handle target striding and offsets via transforms?

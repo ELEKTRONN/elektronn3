@@ -13,9 +13,7 @@ import numpy as np
 import seaborn as sns
 from matplotlib import pyplot as plt
 from scipy import stats
-
 from elektronn3 import floatX
-
 logger = logging.getLogger('elektronn3log')
 
 

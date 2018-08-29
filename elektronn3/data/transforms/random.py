@@ -57,3 +57,16 @@ class HalfNormal(RandomSampler):
     ):
         rv = scipy.stats.halfnorm(loc=0, scale=sigma)
         super().__init__(rv=rv, shape=shape, bounds=bounds, rng=rng)
+
+
+class RandInt(RandomSampler):
+    """RandInt distribution sampler. Default is binary"""
+    def __init__(
+            self,
+            low: int = 0,
+            high: int = 2,
+            shape: Tuple[int, ...] = (),
+            rng: Optional[np.random.RandomState] = None
+    ):
+        rv = scipy.stats.randint(low=low, high=high)
+        super().__init__(rv=rv, shape=shape, rng=rng, bounds=None)
