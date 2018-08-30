@@ -60,7 +60,12 @@ class HalfNormal(RandomSampler):
 
 
 class RandInt(RandomSampler):
-    """RandInt distribution sampler. Default is binary"""
+    """Discrete uniform distribution sampler
+
+    Outputs random integers in a defined range ``(low, high)`` with equal
+    probability.
+
+    By default (``low=0, high=2``), it generates binary values (0 or 1)."""
     def __init__(
             self,
             low: int = 0,

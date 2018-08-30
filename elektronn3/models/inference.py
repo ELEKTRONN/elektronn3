@@ -20,23 +20,27 @@ class InferenceModel:
     Args:
         model: Path to training folder of e3 model or already loaded/initialized
              nn.Module defining the model.
-        state_dict_src: Path to state dict file (.pth) or loaded state
-                        dictionary or None.
-        disable_cuda: use cpu only
-        multi_gpu: enable multi-gpu support of pytorch
+        state_dict_src: Path to ``state_dict`` file (.pth) or loaded
+            ``state_dict`` or ``None``. If not ``None``, the ``state_dict`` of
+            the ``model`` is replaced with it.
+        disable_cuda: Use cpu only
+        multi_gpu: Enable multi-GPU support of PyTorch
     Examples:
         >>> cnn = nn.Sequential(
-        ... nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
-        ... nn.Conv2d(32, 2, 1)).to('cpu')
+        ...     nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
+        ...     nn.Conv2d(32, 2, 1))
         >>> inp = np.random.randn(2, 5, 10, 10)
         >>> model = InferenceModel(cnn)
         >>> out = model.predict_proba(inp)
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
-    def __init__(self, model: nn.Module,
-                 state_dict_src: Optional[Union[str, dict]] = None,
-                 disable_cuda: Optional[bool] = False,
-                 multi_gpu: Optional[bool] = True):
+    def __init__(
+            self,
+            model: nn.Module,
+            state_dict_src: Optional[Union[str, dict]] = None,
+            disable_cuda: Optional[bool] = False,
+            multi_gpu: Optional[bool] = True
+    ):
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -65,9 +69,13 @@ class InferenceModel:
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
-    def predict_proba(self, inp: np.ndarray, batch_size: int = 10,
-                      verbose: Optional[bool] = False,
-                      out_shape: Optional[tuple] = None):
+    def predict_proba(
+            self,
+            inp: Union[np.ndarray, torch.Tensor],
+            batch_size: int = 10,
+            verbose: Optional[bool] = False,
+            out_shape: Optional[tuple] = None
+    ):
         """
 
         Args:
@@ -110,7 +118,7 @@ def load_trained_model(src: str) -> InferenceModel:
 
     Args:
         src: Source path to model directory. Directory must contain training
-             script and model-checkpoint.pth.
+            script and model-checkpoint.pth.
 
     Returns:
         Trained model

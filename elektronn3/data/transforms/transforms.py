@@ -381,8 +381,8 @@ class RandomFlip:
     flipped with probability p=0.5 (iid).
 
     Args:
-        ndim_spatial: Number of spatial dimension in input, e.g. ndim_spatial=2
-        for input shape (N, C, H, W)
+        ndim_spatial: Number of spatial dimension in input, e.g.
+            ``ndim_spatial=2`` for input shape (N, C, H, W)
     """
     def __init__(self, ndim_spatial: int = 2,
             rng: Optional[np.random.RandomState] = None
@@ -405,9 +405,6 @@ class RandomFlip:
 
 
 # TODO: Handle target striding and offsets via transforms?
-
-# TODO: Meta-transform that performs a wrapped transform with a certain
-#       probability, replacing prob params?
 
 # TODO: Functional API (transforms.functional).
 #       The current object-oriented interface should be rewritten as a wrapper
