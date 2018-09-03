@@ -20,17 +20,13 @@ from typing import Sequence, Tuple, Optional, Dict, Any, Callable
 import numpy as np
 import skimage.exposure
 
-<<<<<<< HEAD:elektronn3/data/transforms.py
 import scipy
 import scipy.ndimage
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
 
-from elektronn3.data import random_blurring
-=======
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal
->>>>>>> master:elektronn3/data/transforms/transforms.py
 
 Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
 
