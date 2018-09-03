@@ -26,6 +26,10 @@ parser.add_argument(
     help='Maximum number of training steps to perform.'
 )
 parser.add_argument(
+    '-t', '--max-runtime', type=int, default=3600 * 24 * 4,  # 4 days
+    help='Maximum training time (in seconds).'
+)
+parser.add_argument(
     '-r', '--resume', metavar='PATH',
     help='Path to pretrained model state dict from which to resume training.'
 )
@@ -43,7 +47,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils
-from elektronn3.training import Trainer, Backup, DiceLoss, LovaszLoss
+from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.training import metrics
 from elektronn3.models.unet import UNet
 
@@ -64,6 +68,7 @@ target_h5data = [
 ]
 
 max_steps = args.max_steps
+max_runtime = args.max_runtime
 lr = 0.0004
 lr_stepsize = 1000
 lr_dec = 0.995
@@ -91,8 +96,8 @@ common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
-    transforms.RandomGrayAugment(channels=[0], prob=0.8),
-    # transforms.AdditiveGaussianNoise(sigma=0.2, channels=[0], prob=0.1)
+    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
+    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
     # transforms.RandomBlurring({'probability': 0.5})
 ])
 valid_transform = transforms.Compose(common_transforms + [])
@@ -154,9 +159,8 @@ valid_metrics = {
 # Class weights for imbalanced dataset
 class_weights = torch.tensor([0.2653,  0.7347])
 
-criterion = nn.CrossEntropyLoss(weight=class_weights)
-# criterion = DiceLoss()
-# criterion = LovaszLoss()
+# criterion = nn.CrossEntropyLoss(weight=class_weights)
+criterion = DiceLoss()
 
 # Create trainer
 trainer = Trainer(
@@ -178,7 +182,7 @@ trainer = Trainer(
 Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
 # Start training
-trainer.train(max_steps)
+trainer.train(max_steps=max_steps, max_runtime=max_runtime)
 
 
 # How to re-calculate mean, std and class_weights for other datasets:

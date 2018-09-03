@@ -15,20 +15,24 @@ torchvsion.transforms, but there are two key differences:
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
-from typing import Sequence, Tuple, Optional, Dict, Any, Union
+from typing import Sequence, Tuple, Optional, Dict, Any, Callable
 
 import numpy as np
 import skimage.exposure
 
+<<<<<<< HEAD:elektronn3/data/transforms.py
 import scipy
 import scipy.ndimage
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
 
 from elektronn3.data import random_blurring
+=======
+from elektronn3.data.transforms import random_blurring
+from elektronn3.data.transforms.random import Normal, HalfNormal
+>>>>>>> master:elektronn3/data/transforms/transforms.py
 
-
-# Transformation = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
 
 
 class Identity:
@@ -38,15 +42,18 @@ class Identity:
 
 class Compose:
     """Composes several transforms together.
+
     Args:
         transforms (list of ``Transform`` objects): list of transforms to compose.
+
+
     Example:
         >>> Compose([
         >>>     Normalize(mean=(155.291411,), std=(41.812504,)),
         >>> ])
     """
 
-    def __init__(self, transforms):
+    def __init__(self, transforms: Sequence[Transform]):
         self.transforms = transforms
 
     def __call__(self, inp, target):
@@ -60,6 +67,36 @@ class Compose:
             format_string += '\n    {0}'.format(t)
         format_string += '\n)'
         return format_string
+
+
+class Lambda:
+    """Wraps a function of the form f(x, y) = (x', y') into a transform.
+
+    Args:
+        func: A function that takes two arrays and returns a
+            tuple of two arrays.
+
+    Example:
+        >>> # Multiplies inputs (x) by 255, leaves target (y) unchanged
+        >>> t = Lambda(lambda x, y: (x * 255, y))
+
+        >>> # You can also pass regular Python functions to Lambda
+        >>> def flatten(x, y):
+        >>>     return x.reshape(-1), y.reshape(-1)
+        >>> t = Lambda(flatten)
+    """
+    def __init__(
+            self,
+            func: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+    ):
+        self.func = func
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        return self.func(inp, target)
 
 
 class Normalize:
@@ -103,15 +140,17 @@ class RandomGammaCorrection:
     def __init__(
             self,
             gamma_std: float = 0.5,
+            gamma_min: float = 0.25,  # Prevent gamma <= 0 (0 causes zero division)
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
-        self.gamma_std = gamma_std
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
-        self.gamma_min = 0.25
+        self.gamma_generator = Normal(
+            mean=1.0, sigma=gamma_std, bounds=(gamma_min, np.inf), rng=rng
+        )
 
     def __call__(
             self,
@@ -124,8 +163,7 @@ class RandomGammaCorrection:
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         gcorr = np.empty_like(inp)
         for c in channels:
-            gamma = self.rng.normal(1.0, self.gamma_std)
-            gamma = max(self.gamma_min, gamma)  # Prevent gamma <= 0 (0 causes zero division)
+            gamma = self.gamma_generator()
             # adjust_gamma() requires inputs in the (0, 1) range, so the
             #  image intensity values are rescaled to (0, 1) and after
             #  applying gamma correction they are rescaled back to the original
@@ -227,10 +265,10 @@ class RandomGaussianBlur:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
-        self.sigma = sigma
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
+        self.noise_generator = Normal(mean=0, sigma=sigma, rng=rng)
 
     def __call__(
             self,
@@ -240,13 +278,14 @@ class RandomGaussianBlur:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
             return inp, target
-        #adding randomness by drawing the std for the gaussian filter from a log_normal distribution
-        #not sure if mu=0 for the log_normal is appropriate
-        mu =0
-        gaussian_std = np.random.lognormal(mu, sigma=self.sigma)
-        print("sigma used for the gaussian_filter:", gaussian_std)
-        blurred_inp = gaussian_filter(inp, sigma = gaussian_std)
-        return blurred_inp, target
+
+        noise = np.empty_like(inp)
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        for c in channels:
+            noise[c] = self.noise_generator(shape=inp[c].shape)
+        noisy_inp = inp + noise
+        return noisy_inp, target
+
 
 
 class RandomBlurring:  # Warning: This operates in-place!
