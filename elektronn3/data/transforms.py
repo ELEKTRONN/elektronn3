@@ -23,6 +23,7 @@ import skimage.exposure
 import scipy
 import scipy.ndimage
 from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage.interpolation import map_coordinates
 
 from elektronn3.data import random_blurring
 
@@ -240,7 +241,7 @@ class RandomGaussianBlur:
         if self.rng.rand() > self.prob:
             return inp, target
         #adding randomness by drawing the std for the gaussian filter from a log_normal distribution
-        #not sure if mu=0 for the log_normal is appropriate 
+        #not sure if mu=0 for the log_normal is appropriate
         mu =0
         gaussian_std = np.random.lognormal(mu, sigma=self.sigma)
         print("sigma used for the gaussian_filter:", gaussian_std)
