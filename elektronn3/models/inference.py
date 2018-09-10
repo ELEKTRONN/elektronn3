@@ -4,23 +4,40 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
 
+# TODO: elektronn3.inference top-level submodule
+
 import torch
 import torch.nn as nn
 import glob
 from collections import OrderedDict
 import numpy as np
+import os
 import time
 from typing import Union, Optional, Callable
 
 
-# TODO: Optionally apply softmax
-class InferenceModel:
+class Predictor:
     """Class to perform inference using a ``torch.nn.Module`` object either
-    passed directly or loaded from an elektronn3 training folder.
+    passed directly or loaded from a file.
 
     Args:
-        model: Path to training folder of elektronn3 model or already
-            loaded/initialized ``nn.Module`` defining the model.
+        model: Network model to be used for inference.
+            The model can be passed as an ``torch.nn.Module``, or as a path
+            to either a model file or to an elektronn3 save directory:
+
+            - If ``model`` is a ``torch.nn.Module`` object, it is used
+              directly.
+            - If ``model`` is a path (string) to a pickled PyTorch module (.pt)
+              (**not** a pickled ``state_dict``), it is loaded from the file
+              and mapped to the specified ``device``.
+            - If ``model`` is a path to an elektronn3 save directory,
+              the model is automatically initialized from the training script
+              (.py) by calling its ``get_model()`` function and the
+              ``state_dict`` is loaded from the best (or only) available
+              ``state_dict`` checkpoint (.pth) file.
+              This only works if the network model is defined in a dedicated
+              ``get_model()`` function within the training script that was
+              used.
         state_dict_src: Path to ``state_dict`` file (.pth) or loaded
             ``state_dict`` or ``None``. If not ``None``, the ``state_dict`` of
             the ``model`` is replaced with it.
@@ -39,13 +56,13 @@ class InferenceModel:
         ...     nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
         ...     nn.Conv2d(32, 2, 1))
         >>> inp = np.random.randn(2, 5, 10, 10)
-        >>> model = InferenceModel(cnn)
+        >>> model = Predictor(cnn)
         >>> out = model.predict_proba(inp)
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
     def __init__(
             self,
-            model: nn.Module,
+            model: Union[nn.Module, str],
             state_dict_src: Optional[Union[str, dict]] = None,
             device: Optional[Union[torch.device, str]] = None,
             multi_gpu: bool = True,
@@ -54,26 +71,24 @@ class InferenceModel:
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
+        if isinstance(model, str):
+            if os.path.isfile(model):
+                model = torch.load(model, map_location=device)
+            elif os.path.isdir(model):
+                model = load_model_from_savedir(model)
+            else:
+                raise ValueError(f'Model path {model} not found.')
         self.model = model
-        if type(state_dict_src) is str:
-            state_dict = torch.load(state_dict_src[0])
-        elif type(state_dict_src) is dict or state_dict_src is None:
+        if isinstance(state_dict_src, str):
+            state_dict = torch.load(state_dict_src)
+        elif isinstance(state_dict_src, dict) or state_dict_src is None:
             state_dict = state_dict_src
         else:
             raise ValueError(
                 '"state_dict_src" has to be either a path to a .pth file (str),'
                 ' a state_dict object (dict) or None.')
         if state_dict is not None:
-            try:
-                self.model.load_state_dict(state_dict)
-            # if self.model was saved as nn.DataParallel then remove 'module.'
-            #  prefix in every key
-            # TODO: Is it really safe to catch all runtime errors here?
-            except RuntimeError:
-                new_state_dict = OrderedDict()
-                for k, v in state_dict.items():
-                    new_state_dict[k.replace('module.', '')] = v
-                self.model.load_state_dict(new_state_dict)
+            set_state_dict(model, state_dict)
         if not model_has_softmax_outputs:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         self.model.eval()
@@ -111,9 +126,9 @@ class InferenceModel:
         Returns:
             Model output
         """
-        # TODO (high priority!): Spatial chunking ("imposed_patch_size")
+        # TODO (high priority!): Tiling ("imposed_patch_size")
         # TODO: Refactor this function to be less complex by default, calling
-        #     "special" code for spatial chunking (todo) and batch chunking
+        #     "special" code for tiling (todo) and batch chunking
         #     (batch_size) only if needed.
         # TODO: Optimize performance, especially: Can we use cuda's async data transfer
         #       in a better way? (begin transfer earlier, defer transfer to CPU)
@@ -150,14 +165,29 @@ class InferenceModel:
         return out
 
 
+def set_state_dict(model: torch.nn.Module, state_dict: dict):
+    """Set state dict of a model.
+
+    Also works with ``torch.nn.DataParallel`` models."""
+    try:
+        model.load_state_dict(state_dict)
+    # If self.model was saved as nn.DataParallel then remove 'module.' prefix
+    # in every key
+    except RuntimeError:  # TODO: Is it safe to catch all runtime errors here?
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            new_state_dict[k.replace('module.', '')] = v
+        model.load_state_dict(new_state_dict)
+
+
 # TODO: Handle multiple state dict files being available
-def load_trained_model(src: str) -> InferenceModel:
+def load_model_from_savedir(src: str) -> torch.nn.Module:
     """
-    Load trained elektronn3 model.
+    Load trained elektronn3 model from a save directory.
 
     Args:
         src: Source path to model directory. Directory must contain training
-            script and model-checkpoint.pth.
+            script and a model checkpoint .pth file.
 
     Returns:
         Trained model
@@ -171,10 +201,13 @@ def load_trained_model(src: str) -> InferenceModel:
     # get state dict path
     state_dict_p = glob.glob(f'{src}/*.pth')
     if len(state_dict_p) > 1:
-        final_p = ["final" in sp for sp in state_dict_p]
-        if np.sum(final_p) == 1:
-            state_dict_p = [state_dict_p[np.argmax(final_p)]]
-    assert len(state_dict_p) == 1, "Multiple/None state dict file(s). " \
+        best_p = ["_best" in sp for sp in state_dict_p]
+        if np.sum(best_p) == 1:
+            state_dict_p = [state_dict_p[np.argmax(best_p)]]
+    assert len(state_dict_p) == 1, "Multiple/no state dict file(s). " \
                                    "Ill-defined state dict file."
-    model = InferenceModel(get_model(), state_dict_p[0])
+    state_dict = torch.load(state_dict_p[0])
+    # model = Predictor(get_model(), state_dict_p[0])
+    model = get_model()  # get_model() is defined dynamically by exec(open(...)) above
+    set_state_dict(model, state_dict)
     return model
