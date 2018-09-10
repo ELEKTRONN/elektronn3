@@ -32,6 +32,7 @@ def get_model():
     ).to(device)
     return model
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Train a network.')
     parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -103,13 +104,13 @@ if __name__ == "__main__":
     lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 
     valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
-    'val_AP': metrics.bin_average_precision,  # expensive
-    'val_AUROC': metrics.bin_auroc,  # expensive
+        'val_accuracy': metrics.bin_accuracy,
+        'val_precision': metrics.bin_precision,
+        'val_recall': metrics.bin_recall,
+        'val_DSC': metrics.bin_dice_coefficient,
+        'val_IoU': metrics.bin_iou,
+        'val_AP': metrics.bin_average_precision,  # expensive
+        'val_AUROC': metrics.bin_auroc,  # expensive
     }
 
     criterion = nn.CrossEntropyLoss().to(device)
@@ -127,7 +128,7 @@ if __name__ == "__main__":
         save_root=save_root,
         exp_name=args.exp_name,
         schedulers={"lr": lr_sched},
-    valid_metrics=valid_metrics,
+        valid_metrics=valid_metrics,
     )
 
     # Archiving training script, src folder, env info

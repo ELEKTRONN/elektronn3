@@ -108,7 +108,7 @@ if __name__ == "__main__":
     ])
     valid_transform = transforms.Compose(common_transforms + [])
 
-    #Specify data set
+    # Specify data set
     common_data_kwargs = {  # Common options for training and valid sets.
         'aniso_factor': 2,
         'patch_shape': (48, 96, 96),
@@ -152,13 +152,13 @@ if __name__ == "__main__":
     # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
     valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
-    'val_AP': metrics.bin_average_precision,  # expensive
-    'val_AUROC': metrics.bin_auroc,  # expensive
+        'val_accuracy': metrics.bin_accuracy,
+        'val_precision': metrics.bin_precision,
+        'val_recall': metrics.bin_recall,
+        'val_DSC': metrics.bin_dice_coefficient,
+        'val_IoU': metrics.bin_iou,
+        'val_AP': metrics.bin_average_precision,  # expensive
+        'val_AUROC': metrics.bin_auroc,  # expensive
     }
 
     # Class weights for imbalanced dataset
@@ -180,8 +180,8 @@ if __name__ == "__main__":
         save_root=save_root,
         exp_name=args.exp_name,
         schedulers={"lr": lr_sched},
-    valid_metrics=valid_metrics,
-)
+        valid_metrics=valid_metrics,
+    )
 
     # Archiving training script, src folder, env info
     Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
