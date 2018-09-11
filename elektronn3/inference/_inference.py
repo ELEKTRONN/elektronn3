@@ -4,7 +4,6 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
 
-# TODO: elektronn3.inference top-level submodule
 
 import torch
 import torch.nn as nn
