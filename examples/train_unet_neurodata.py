@@ -52,137 +52,142 @@ from elektronn3.training import metrics
 from elektronn3.models.unet import UNet
 
 
-torch.manual_seed(0)
+def get_model():
+    # Initialize neural network model
+    model = UNet(
+        n_blocks=3,
+        start_filts=32,
+        planar_blocks=(1,),
+        activation='relu',
+        batch_norm=True
+    ).to(device)
+    return model
 
-# USER PATHS
-save_root = os.path.expanduser('~/e3training/')
-os.makedirs(save_root, exist_ok=True)
-data_root = os.path.expanduser('~/neuro_data_cdhw/')
-input_h5data = [
-    (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
-    for i in range(3)
-]
-target_h5data = [
-    (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
-    for i in range(3)
-]
 
-max_steps = args.max_steps
-max_runtime = args.max_runtime
-lr = 0.0004
-lr_stepsize = 1000
-lr_dec = 0.995
-batch_size = 1
+if __name__ == "__main__":
+    torch.manual_seed(0)
 
-# Initialize neural network model
-model = UNet(
-    n_blocks=3,
-    start_filts=32,
-    planar_blocks=(1,),
-    activation='relu',
-    batch_norm=True
-).to(device)
-if args.resume is not None:  # Load pretrained network params
-    model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
+    # USER PATHS
+    save_root = os.path.expanduser('~/e3training/')
+    os.makedirs(save_root, exist_ok=True)
+    data_root = os.path.expanduser('~/neuro_data_cdhw/')
+    input_h5data = [
+        (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+        for i in range(3)
+    ]
+    target_h5data = [
+        (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+        for i in range(3)
+    ]
 
-# These statistics are computed from the training dataset.
-# Remember to re-compute and change them when switching the dataset.
-dataset_mean = (155.291411,)
-dataset_std = (42.599973,)
+    max_steps = args.max_steps
+    max_runtime = args.max_runtime
+    lr = 0.0004
+    lr_stepsize = 1000
+    lr_dec = 0.995
+    batch_size = 1
 
-# Transformations to be applied to samples before feeding them to the network
-common_transforms = [
-    transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
-]
-train_transform = transforms.Compose(common_transforms + [
-    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
-    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
-    # transforms.RandomBlurring({'probability': 0.5})
-])
-valid_transform = transforms.Compose(common_transforms + [])
+    model = get_model()
+    if args.resume is not None:  # Load pretrained network params
+        model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
-# Specify data set
-common_data_kwargs = {  # Common options for training and valid sets.
-    'aniso_factor': 2,
-    'patch_shape': (48, 96, 96),
-    'classes': [0, 1],
-}
-train_dataset = PatchCreator(
-    input_h5data=input_h5data[:2],
-    target_h5data=target_h5data[:2],
-    train=True,
-    epoch_size=args.epoch_size,
-    warp=0.5,
-    warp_kwargs={
-        'sample_aniso': True,
-        'perspective': True,
-    },
-    transform=train_transform,
-    **common_data_kwargs
-)
-valid_dataset = PatchCreator(
-    input_h5data=[input_h5data[2]],
-    target_h5data=[target_h5data[2]],
-    train=False,
-    epoch_size=10,  # How many samples to use for each validation run
-    preview_shape=(64, 144, 144),
-    warp=0,
-    warp_kwargs={
-        'sample_aniso': True,
-        'warp_amount': 0.8,  # Strength
-    },
-    transform=valid_transform,
-    **common_data_kwargs
-)
+    # These statistics are computed from the training dataset.
+    # Remember to re-compute and change them when switching the dataset.
+    dataset_mean = (155.291411,)
+    dataset_std = (42.599973,)
 
-# Set up optimization
-optimizer = optim.Adam(
-    model.parameters(),
-    weight_decay=0.5e-4,
-    lr=lr,
-    amsgrad=True
-)
-lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
-# lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
+    # Transformations to be applied to samples before feeding them to the network
+    common_transforms = [
+        transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
+        transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    ]
+    train_transform = transforms.Compose(common_transforms + [
+        # transforms.RandomGrayAugment(channels=[0], prob=0.3),
+        # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
+        # transforms.RandomBlurring({'probability': 0.5})
+    ])
+    valid_transform = transforms.Compose(common_transforms + [])
 
-valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
-    'val_AP': metrics.bin_average_precision,  # expensive
-    'val_AUROC': metrics.bin_auroc,  # expensive
-}
+    # Specify data set
+    common_data_kwargs = {  # Common options for training and valid sets.
+        'aniso_factor': 2,
+        'patch_shape': (48, 96, 96),
+        'classes': [0, 1],
+    }
+    train_dataset = PatchCreator(
+        input_h5data=input_h5data[:2],
+        target_h5data=target_h5data[:2],
+        train=True,
+        epoch_size=args.epoch_size,
 
-# Class weights for imbalanced dataset
-class_weights = torch.tensor([0.2653,  0.7347])
+        warp=0.5,
+        warp_kwargs={
+            'sample_aniso': True,
+            'perspective': True,
+        },
+        transform=train_transform,**common_data_kwargs
+    )
+    valid_dataset = PatchCreator(
+        input_h5data=[input_h5data[2]],
+        target_h5data=[target_h5data[2]],
+        train=False,
+        epoch_size=10,  # How many samples to use for each validation run
+        preview_shape=(64, 144, 144),
+        warp=0,
+        warp_kwargs={
+            'sample_aniso': True,
+            'warp_amount': 0.8,  # Strength
+        },transform=valid_transform,
+        **common_data_kwargs
+    )
 
-# criterion = nn.CrossEntropyLoss(weight=class_weights)
-criterion = DiceLoss()
+    # Set up optimization
+    optimizer = optim.Adam(
+        model.parameters(),
+        weight_decay=0.5e-4,
+        lr=lr,
+        amsgrad=True
+    )
+    lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
+    # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
 
-# Create trainer
-trainer = Trainer(
-    model=model,
-    criterion=criterion,
-    optimizer=optimizer,
-    device=device,
-    train_dataset=train_dataset,
-    valid_dataset=valid_dataset,
-    batchsize=batch_size,
-    num_workers=2,
-    save_root=save_root,
-    exp_name=args.exp_name,
-    schedulers={"lr": lr_sched},
-    valid_metrics=valid_metrics,
-)
+    valid_metrics = {
+        'val_accuracy': metrics.bin_accuracy,
+        'val_precision': metrics.bin_precision,
+        'val_recall': metrics.bin_recall,
+        'val_DSC': metrics.bin_dice_coefficient,
+        'val_IoU': metrics.bin_iou,
+        'val_AP': metrics.bin_average_precision,  # expensive
+        'val_AUROC': metrics.bin_auroc,  # expensive
+    }
 
-# Archiving training script, src folder, env info
-Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+    # Class weights for imbalanced dataset
+    class_weights = torch.tensor([0.2653,  0.7347])
 
-# Start training
-trainer.train(max_steps=max_steps, max_runtime=max_runtime)
+    # criterion = nn.CrossEntropyLoss(weight=class_weights)
+    criterion = DiceLoss()
+
+    # Create trainer
+    trainer = Trainer(
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        train_dataset=train_dataset,
+        valid_dataset=valid_dataset,
+        batchsize=batch_size,
+        num_workers=2,
+        save_root=save_root,
+        exp_name=args.exp_name,
+        schedulers={"lr": lr_sched},
+        valid_metrics=valid_metrics,
+    )
+
+    # Archiving training script, src folder, env info
+    Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+
+    # Start training
+    trainer.train(max_steps=max_steps, max_runtime=max_runtime)
 
 
 # How to re-calculate mean, std and class_weights for other datasets:

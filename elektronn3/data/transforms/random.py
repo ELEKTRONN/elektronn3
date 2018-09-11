@@ -57,3 +57,21 @@ class HalfNormal(RandomSampler):
     ):
         rv = scipy.stats.halfnorm(loc=0, scale=sigma)
         super().__init__(rv=rv, shape=shape, bounds=bounds, rng=rng)
+
+
+class RandInt(RandomSampler):
+    """Discrete uniform distribution sampler
+
+    Outputs random integers in a defined range ``(low, high)`` with equal
+    probability.
+
+    By default (``low=0, high=2``), it generates binary values (0 or 1)."""
+    def __init__(
+            self,
+            low: int = 0,
+            high: int = 2,
+            shape: Tuple[int, ...] = (),
+            rng: Optional[np.random.RandomState] = None
+    ):
+        rv = scipy.stats.randint(low=low, high=high)
+        super().__init__(rv=rv, shape=shape, rng=rng, bounds=None)
