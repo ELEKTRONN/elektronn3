@@ -95,15 +95,40 @@ class Predictor:
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
+    def _predict(self, inp: torch.Tensor) -> np.ndarray:
+        inp = inp.to(self.device)
+        out = self.model(inp)
+        out = out.cpu().numpy()
+        return out
+
+    def _splitbatch_predict(
+            self,
+            inp: torch.Tensor,
+            out_shape: tuple,
+            num_batches: int,
+            batch_size: int
+    ) -> np.ndarray:
+        """Split the input batch into small batches of the specified batch_size
+        and perform inference on each of them separately."""
+        out = np.empty(out_shape, dtype=np.float32)
+        for k in range(0, num_batches):
+            low = batch_size * k
+            high = batch_size * (k + 1)
+            # Only moving data to GPU in the loop to save memory
+            inp_stride = inp[low:high].to(self.device)
+            out_stride = self.model(inp_stride)
+            out[low:high] = out_stride.cpu().numpy()
+            del inp_stride, out_stride  # Free some GPU memory
+        return out
+
     def predict_proba(
             self,
             inp: Union[np.ndarray, torch.Tensor],
-            batch_size: int = 2,
-            post_process: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+            batch_size: Optional[int] = None,
             verbose: Optional[bool] = False,
             out_shape: Optional[tuple] = None,
     ):
-        """
+        """ Predict class probabilites of an input tensor.
 
         Args:
             inp: Input data, e.g. of shape (N, C, H, W).
@@ -115,10 +140,8 @@ class Predictor:
                 inference. In general, a higher ``batch_size`` will give you
                 higher prediction speed, but prediction will consume more
                 GPU memory. Reduce the ``batch_size`` if you run out of memory.
-            post_process: Post processing function that is executed on the
-                network output tensors before returning. The expected function
-                signature is ``y = post_process(x)``, where x and y both are
-                ``np.ndarray``s.
+                If this is ``None`` (default), the input batch size is used
+                as the prediction batch size.
             verbose: If ``True``, report inference speed.
             out_shape: Output shape, will be inferred if ``None``.
 
@@ -126,37 +149,27 @@ class Predictor:
             Model output
         """
         # TODO (high priority!): Tiling ("imposed_patch_size")
-        # TODO: Refactor this function to be less complex by default, calling
-        #     "special" code for tiling (todo) and batch chunking
-        #     (batch_size) only if needed.
-        # TODO: Optimize performance, especially: Can we use cuda's async data transfer
-        #       in a better way? (begin transfer earlier, defer transfer to CPU)
         if verbose:
             start = time.time()
         inp = torch.as_tensor(inp, dtype=torch.float32)
         inp_batch_size = inp.shape[0]
+        if batch_size is None:
+            batch_size = inp_batch_size
         with torch.no_grad():
-            if out_shape is None:
+            # TODO: Can we just assume instead that out_shape == in_shape unless stated otherwise?
+            if out_shape is None:  # TODO: Can we cache this?
                 # Test inference to figure out shapes
+                # TODO: out_shape is unnecessary iff num_batches == 1 AND no tiling is used.
                 test_out = self.model(inp[:1].to(self.device))
                 out_shape = tuple([inp_batch_size] + list(test_out.shape)[1:])
                 del test_out
-            out = np.empty(out_shape, dtype=np.float32)
-            # Split the input batch into small batches of the specified
-            # batch_size and perform inference on each of them separately
+
             num_batches = int(np.ceil(inp_batch_size / batch_size))
-            for k in range(0, num_batches):
-                low = batch_size * k
-                high = batch_size * (k + 1)
-                # Only moving data to GPU in the loop to save memory
-                inp_stride = inp[low:high].to(self.device)
-                out_stride = self.model(inp_stride)
-                out[low:high] = out_stride.cpu().numpy()
-                del inp_stride, out_stride  # Free some GPU memory
-                # TODO: Make sure the GC does its work or manually gc.collect()
-            assert high >= inp_batch_size, "Prediction has less samples than given in input."
-        if post_process is not None:
-            out = post_process(out)
+            if num_batches == 1:  # Predict everything in one step
+                out = self._predict(inp)
+            else:  # Split input batch into smaller batches and predict separately
+                out = self._splitbatch_predict(inp, out_shape, num_batches, batch_size)
+
         if verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
