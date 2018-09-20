@@ -1,9 +1,11 @@
-# -*- coding: utf-8 -*-
 # ELEKTRONN3 - Neural Network Toolkit
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
+
+# NOTE: This module is currently not maintained. We should probably put this somewhere else.
+
 import os
 import traceback
 from typing import Tuple, Dict, Optional

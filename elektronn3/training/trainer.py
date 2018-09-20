@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # ELEKTRONN3 - Neural Network Toolkit
 #
 # Copyright (c) 2017 - now
@@ -132,6 +131,7 @@ class Trainer:
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
+    # TODO: Log useful info, like ELEKTRONN2 does
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
 
@@ -392,13 +392,15 @@ class Trainer:
                         return
                 else:
                     raise e
-        torch.save(
-            self.model.state_dict(),
-            os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
-        )
+        self.save_model(suffix='_final')
 
-    def save_model(self, suffix=''):
+    def save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
         """Save/serialize trained model state to files.
+
+        If the model uses a parallel wrapper like ``torch.nn.DataParallel``,
+        this is automatically detected and the wrapped model is saved directly
+        to make later deserialization easier. This can be disabled by setting
+        ``unwrap_parallel=False``.
 
         Writes to two files in the ``self.save_path``:
 
@@ -416,11 +418,28 @@ class Trainer:
 
         If ``suffix`` is defined, it will be added before the file extension.
         """
-        torch.save(
-            self.model.state_dict(),
-            os.path.join(self.save_path, f'state_dict{suffix}.pth')
+        # TODO: Logging
+        model = self.model
+        # We do this awkard check because there are too many different
+        # parallel wrappers in PyTorch and some of them have changed names
+        # in different releases (DataParallel, DistributedDataParallel{,CPU}).
+        is_wrapped = (
+            hasattr(model, 'module') and
+            'parallel' in str(type(model)).lower() and
+            isinstance(model.module, torch.nn.Module)
         )
-        torch.save(self.model, os.path.join(self.save_path, f'model{suffix}.pt'))
+        if is_wrapped and unwrap_parallel:
+            # If a parallel wrapper was used, the only thing we should save
+            # is the model.module, which contains the actual model and params.
+            # If we saved the wrapped module directly, deserialization would
+            # get unnecessarily difficult.
+            model = model.module
+
+        state_dict_path = os.path.join(self.save_path, f'state_dict{suffix}.pth')
+        model_path = os.path.join(self.save_path, f'model{suffix}.pt')
+
+        torch.save(model.state_dict(), state_dict_path)
+        torch.save(model, model_path)
 
     def validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
