@@ -3,16 +3,17 @@
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
-
-
-import torch
-import torch.nn as nn
 import glob
-from collections import OrderedDict
-import numpy as np
+import itertools
 import os
 import time
-from typing import Union, Optional, Callable
+from collections import OrderedDict
+from typing import Optional, Tuple, Union
+
+import numpy as np
+import torch
+import torch.nn as nn
+from tqdm import tqdm
 
 
 class Predictor:
@@ -95,6 +96,40 @@ class Predictor:
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
+    def _tiled_predict(
+            self,
+            inp: torch.Tensor,
+            out_shape: Tuple[int, ...],
+            tile_shape: Tuple[int, ...]
+    ) -> np.ndarray:
+        """Uses naive non-overlapping spatial tiling to split prediction
+        into smaller, less GPU memory-consuming chunks.
+
+        Assumes that the spatial output shape is the same as the spatial input shape."""
+        out = np.empty(out_shape, dtype=np.float32)  # Assuming out shape == inp shape!
+        inp_shape = np.array(inp.shape[2:])  # Only spatial dimensions
+        tile_shape = np.array(tile_shape)
+
+        tiles = np.ceil(inp_shape / tile_shape).astype(int)
+        num_tiles = np.prod(tiles)
+        tile_ranges = [range(t) for t in tiles]
+        for tile_pos in tqdm(itertools.product(*tile_ranges), total=num_tiles):
+            tile_pos = np.array(tile_pos)
+            lo = tile_shape * tile_pos
+            hi = tile_shape * (tile_pos + 1)
+            if np.any(hi > inp_shape):  # Incomplete tile at the edge
+                # Just clip it off and hope the shape is acceptable for the model
+                # TODO This can go wrong. How can we handle this gracefully?
+                # We could just pad to full size.
+                hi = hi.clip(max=inp_shape)
+            # Slice everything in N and C dims (equivalent to [:, :])
+            nonspatial_slice = [slice(None)] * 2
+            # Slice only the current tile region in (D, H, W) dims
+            spatial_slice = [slice(l, h) for l, h in zip(lo, hi)]
+            full_slice = tuple(nonspatial_slice + spatial_slice)
+            out[full_slice] = self._predict(inp[full_slice])
+        return out
+
     def _predict(self, inp: torch.Tensor) -> np.ndarray:
         inp = inp.to(self.device)
         out = self.model(inp)
@@ -104,9 +139,10 @@ class Predictor:
     def _splitbatch_predict(
             self,
             inp: torch.Tensor,
-            out_shape: tuple,
+            out_shape: Tuple[int, ...],
             num_batches: int,
-            batch_size: int
+            batch_size: int,
+            tile_shape: Tuple[int, ...]
     ) -> np.ndarray:
         """Split the input batch into small batches of the specified batch_size
         and perform inference on each of them separately."""
@@ -114,19 +150,16 @@ class Predictor:
         for k in range(0, num_batches):
             low = batch_size * k
             high = batch_size * (k + 1)
-            # Only moving data to GPU in the loop to save memory
-            inp_stride = inp[low:high].to(self.device)
-            out_stride = self.model(inp_stride)
-            out[low:high] = out_stride.cpu().numpy()
-            del inp_stride, out_stride  # Free some GPU memory
+            out[low:high] = self._tiled_predict(inp[low:high], tile_shape=tile_shape)
         return out
 
     def predict_proba(
             self,
             inp: Union[np.ndarray, torch.Tensor],
             batch_size: Optional[int] = None,
+            tile_shape: Optional[Tuple[int, ...]] = None,
             verbose: Optional[bool] = False,
-            out_shape: Optional[tuple] = None,
+            out_shape: Optional[Tuple[int, ...]] = None,
     ):
         """ Predict class probabilites of an input tensor.
 
@@ -142,6 +175,7 @@ class Predictor:
                 GPU memory. Reduce the ``batch_size`` if you run out of memory.
                 If this is ``None`` (default), the input batch size is used
                 as the prediction batch size.
+            tile_shape
             verbose: If ``True``, report inference speed.
             out_shape: Output shape, will be inferred if ``None``.
 
@@ -153,10 +187,12 @@ class Predictor:
             start = time.time()
         inp = torch.as_tensor(inp, dtype=torch.float32)
         inp_batch_size = inp.shape[0]
+        spatial_shape = np.array(inp.shape[2:])
+        if tile_shape is None:
+            tile_shape = spatial_shape
         if batch_size is None:
             batch_size = inp_batch_size
         with torch.no_grad():
-            # TODO: Can we just assume instead that out_shape == in_shape unless stated otherwise?
             if out_shape is None:  # TODO: Can we cache this?
                 # Test inference to figure out shapes
                 # TODO: out_shape is unnecessary iff num_batches == 1 AND no tiling is used.
@@ -166,9 +202,9 @@ class Predictor:
 
             num_batches = int(np.ceil(inp_batch_size / batch_size))
             if num_batches == 1:  # Predict everything in one step
-                out = self._predict(inp)
+                out = self._tiled_predict(inp, out_shape=out_shape, tile_shape=tile_shape)
             else:  # Split input batch into smaller batches and predict separately
-                out = self._splitbatch_predict(inp, out_shape, num_batches, batch_size)
+                out = self._splitbatch_predict(inp, out_shape, num_batches, batch_size, tile_shape)
 
         if verbose:
             dtime = time.time() - start
@@ -196,10 +232,9 @@ def set_state_dict(model: torch.nn.Module, state_dict: dict):
         model.load_state_dict(new_state_dict)
 
 
-# TODO: Handle multiple state dict files being available
 def load_model_from_savedir(src: str) -> torch.nn.Module:
     """
-    Load trained elektronn3 model from a save directory.
+    Load the *best* trained elektronn3 model from a save directory.
 
     Args:
         src: Source path to model directory. Directory must contain training
