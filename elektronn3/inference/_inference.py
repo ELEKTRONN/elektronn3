@@ -96,6 +96,12 @@ class Predictor:
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
+    def _predict(self, inp: torch.Tensor) -> np.ndarray:
+        inp = inp.to(self.device)
+        out = self.model(inp)
+        out = out.cpu().numpy()
+        return out
+
     def _tiled_predict(
             self,
             inp: torch.Tensor,
@@ -115,25 +121,20 @@ class Predictor:
         tile_ranges = [range(t) for t in tiles]
         for tile_pos in tqdm(itertools.product(*tile_ranges), total=num_tiles):
             tile_pos = np.array(tile_pos)
-            lo = tile_shape * tile_pos
-            hi = tile_shape * (tile_pos + 1)
-            if np.any(hi > inp_shape):  # Incomplete tile at the edge
+            # Calculate corner coordinates of the current tile
+            low_corner = tile_shape * tile_pos
+            high_corner = tile_shape * (tile_pos + 1)
+            if np.any(high_corner > inp_shape):  # Incomplete tile at the edge
                 # Just clip it off and hope the shape is acceptable for the model
                 # TODO This can go wrong. How can we handle this gracefully?
                 # We could just pad to full size.
-                hi = hi.clip(max=inp_shape)
+                high_corner = high_corner.clip(max=inp_shape)
             # Slice everything in N and C dims (equivalent to [:, :])
             nonspatial_slice = [slice(None)] * 2
             # Slice only the current tile region in (D, H, W) dims
-            spatial_slice = [slice(l, h) for l, h in zip(lo, hi)]
+            spatial_slice = [slice(l, h) for l, h in zip(low_corner, high_corner)]
             full_slice = tuple(nonspatial_slice + spatial_slice)
             out[full_slice] = self._predict(inp[full_slice])
-        return out
-
-    def _predict(self, inp: torch.Tensor) -> np.ndarray:
-        inp = inp.to(self.device)
-        out = self.model(inp)
-        out = out.cpu().numpy()
         return out
 
     def _splitbatch_predict(
@@ -182,7 +183,6 @@ class Predictor:
         Returns:
             Model output
         """
-        # TODO (high priority!): Tiling ("imposed_patch_size")
         if verbose:
             start = time.time()
         inp = torch.as_tensor(inp, dtype=torch.float32)
@@ -209,7 +209,7 @@ class Predictor:
         if verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
-            print(f'Inference speed: {speed:.2f} MPix /s, time: {dtime:.2f}.')
+            print(f'Inference speed: {speed:.2f} MPix/s, time: {dtime:.2f}.')
         return out
 
 
