@@ -58,6 +58,12 @@ from elektronn3.training import metrics
 from elektronn3.models.unet import UNet
 
 
+if torch.__version__.startswith('0'):
+    args.disable_trace = True
+    print('Disabling JIT tracing because PyTorch version is too old to work '
+          'reliably with tracing. Please upgrade to PyTorch 1.0 (nightly) or '
+          'run with the --disable-trace option.')
+
 # TODO: Support loading ScriptModules directly
 def get_model(trace: bool = True):
     # Initialize neural network model
