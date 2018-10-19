@@ -169,7 +169,19 @@ class Trainer:
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
         self.device = device
-        self.model = model.to(device)
+        try:
+            model.to(device)
+        except RuntimeError as exc:
+            if isinstance(model, torch.jit.ScriptModule):
+                # "RuntimeError: to is not supported on TracedModules"
+                # But .cuda() works for some reason. Using this messy
+                # workaround in the hope that we can drop it soon.
+                # TODO: Remove this when ScriptModule.to() is supported
+                if 'cuda' in str(self.device):  # (Ignoring device number!)
+                    model.cuda()
+            else:
+                raise exc
+        self.model = model
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
         self.train_dataset = train_dataset
@@ -439,7 +451,18 @@ class Trainer:
         model_path = os.path.join(self.save_path, f'model{suffix}.pt')
 
         torch.save(model.state_dict(), state_dict_path)
-        torch.save(model, model_path)
+        try:
+            # Try saving directly as an uncompiled nn.Module
+            torch.save(model, model_path)
+        except TypeError as exc:
+            # If model is a ScriptModule, it can't be saved with torch.save()
+            # Use ScriptModule.save() instead in this case.
+            # Using the file extension '.pts' to show it's a ScriptModule.
+            if isinstance(model, torch.jit.ScriptModule):
+                model_path += 's'
+                model.save(model_path)
+            else:
+                raise exc
 
     def validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
