@@ -177,6 +177,7 @@ class Trainer:
                 # But .cuda() works for some reason. Using this messy
                 # workaround in the hope that we can drop it soon.
                 # TODO: Remove this when ScriptModule.to() is supported
+                # See https://github.com/pytorch/pytorch/issues/7354
                 if 'cuda' in str(self.device):  # (Ignoring device number!)
                     model.cuda()
             else:

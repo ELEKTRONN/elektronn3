@@ -36,7 +36,7 @@ parser.add_argument(
          'ScriptModule from which to resume training.'
 )
 parser.add_argument(
-    '--disable-trace', action='store_true',
+    '-d', '--disable-trace', action='store_true',
     help='Disable tracing JIT compilation of the model.'
 )
 args = parser.parse_args()
@@ -64,7 +64,7 @@ if torch.__version__.startswith('0'):
           'reliably with tracing. Please upgrade to PyTorch 1.0 (nightly) or '
           'run with the --disable-trace option.')
 
-# TODO: Support loading ScriptModules directly
+
 def get_model(trace: bool = True):
     # Initialize neural network model
     model = UNet(
@@ -75,7 +75,7 @@ def get_model(trace: bool = True):
         batch_norm=True
     ).to(device)
     if trace:
-        x = torch.randn(1,1,32,64,64, device=device)
+        x = torch.randn(1, 1, 32, 64, 64, device=device)
         model = torch.jit.trace(model, x)
 
     return model
@@ -106,9 +106,10 @@ if __name__ == "__main__":
 
     model = get_model(trace=(not args.disable_trace))
     if args.resume is not None:  # Load pretrained network
-        try:
+        try:  # Assume it's a state_dict for the model
             model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
         except _pickle.UnpicklingError as exc:
+            # Assume it's a complete saved ScriptModule
             model = torch.jit.load(os.path.expanduser(args.resume))
             # TODO: Rewrite this when ScriptModule.to() is supported
             if 'cuda' in str(device):  # (Ignoring device number!)
