@@ -97,7 +97,7 @@ class TripletNetTrainer(Trainer):
                     target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                     target = Variable(target)
                     loss = self.criterion(dA, dB, target)
-                    L_l2 = torch.mean(torch.cat((z0.norm(2, dim=1), z1.norm(2, dim=1), z2.norm(2, dim=1)), dim=0))
+                    L_l2 = torch.mean(torch.cat((z0.norm(1, dim=1), z1.norm(1, dim=1), z2.norm(1, dim=1)), dim=0))
                     misc['G_loss_l2'] += self.alpha * float(L_l2)
                     loss = loss + self.alpha * L_l2
                     misc['G_loss_tnet'] += (1 - self.alpha2) * float(loss)  # log actual loss

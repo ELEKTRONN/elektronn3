@@ -20,6 +20,14 @@ class InferenceModel(object):
         src: Path to training folder of e3 model or already loaded/initialized nn.Module defining the model.
         disable_cuda: use cpu only
         multi_gpu: enable multi-gpu support of pytorch
+    Examples:
+        >>> cnn = nn.Sequential(
+        ... nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
+        ... nn.Conv2d(32, 2, 1)).to('cpu')
+        >>> inp = np.random.randn(2, 5, 10, 10)
+        >>> model = InferenceModel(cnn)
+        >>> out = model.predict_proba(inp)
+        >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
     def __init__(self, src: Union[str, nn.Module], disable_cuda: bool = False,
                  multi_gpu: bool = True):
@@ -29,6 +37,7 @@ class InferenceModel(object):
             device = torch.device('cpu')
         self.device = device
         if type(src) is str:
+            print('Initializing model from {}.'.format(src))
             self.model = load_model(src)
             self.model_p = src
         else:

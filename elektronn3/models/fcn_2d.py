@@ -20,10 +20,10 @@ from torchvision.models.vgg import VGG
 
 class FCN32s(nn.Module):
 
-    def __init__(self, base_net, n_class):
+    def __init__(self, pretrained_net, n_class):
         super().__init__()
         self.n_class = n_class
-        self.base_net = base_net
+        self.pretrained_net = pretrained_net
         self.relu    = nn.ReLU(inplace=True)
         self.deconv1 = nn.ConvTranspose2d(512, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn1     = nn.BatchNorm2d(512)
@@ -38,7 +38,7 @@ class FCN32s(nn.Module):
         self.classifier = nn.Conv2d(32, n_class, kernel_size=1)
 
     def forward(self, x):
-        output = self.base_net(x)
+        output = self.pretrained_net(x)
         x5 = output['x5']  # size=(N, 512, x.H/32, x.W/32)
 
         score = self.bn1(self.relu(self.deconv1(x5)))     # size=(N, 512, x.H/16, x.W/16)
@@ -53,10 +53,10 @@ class FCN32s(nn.Module):
 
 class FCN16s(nn.Module):
 
-    def __init__(self, base_net, n_class):
+    def __init__(self, pretrained_net, n_class):
         super().__init__()
         self.n_class = n_class
-        self.base_net = base_net
+        self.pretrained_net = pretrained_net
         self.relu    = nn.ReLU(inplace=True)
         self.deconv1 = nn.ConvTranspose2d(512, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn1     = nn.BatchNorm2d(512)
@@ -71,7 +71,7 @@ class FCN16s(nn.Module):
         self.classifier = nn.Conv2d(32, n_class, kernel_size=1)
 
     def forward(self, x):
-        output = self.base_net(x)
+        output = self.pretrained_net(x)
         x5 = output['x5']  # size=(N, 512, x.H/32, x.W/32)
         x4 = output['x4']  # size=(N, 512, x.H/16, x.W/16)
 
@@ -88,10 +88,10 @@ class FCN16s(nn.Module):
 
 class FCN8s(nn.Module):
 
-    def __init__(self, base_net, n_class):
+    def __init__(self, pretrained_net, n_class):
         super().__init__()
         self.n_class = n_class
-        self.base_net = base_net
+        self.pretrained_net = pretrained_net
         self.relu    = nn.ReLU(inplace=True)
         self.deconv1 = nn.ConvTranspose2d(512, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn1     = nn.BatchNorm2d(512)
@@ -106,7 +106,7 @@ class FCN8s(nn.Module):
         self.classifier = nn.Conv2d(32, n_class, kernel_size=1)
 
     def forward(self, x):
-        output = self.base_net(x)
+        output = self.pretrained_net(x)
         x5 = output['x5']  # size=(N, 512, x.H/32, x.W/32)
         x4 = output['x4']  # size=(N, 512, x.H/16, x.W/16)
         x3 = output['x3']  # size=(N, 256, x.H/8,  x.W/8)
@@ -125,10 +125,10 @@ class FCN8s(nn.Module):
 
 class FCNs(nn.Module):
 
-    def __init__(self, base_net, n_class):
+    def __init__(self, pretrained_net, n_class):
         super().__init__()
         self.n_class = n_class
-        self.base_net = base_net
+        self.pretrained_net = pretrained_net
         self.relu    = nn.ReLU(inplace=True)
         self.deconv1 = nn.ConvTranspose2d(512, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn1     = nn.BatchNorm2d(512)
@@ -143,7 +143,7 @@ class FCNs(nn.Module):
         self.classifier = nn.Conv2d(32, n_class, kernel_size=1)
 
     def forward(self, x):
-        output = self.base_net(x)
+        output = self.pretrained_net(x)
         x5 = output['x5']  # size=(N, 512, x.H/32, x.W/32)
         x4 = output['x4']  # size=(N, 512, x.H/16, x.W/16)
         x3 = output['x3']  # size=(N, 256, x.H/8,  x.W/8)
