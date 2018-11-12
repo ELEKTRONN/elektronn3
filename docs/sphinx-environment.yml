@@ -15,7 +15,7 @@ dependencies:
   - tqdm >=4.23.3
   - numpy >=1.14.2
   - scipy >=1.1.0
-  - pytorch-cpu >=0.4.0
+  - pytorch-cpu >=0.4.1
   - tensorboard >=1.8.0
   - tensorflow >=1.8.0
   # For docs:

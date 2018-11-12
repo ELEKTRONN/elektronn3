@@ -21,4 +21,4 @@ This limitation might be lifted some day, but it's currently low priority.
 
 import torch
 
-from ._inference import Predictor
+from .inference import Predictor
