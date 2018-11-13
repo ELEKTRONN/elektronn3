@@ -121,6 +121,13 @@ class PatchCreator(data.Dataset):
         classes: The different target classes that exist
             in the data set. Setting this is optional, but some features might
             only work if this is specified.
+        in_memory: If ``True``, all data set files are immediately loaded
+            into host memory and are permanently kept there as numpy arrays.
+            If this is disabled (default), file contents are always read from
+            the HDF5 files to produce samples. (Note: This does not mean it's
+            slower, because file contents are transparently cached by h5py,
+            see http://docs.h5py.org/en/latest/high/file.html#chunk-cache).
+
     """
     def __init__(
             self,
@@ -136,7 +143,8 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
-            classes: Optional[Sequence[int]] = None
+            classes: Optional[Sequence[int]] = None,
+            in_memory: bool = False,
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
@@ -171,6 +179,7 @@ class PatchCreator(data.Dataset):
         #       as a whitelist that excludes classes that should be ignored.
         self.classes = classes
         self.num_classes = None if classes is None else len(classes)
+        self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
@@ -502,10 +511,14 @@ class PatchCreator(data.Dataset):
         self.check_files()
         inp_h5sets, target_h5sets = [], []
         modestr = 'Training' if self.train else 'Validation'
-        print(f'\n{modestr} data set:')
+        memstr = ' (in memory)' if self.in_memory else ''
+        print(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
             inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
+            if self.in_memory:
+                inp_h5 = inp_h5.value
+                target_h5 = target_h5.value
 
             print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
             print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
