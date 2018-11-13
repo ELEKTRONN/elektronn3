@@ -33,21 +33,19 @@ def _to_full_numpy(seq) -> np.ndarray:
 
 
 def calculate_means(inputs: Sequence) -> Tuple[float]:
-    # TODO: This implementation can surely be optimized (esp. memory usage)
     inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
-    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
-    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
-    means = flat.mean(axis=1)  # For each channel, calculate mean of all values
+    # Select dimensions to reduce over: Every dimension except C (1)
+    reduce_dims = tuple([0] + list(range(inputs.ndim))[2:])  # = (0, 2, 3, ...)
+    means = inputs.mean(axis=reduce_dims)
     return tuple(means)
 
 
 # TODO: Respect separate channels
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
-    # TODO: This implementation can surely be optimized (esp. memory usage)
     inputs = _to_full_numpy(inputs)
-    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
-    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
-    stds = flat.std(axis=1)  # For each channel, calculate std of all values
+    # Select dimensions to reduce over: Every dimension except C (1)
+    reduce_dims = tuple([0] + list(range(inputs.ndim))[2:])  # = (0, 2, 3, ...)
+    stds = inputs.std(axis=reduce_dims)
     return tuple(stds)
 
 
