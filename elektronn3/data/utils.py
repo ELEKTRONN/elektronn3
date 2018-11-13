@@ -19,7 +19,7 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
-def _to_full_numpy(seq):
+def _to_full_numpy(seq) -> np.ndarray:
     if isinstance(seq, np.ndarray):
         return seq
     elif isinstance(seq[0], np.ndarray):
@@ -62,12 +62,22 @@ def calculate_class_weights(
     datasets with high class imbalance."""
 
     def __inverse(targets):
-        raise NotImplementedError  # TODO
-        # Weight of each class c1, c2, c3, ... with element counts n1, n2, n3, ... is assigned by:
-        # weight[i] = 1 / n[i]
+        """The weight of each class c1, c2, c3, ... with labeled-element
+        counts n1, n2, n3, ... is assigned by weight[i] = 1 / n[i]"""
+        classes = np.unique(targets)
+        # Count total number of labeled elements per class
+        num_labeled = np.array([
+            np.sum(np.equal(targets, c), dtype=np.float32)
+            for c in classes
+        ])
+        class_weights = 1 / num_labeled
+        return class_weights
 
     def __binmean(targets):
-        # This assumes a binary segmentation problem (background/foreground)
+        """Use the mean of the targets to determine class weights.
+
+        This assumes a binary segmentation problem (background/foreground) and
+        breaks in a multi-class setting."""
         target_mean = np.mean(targets)
         bg_weight = target_mean / (1. + target_mean)
         fg_weight = 1. - bg_weight
