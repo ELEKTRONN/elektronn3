@@ -92,11 +92,6 @@ class PatchCreator(data.Dataset):
             data.
             If ``True``, training data is returned.
             If ``False``, validation data is returned.
-        preview_shape: Desired spatial shape of the dedicated preview batch.
-            The preview batch is obtained by slicing a patch of this
-            shape out of the center of the preview cube.
-            If it is ``None`` (default), preview batch functionality will be
-            disabled.
         warp: ratio of training samples that should be obtained using
             geometric warping augmentations.
         warp_kwargs: kwargs that are passed through to
@@ -200,10 +195,6 @@ class PatchCreator(data.Dataset):
         self.inputs = []
         self.targets = []
 
-        self.preview_shape = preview_shape
-        self._preview_batch = None
-
-
         # Setup internal stuff
         self.rng = np.random.RandomState(
             np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
@@ -222,10 +213,6 @@ class PatchCreator(data.Dataset):
         if transform is None:
             transform = lambda x: x
         self.transform = transform
-
-        # Load preview data on initialization so read errors won't occur late
-        # and reading doesn't have to be done by each background worker process separately.
-        _ = self.preview_batch
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
         # Note that the index is ignored. Samples are always random
@@ -300,59 +287,6 @@ class PatchCreator(data.Dataset):
     #     s = s.format(self.c_target, self.c_input, self._training_count,
     #                  self._valid_count, self.n_labelled_pixels)
     #     return s
-
-    def _create_preview_batch(
-            self,
-            inp_source: h5py.Dataset,
-            target_source: h5py.Dataset,
-    ) -> Tuple[torch.Tensor, torch.LongTensor]:
-        # Central slicing
-        halfshape = np.array(self.preview_shape) // 2
-        if inp_source.ndim == 4:
-            inp_shape = np.array(inp_source.shape[1:])
-            target_shape = np.array(target_source.shape[1:])
-        elif inp_source.ndim == 3:
-            inp_shape = np.array(inp_source.shape)
-            target_shape = np.array(target_source.shape)
-        inp_center = inp_shape // 2
-        inp_lo = inp_center - halfshape
-        inp_hi = inp_center + halfshape
-        target_center = target_shape // 2
-        target_lo = target_center - halfshape
-        target_hi = target_center + halfshape
-        if np.any(inp_center < halfshape):
-            raise ValueError(
-                'preview_shape is too big for shape of input source.'
-                f'Requested {self.preview_shape}, but can only deliver {tuple(inp_shape)}.'
-            )
-        elif np.any(target_center < halfshape):
-            raise ValueError(
-                'preview_shape is too big for shape of target source.'
-                f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
-            )
-        inp_np = slice_h5(inp_source, inp_lo, inp_hi, prepend_empty_axis=True)
-        target_np = slice_h5(
-            target_source, target_lo, target_hi,
-            dtype=self._target_dtype, prepend_empty_axis=True
-        )
-        inp_np, target_np = self.transform(inp_np, target_np)
-
-        inp = torch.from_numpy(inp_np)
-        target = torch.from_numpy(target_np)
-
-        return inp, target
-
-    # TODO: Make targets optional so we can have larger previews without ground truth targets?
-
-    @property
-    def preview_batch(self) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        if self._preview_batch is None and self.preview_shape is not None:
-            inp, target = self._create_preview_batch(
-                self.inputs[0], self.targets[0]
-            )  # TODO: Don't hardcode [0]
-
-            self._preview_batch = (inp, target)
-        return self._preview_batch
 
     @property
     def warp_stats(self) -> str:
@@ -494,13 +428,13 @@ class PatchCreator(data.Dataset):
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
                 notfound = True
-                if 'neuro_data_zxy' in p:
+                if 'neuro_data_cdhw' in p:
                     give_neuro_data_hint = True
         if give_neuro_data_hint:
-            print('\nIt looks like you are referencing the neuro_data_zxy dataset.\n'
+            print('\nIt looks like you are referencing the neuro_data_cdhw dataset.\n'
                   'To install the neuro_data_xzy dataset to the default location, run:\n'
-                  '  $ wget http://elektronn.org/downloads/neuro_data_zxy.zip\n'
-                  '  $ unzip neuro_data_zxy.zip -d ~/neuro_data_zxy')
+                  '  $ wget https://github.com/ELEKTRONN/elektronn.github.io/releases/download/neuro_data_cdhw/neuro_data_cdhw.zip\n'
+                  '  $ unzip neuro_data_cdhw.zip -d ~/neuro_data_zxy')
         if notfound:
             print('\nPlease fetch the necessary dataset and/or '
                   'change the relevant file paths in the network config.')
@@ -527,6 +461,39 @@ class PatchCreator(data.Dataset):
         print()
 
         return inp_h5sets, target_h5sets
+
+
+def get_preview_batch(
+        fname: str,
+        key: str,
+        preview_shape: Optional[Tuple[int, ...]] = None,
+        transform: Callable = transforms.Identity(),
+        in_memory: bool = False
+) -> torch.Tensor:
+    inp_h5 = h5py.File(fname, 'r')[key]
+    if in_memory:
+        inp_h5 = inp_h5.value
+    inp_shape = np.array(inp_h5.shape[1:])
+    if preview_shape is None:  # Slice everything
+        inp_lo = np.zeros_like(inp_shape)
+        inp_hi = inp_shape
+    else:  # Slice only a preview_shape-sized region from the center of the input
+        halfshape = np.array(preview_shape) // 2
+        inp_center = inp_shape // 2
+        inp_lo = inp_center - halfshape
+        inp_hi = inp_center + halfshape
+        if np.any(inp_center < halfshape):
+            raise ValueError(
+                'preview_shape is too big for shape of input source.'
+                f'Requested {preview_shape}, but can only deliver {tuple(inp_shape)}.'
+            )
+    memstr = ' (in memory)' if in_memory else ''
+    print(f'\nPreview data{memstr}:')
+    print(f'  input:       {fname}[{key}]: {inp_h5.shape} ({inp_h5.dtype})\n')
+    inp_np = slice_h5(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
+    inp_np, _ = transform(inp_np, None)
+    inp = torch.from_numpy(inp_np)
+    return inp
 
 
 class SimpleNeuroData2d(data.Dataset):

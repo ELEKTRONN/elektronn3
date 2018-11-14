@@ -85,6 +85,9 @@ class Trainer:
             If ``exp_name`` is not set, it is auto-generated from the model
             name and a time stamp in the format ``'%y-%m-%d_%H-%M-%S'``.
         batchsize: Desired batch size of training samples.
+        preview_batch: Set a fixed input batch for preview predictions.
+            If it is ``None`` (default), preview batch functionality will be
+            disabled.
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
             See :py:class:`torch.utils.data.DataLoader`
@@ -154,6 +157,7 @@ class Trainer:
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
+            preview_batch: Optional[torch.Tensor] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -188,6 +192,7 @@ class Trainer:
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
         self.valid_metrics = valid_metrics
+        self.preview_batch = preview_batch
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -222,8 +227,6 @@ class Trainer:
         if hasattr(self.train_dataset, 'classes'):
             self.classes = self.train_dataset.classes
             self.num_classes = len(self.train_dataset.classes)
-        self.previews_enabled = hasattr(valid_dataset, 'preview_batch')\
-            and valid_dataset.preview_shape is not None
 
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False
@@ -377,7 +380,7 @@ class Trainer:
                 if self.tb:
                     self.tb_log_scalars(stats, 'stats')
                     self.tb_log_scalars(misc, 'misc')
-                    if self.previews_enabled:
+                    if self.preview_batch is not None:
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
@@ -536,38 +539,30 @@ class Trainer:
     def tb_log_preview(
             self,
             z_plane: Optional[int] = None,
-            group: str = 'preview_batch'
+            group: str = 'preview'
     ) -> None:
         """ Preview from constant region of preview batch data.
-
-        This only works for datasets that have a ``preview_batch`` attribute.
         """
-        inp_batch = self.valid_dataset.preview_batch[0].to(self.device)
+        inp_batch = self.preview_batch.to(self.device)
+        # TODO: Replace this with elektronn3.inference.Predictor usage
         out_batch = preview_inference(self.model, inp_batch=inp_batch)
         if not self.model_has_softmax_outputs:
             out_batch = out_batch.softmax(1)  # Apply softmax before plotting
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
-        out = batch2img(out_batch)
-        pred = out.argmax(0)
+        out_slice = batch2img(out_batch)
+        pred_slice = out_slice.argmax(0)
 
-        for c in range(out.shape[0]):
-            self.tb.log_image(f'{group}/c{c}', out[c], self.step, cmap='gray')
-        self.tb.log_image(f'{group}/pred', pred, self.step, num_classes=self.num_classes)
+        for c in range(out_slice.shape[0]):
+            self.tb.log_image(f'{group}/c{c}', out_slice[c], self.step, cmap='gray')
+        self.tb.log_image(f'{group}/pred', pred_slice, self.step, num_classes=self.num_classes)
 
         # This is only run once per training, because the ground truth for
         # previews is constant (always the same preview inputs/targets)
         if self._first_plot:
-            preview_inp, preview_target = self.valid_dataset.preview_batch
-            inp = batch2img(preview_inp)[0]
-            if preview_target.dim() == preview_inp.dim() - 1:
-                # Unsqueeze C dimension in target so it matches batch2dim()'s expected shape
-                preview_target = preview_target[:, None]
-            target = batch2img(preview_target)[0]
-            self.tb.log_image(f'{group}/inp', inp, step=0, cmap='gray')
-            # Ground truth target for direct comparison with preview prediction
-            self.tb.log_image(f'{group}/target', target, step=0, num_classes=self.num_classes)
+            inp_slice = batch2img(self.preview_batch)[0]
+            self.tb.log_image(f'{group}/inp', inp_slice, step=0, cmap='gray')
             self._first_plot = False
 
     # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
@@ -592,25 +587,25 @@ class Trainer:
 
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
-        inp = batch2img(images['inp'])[0]
+        inp_slice = batch2img(images['inp'])[0]
         target_batch_with_c = images['target'][:, None]
-        target = batch2img(target_batch_with_c)[0]
+        target_slice = batch2img(target_batch_with_c)[0]
 
-        out = batch2img(out_batch)
-        pred = out.argmax(0)
-        self.tb.log_image(f'{group}/inp', inp, step=self.step, cmap='gray')
-        self.tb.log_image(f'{group}/target', target, step=self.step, num_classes=self.num_classes)
+        out_slice = batch2img(out_batch)
+        pred_slice = out_slice.argmax(0)
+        self.tb.log_image(f'{group}/inp', inp_slice, step=self.step, cmap='gray')
+        self.tb.log_image(f'{group}/target', target_slice, step=self.step, num_classes=self.num_classes)
 
-        for c in range(out.shape[0]):
-            self.tb.log_image(f'{group}/c{c}', out[c], step=self.step, cmap='gray')
-        self.tb.log_image(f'{group}/pred', pred, step=self.step, num_classes=self.num_classes)
+        for c in range(out_slice.shape[0]):
+            self.tb.log_image(f'{group}/c{c}', out_slice[c], step=self.step, cmap='gray')
+        self.tb.log_image(f'{group}/pred_slice', pred_slice, step=self.step, num_classes=self.num_classes)
 
-        inp01 = squash01(inp)  # Squash to [0, 1] range for label2rgb and plotting
-        target_ov = label2rgb(target, inp01, bg_label=0, alpha=self.overlay_alpha)
-        pred_ov = label2rgb(pred, inp01, bg_label=0, alpha=self.overlay_alpha)
-        self.tb.log_image(f'{group}/target_overlay', target_ov, step=self.step, colorbar=False)
-        self.tb.log_image(f'{group}/pred_overlay', pred_ov, step=self.step, colorbar=False)
-        # TODO: Synchronize overlay colors with pred- and target colors
+        inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
+        target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
+        pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
+        self.tb.log_image(f'{group}/target_overlay', target_slice_ov, step=self.step, colorbar=False)
+        self.tb.log_image(f'{group}/pred_overlay', pred_slice_ov, step=self.step, colorbar=False)
+        # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
         # TODO: What's up with the colorbar in overlay plots?
         # TODO: When plotting overlay images, they appear darker than they should.
         #       This normalization issue gets worse with higher alpha values

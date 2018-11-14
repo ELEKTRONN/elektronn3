@@ -52,7 +52,7 @@ print(f'Running on device: {device}')
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
-from elektronn3.data import PatchCreator, transforms, utils
+from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, DiceLoss
 from elektronn3.training import metrics
 from elektronn3.models.unet import UNet
@@ -156,13 +156,19 @@ if __name__ == "__main__":
         target_h5data=[target_h5data[2]],
         train=False,
         epoch_size=10,  # How many samples to use for each validation run
-        preview_shape=(64, 144, 144),
         warp=0,
         warp_kwargs={
             'sample_aniso': True,
             'warp_amount': 0.8,  # Strength
         },transform=valid_transform,
         **common_data_kwargs
+    )
+
+    preview_batch = get_preview_batch(
+        fname=os.path.join(data_root, 'raw_2.h5'),
+        key='raw',
+        preview_shape=(64, 144, 144),
+        transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
     )
 
     # Set up optimization
@@ -181,8 +187,8 @@ if __name__ == "__main__":
         'val_recall': metrics.bin_recall,
         'val_DSC': metrics.bin_dice_coefficient,
         'val_IoU': metrics.bin_iou,
-        'val_AP': metrics.bin_average_precision,  # expensive
-        'val_AUROC': metrics.bin_auroc,  # expensive
+        # 'val_AP': metrics.bin_average_precision,  # expensive
+        # 'val_AUROC': metrics.bin_auroc,  # expensive
     }
 
     # Class weights for imbalanced dataset
@@ -205,6 +211,7 @@ if __name__ == "__main__":
         exp_name=args.exp_name,
         schedulers={"lr": lr_sched},
         valid_metrics=valid_metrics,
+        preview_batch=preview_batch
     )
 
     # Archiving training script, src folder, env info
