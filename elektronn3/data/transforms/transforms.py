@@ -364,14 +364,14 @@ class SqueezeTarget:
 
     (This is just needed as a workaround for the example neuro_data_cdhw data
     set, because its targets have a superfluous first dimension.)"""
-    def __init__(self, dim, inplace=True):
+    def __init__(self, dim: int):
         self.dim = dim
 
     def __call__(
             self,
             inp: np.ndarray,  # Returned without modifications
             target: np.ndarray,
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray]:
         return inp, target.squeeze(axis=self.dim)
 
 
@@ -384,7 +384,9 @@ class RandomFlip:
         ndim_spatial: Number of spatial dimension in input, e.g.
             ``ndim_spatial=2`` for input shape (N, C, H, W)
     """
-    def __init__(self, ndim_spatial: int = 2,
+    def __init__(
+            self,
+            ndim_spatial: int = 2,
             rng: Optional[np.random.RandomState] = None
     ):
         self.noise_generator = RandInt(rng=rng)
