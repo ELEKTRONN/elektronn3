@@ -167,7 +167,7 @@ if __name__ == "__main__":
     preview_batch = get_preview_batch(
         fname=os.path.join(data_root, 'raw_2.h5'),
         key='raw',
-        preview_shape=(64, 144, 144),
+        preview_shape=(32, 320, 320),
         transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
     )
 
@@ -211,7 +211,10 @@ if __name__ == "__main__":
         exp_name=args.exp_name,
         schedulers={"lr": lr_sched},
         valid_metrics=valid_metrics,
-        preview_batch=preview_batch
+        preview_batch=preview_batch,
+        # TODO: Tune these:
+        preview_tile_shape=(32, 64, 64),
+        preview_overlap_shape=(32, 64, 64)
     )
 
     # Archiving training script, src folder, env info

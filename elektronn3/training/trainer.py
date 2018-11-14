@@ -26,6 +26,7 @@ from elektronn3.training.train_utils import HistoryTracker
 from torch.utils import collect_env
 from elektronn3.training import metrics
 from elektronn3.data.utils import squash01
+from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
@@ -88,6 +89,8 @@ class Trainer:
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
             disabled.
+        preview_tile_shape
+        preview_overlap_shape
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
             See :py:class:`torch.utils.data.DataLoader`
@@ -158,6 +161,8 @@ class Trainer:
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
+            preview_tile_shape: Optional[Tuple[int, ...]] = None,
+            preview_overlap_shape: Optional[Tuple[int, ...]] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -170,6 +175,12 @@ class Trainer:
             ipython_on_error: bool = False,
             classes: Optional[Sequence[int]] = None,
     ):
+        if preview_batch is not None and\
+                (preview_tile_shape is None or preview_overlap_shape is None):
+            raise ValueError(
+                'If preview_batch is set, you will also need to specify '
+                'preview_tile_shape and preview_overlap_shape!'
+            )
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
         self.device = device
@@ -193,6 +204,8 @@ class Trainer:
         self.valid_dataset = valid_dataset
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
+        self.preview_tile_shape = preview_tile_shape
+        self.preview_overlap_shape = preview_overlap_shape
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -381,12 +394,15 @@ class Trainer:
                     self.tb_log_scalars(stats, 'stats')
                     self.tb_log_scalars(misc, 'misc')
                     if self.preview_batch is not None:
+                        # TODO: Free as much GPU memory as possible to make more room for preview inference
+                        # TODO: Also save preview inference results in a (3D) HDF5 file.
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
 
                 # Save trained model state
                 self.save_model()
+                # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
                     self.save_model(suffix='_best')
@@ -541,11 +557,14 @@ class Trainer:
             z_plane: Optional[int] = None,
             group: str = 'preview'
     ) -> None:
-        """ Preview from constant region of preview batch data.
-        """
-        inp_batch = self.preview_batch.to(self.device)
+        """Preview from constant region of preview batch data."""
+        inp_batch = self.preview_batch.numpy()
         # TODO: Replace this with elektronn3.inference.Predictor usage
-        out_batch = preview_inference(self.model, inp_batch=inp_batch)
+        out_batch = self._preview_inference(
+            inp=inp_batch,
+            tile_shape=self.preview_tile_shape,
+            overlap_shape=self.preview_overlap_shape
+        )
         if not self.model_has_softmax_outputs:
             out_batch = out_batch.softmax(1)  # Apply softmax before plotting
 
@@ -612,12 +631,39 @@ class Trainer:
         #       (i.e. with more contribution of the overlayed label map).
         #       Don't know how to fix this currently.
 
+    # TODO: Make more configurable
+    def _preview_inference(
+            self,
+            inp: np.ndarray,
+            tile_shape: Optional[Tuple[int, ...]] = None,
+            overlap_shape: Optional[Tuple[int, ...]] = None,
+            verbose: bool = True,
+    ) -> torch.Tensor:
+        predictor = Predictor(
+            model=self.model,
+            device=self.device,
+            multi_gpu=False,
+            model_has_softmax_outputs=self.model_has_softmax_outputs,
+        )
+        out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
+        out_np = predictor.predict_proba(
+            inp=inp,
+            batch_size=1,
+            tile_shape=tile_shape,
+            overlap_shape=overlap_shape,
+            verbose=verbose,
+            out_shape=out_shape
+        )
+        out = torch.as_tensor(out_np)
+        return out
 
-def preview_inference(
+
+def __naive_preview_inference(  # Deprecated
         model: torch.nn.Module,
         inp_batch: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     model.eval()  # Set dropout and batchnorm to eval mode
+
     # Attention: Inference on Tensors with unexpected shapes can lead to errors!
     # Staying with multiples of 16 for lengths seems to work.
     with torch.no_grad():

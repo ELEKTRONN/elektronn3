@@ -280,7 +280,7 @@ class Predictor:
             batch_size: Optional[int] = None,
             tile_shape: Optional[Tuple[int, ...]] = None,
             overlap_shape: Optional[Tuple[int, ...]] = None,
-            verbose: Optional[bool] = False,
+            verbose: bool = False,
             out_shape: Optional[Tuple[int, ...]] = None,
     ):
         """ Predict class probabilites of an input tensor.
@@ -375,7 +375,7 @@ class Predictor:
 
         if verbose:
             dtime = time.time() - start
-            speed = inp.numel() / dtime / 1e6
+            speed = inp.size / dtime / 1e6
             print(f'Inference speed: {speed:.2f} MPix/s, time: {dtime:.2f}.')
         return out
 
