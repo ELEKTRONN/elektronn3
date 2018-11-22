@@ -88,6 +88,7 @@ class PatchCreator(data.Dataset):
             be used for reading target data:
             - discrete targets are obtained by nearest-neighbor interpolation
             - non-discrete (continuous) targets are linearly interpolated.
+        target_dtype: dtype that target tensors should be cast to.
         train: Determines if samples come from training or validation
             data.
             If ``True``, training data is returned.
@@ -132,6 +133,7 @@ class PatchCreator(data.Dataset):
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
+            target_dtype: np.dtype = np.int64,
             train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
             warp: Union[bool, float] = False,
@@ -187,7 +189,7 @@ class PatchCreator(data.Dataset):
         #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
         self.offsets = np.array([0, 0, 0])
         self.target_patch_size = self.patch_shape - self.offsets * 2
-        self._target_dtype = np.int64
+        self._target_dtype = target_dtype
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
 
