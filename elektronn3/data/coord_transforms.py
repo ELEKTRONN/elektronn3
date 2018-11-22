@@ -442,7 +442,14 @@ def get_warped_coord_transform(
     else:
         lo_pos = dest_center
         hi_pos = spatial_inp_src_shape - dest_center
-    assert np.all([lo_pos[i] < hi_pos[i] for i in range(3)])
+    if not np.all([lo_pos[i] < hi_pos[i] for i in range(3)]):
+        raise RuntimeError(
+            f'lo_pos: {lo_pos}, hi_pos: {hi_pos}\n'
+            'lo_pos has to be smaller than hi_pos in all dimensions, but this '
+            'is not the case here.\n Please make sure that your patch_shape '
+            'is significantly smaller than the shape of the smallest labelled '
+            'region of your data set.'
+        )
     z = rng.randint(lo_pos[0], hi_pos[0]) + src_remainder[0]
     y = rng.randint(lo_pos[1], hi_pos[1]) + src_remainder[1]
     x = rng.randint(lo_pos[2], hi_pos[2]) + src_remainder[2]
