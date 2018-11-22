@@ -328,9 +328,9 @@ class Trainer:
                     self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
 
                     # Preserve training batch and network output for later visualization
-                    images['inp'] = inp
-                    images['target'] = target
-                    images['out'] = out
+                    images['inp'] = inp.cpu()
+                    images['target'] = target.cpu()
+                    images['out'] = out.cpu()
                     # this was changed to support ReduceLROnPlateau which does not implement get_lr
                     misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
                     # update schedules
@@ -345,6 +345,8 @@ class Trainer:
                     running_acc += acc
                     running_mean_target += mean_target
                     running_vx_size += inp.numel()
+
+                    del inp, target, out  # Free memory
 
                     self.step += 1
                     if self.step >= max_steps:
@@ -395,7 +397,7 @@ class Trainer:
                     self.tb_log_scalars(misc, 'misc')
                     if self.preview_batch is not None:
                         # TODO: Free as much GPU memory as possible to make more room for preview inference
-                        # TODO: Also save preview inference results in a (3D) HDF5 file.
+                        # TODO: Also save preview inference results in a (3D) HDF5 file
                         self.tb_log_preview()
                     self.tb_log_sample_images(images, group='tr_samples')
                     self.tb.writer.flush()
@@ -506,7 +508,7 @@ class Trainer:
 
         self.model.train()  # Reset model to training mode
 
-        # TODO: Refactor: Either remove side effects (plotting)
+        # TODO: Refactor: Remove side effects (plotting)
         return stats
 
     def tb_log_scalars(
