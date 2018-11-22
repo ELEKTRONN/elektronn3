@@ -417,7 +417,8 @@ def get_warped_coord_transform(
 
     rng = np.random.RandomState() if rng is None else rng
     patch_shape = np.array(patch_shape)
-    target_patch_shape = np.array(target_patch_shape)
+    if target_patch_shape is not None:
+        target_patch_shape = np.array(target_patch_shape)
 
     # The last three dimensions of the data source shapes are interpreted as
     #  spatial dimensions (D, H, W). All preciding dimensions are ignored.
