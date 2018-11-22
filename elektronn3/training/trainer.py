@@ -554,6 +554,7 @@ class Trainer:
         else:
             raise ValueError('Only 4D and 5D tensors are supported.')
 
+    # TODO: Support regression scenario
     def tb_log_preview(
             self,
             z_plane: Optional[int] = None,
@@ -609,29 +610,67 @@ class Trainer:
         batch2img = self._get_batch2img_function(out_batch, z_plane)
 
         inp_slice = batch2img(images['inp'])[0]
-        target_batch_with_c = images['target'][:, None]
-        target_slice = batch2img(target_batch_with_c)[0]
+        target_batch = images['target']
 
+        # Check if the network is being trained for classification
+        is_classification = target_batch.dim() == out_batch.dim() - 1
+        # If it's not classification, we assume a regression scenario
+        is_regression = np.all(target_batch.shape == out_batch.shape)
+        # If not exactly one of the scenarios is detected, we can't handle it
+        assert is_regression != is_classification
+
+        if is_classification:
+            # In classification scenarios, targets have one dim less than network
+            #  outputs, so if we want to use the same batch2img function for
+            #  targets, we have to add an empty channel axis to it after the N dimension
+            target_batch = target_batch[:, None]
+
+        target_slice = batch2img(target_batch)
         out_slice = batch2img(out_batch)
-        pred_slice = out_slice.argmax(0)
+        if is_classification:
+            target_slice = target_slice.squeeze(0)  # Squeeze empty axis that was added above
+        elif target_slice.shape[0] == 3:  # Assume RGB values
+            # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
+            target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
+            out_slice = np.moveaxis(out_slice, 0, -1)
+        else:
+            raise RuntimeError(
+                f'Can\t prepare targets of shape {target_batch.shape} for plotting.'
+            )
+
         self.tb.log_image(f'{group}/inp', inp_slice, step=self.step, cmap='gray')
-        self.tb.log_image(f'{group}/target', target_slice, step=self.step, num_classes=self.num_classes)
+        self.tb.log_image(
+            f'{group}/target', target_slice, step=self.step, num_classes=self.num_classes
+        )
 
-        for c in range(out_slice.shape[0]):
-            self.tb.log_image(f'{group}/c{c}', out_slice[c], step=self.step, cmap='gray')
-        self.tb.log_image(f'{group}/pred_slice', pred_slice, step=self.step, num_classes=self.num_classes)
+        # Only make pred and overlay plots in classification scenarios
+        if is_classification:
+            # Plot each class probmap individually
+            for c in range(out_slice.shape[0]):
+                self.tb.log_image(f'{group}/c{c}', out_slice[c], step=self.step, cmap='gray')
 
-        inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-        target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
-        pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
-        self.tb.log_image(f'{group}/target_overlay', target_slice_ov, step=self.step, colorbar=False)
-        self.tb.log_image(f'{group}/pred_overlay', pred_slice_ov, step=self.step, colorbar=False)
-        # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
-        # TODO: What's up with the colorbar in overlay plots?
-        # TODO: When plotting overlay images, they appear darker than they should.
-        #       This normalization issue gets worse with higher alpha values
-        #       (i.e. with more contribution of the overlayed label map).
-        #       Don't know how to fix this currently.
+            pred_slice = out_slice.argmax(0)
+            self.tb.log_image(
+                f'{group}/pred_slice', pred_slice, step=self.step, num_classes=self.num_classes
+            )
+
+            inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
+            target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
+            pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
+            self.tb.log_image(
+                f'{group}/target_overlay', target_slice_ov, step=self.step, colorbar=False
+            )
+            self.tb.log_image(
+                f'{group}/pred_overlay', pred_slice_ov, step=self.step, colorbar=False
+            )
+            # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
+            # TODO: What's up with the colorbar in overlay plots?
+            # TODO: When plotting overlay images, they appear darker than they should.
+            #       This normalization issue gets worse with higher alpha values
+            #       (i.e. with more contribution of the overlayed label map).
+            #       Don't know how to fix this currently.
+        elif is_regression:
+            self.tb.log_image(f'{group}/out', out_slice, step=self.step)
 
     # TODO: Make more configurable
     def _preview_inference(
