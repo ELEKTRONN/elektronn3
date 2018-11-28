@@ -32,6 +32,7 @@ def _to_full_numpy(seq) -> np.ndarray:
                          'or a sequence of h5py.Datasets.')
 
 
+# TODO: This and calculate_stds break if sequence elements have different shapes!
 def calculate_means(inputs: Sequence) -> Tuple[float]:
     inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
     # Select dimensions to reduce over: Every dimension except C (1)

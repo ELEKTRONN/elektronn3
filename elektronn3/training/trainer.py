@@ -17,15 +17,15 @@ import IPython
 import numpy as np
 import torch
 import torch.utils.data
-from skimage.color import label2rgb
 from torch.optim.lr_scheduler import StepLR
 
+from elektronn3.training import handlers
 from elektronn3.training.train_utils import Timer, pretty_string_time
 from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
+
 from torch.utils import collect_env
 from elektronn3.training import metrics
-from elektronn3.data.utils import squash01
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
@@ -134,6 +134,19 @@ class Trainer:
             ``None``.
             The ``classes`` attribute is used for plotting purposes and is
             not strictly required for training.
+        sample_plotting_handler: Function that receives training and
+            validation samples and is responsible for visualizing them by
+            e.g. plotting them to tensorboard and/or writing them to files.
+            It is called once after each training epoch and once after each
+            validation run.
+            If ``None``, a tensorboard-based default handler is used that
+            works for most classification scenarios and for 3-channel
+            regression.
+        preview_plotting_handler: Function that is responsible for producing
+            previews and visualizing/plotting/logging them.
+            It is called once after each training epoch.
+            If ``None``, a tensorboard-based default handler is used that
+            works for most classification scenarios.
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
@@ -174,6 +187,8 @@ class Trainer:
             ignore_errors: bool = False,
             ipython_on_error: bool = False,
             classes: Optional[Sequence[int]] = None,
+            sample_plotting_handler: Optional[Callable] = None,
+            preview_plotting_handler: Optional[Callable] = None,
     ):
         if preview_batch is not None and\
                 (preview_tile_shape is None or preview_overlap_shape is None):
@@ -212,6 +227,8 @@ class Trainer:
         self.num_workers = num_workers
         # TODO: This could be automatically determined by parsing the model
         self.model_has_softmax_outputs = model_has_softmax_outputs
+        self.sample_plotting_handler = sample_plotting_handler
+        self.preview_plotting_handler = preview_plotting_handler
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -246,6 +263,11 @@ class Trainer:
             logger.warning('Tensorboard is not available, so it has to be disabled.')
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
+            if self.sample_plotting_handler is None:
+                self.sample_plotting_handler = handlers._tb_log_sample_images
+            if self.preview_plotting_handler is None:
+                self.preview_plotting_handler = handlers._tb_log_preview
+
             if tensorboard_root_path is None:
                 tb_path = self.save_path
             else:
@@ -398,8 +420,8 @@ class Trainer:
                     if self.preview_batch is not None:
                         # TODO: Free as much GPU memory as possible to make more room for preview inference
                         # TODO: Also save preview inference results in a (3D) HDF5 file
-                        self.tb_log_preview()
-                    self.tb_log_sample_images(images, group='tr_samples')
+                        self.preview_plotting_handler(self)
+                    self.sample_plotting_handler(self, images, group='tr_samples')
                     self.tb.writer.flush()
 
                 # Save trained model state
@@ -499,7 +521,8 @@ class Trainer:
                 for name, evaluator in self.valid_metrics.items():
                     stats[name] += evaluator(target, out) / len(self.valid_loader)
 
-        self.tb_log_sample_images(
+        self.sample_plotting_handler(
+            self,
             {'inp': inp, 'out': out, 'target': target},
             group='val_samples'
         )
@@ -553,124 +576,6 @@ class Trainer:
             return lambda x: x[0, :].cpu().numpy()
         else:
             raise ValueError('Only 4D and 5D tensors are supported.')
-
-    # TODO: Support regression scenario
-    def tb_log_preview(
-            self,
-            z_plane: Optional[int] = None,
-            group: str = 'preview'
-    ) -> None:
-        """Preview from constant region of preview batch data."""
-        inp_batch = self.preview_batch.numpy()
-        # TODO: Replace this with elektronn3.inference.Predictor usage
-        out_batch = self._preview_inference(
-            inp=inp_batch,
-            tile_shape=self.preview_tile_shape,
-            overlap_shape=self.preview_overlap_shape
-        )
-        if not self.model_has_softmax_outputs:
-            out_batch = out_batch.softmax(1)  # Apply softmax before plotting
-
-        batch2img = self._get_batch2img_function(out_batch, z_plane)
-
-        out_slice = batch2img(out_batch)
-        pred_slice = out_slice.argmax(0)
-
-        for c in range(out_slice.shape[0]):
-            self.tb.log_image(f'{group}/c{c}', out_slice[c], self.step, cmap='gray')
-        self.tb.log_image(f'{group}/pred', pred_slice, self.step, num_classes=self.num_classes)
-
-        # This is only run once per training, because the ground truth for
-        # previews is constant (always the same preview inputs/targets)
-        if self._first_plot:
-            inp_slice = batch2img(self.preview_batch)[0]
-            self.tb.log_image(f'{group}/inp', inp_slice, step=0, cmap='gray')
-            self._first_plot = False
-
-    # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
-    def tb_log_sample_images(
-            self,
-            images: Dict[str, torch.Tensor],
-            z_plane: Optional[int] = None,
-            group: str = 'sample'
-    ) -> None:
-        """Preview from last training/validation sample
-
-        Since the images are chosen randomly from the training/validation set
-        they come from random regions in the data set.
-
-        Note: Training images are possibly augmented, so the plots may look
-            distorted/weirdly colored.
-        """
-
-        out_batch = images['out']
-        if not self.model_has_softmax_outputs:
-            out_batch = out_batch.softmax(1)  # Apply softmax before plotting
-
-        batch2img = self._get_batch2img_function(out_batch, z_plane)
-
-        inp_slice = batch2img(images['inp'])[0]
-        target_batch = images['target']
-
-        # Check if the network is being trained for classification
-        is_classification = target_batch.dim() == out_batch.dim() - 1
-        # If it's not classification, we assume a regression scenario
-        is_regression = np.all(target_batch.shape == out_batch.shape)
-        # If not exactly one of the scenarios is detected, we can't handle it
-        assert is_regression != is_classification
-
-        if is_classification:
-            # In classification scenarios, targets have one dim less than network
-            #  outputs, so if we want to use the same batch2img function for
-            #  targets, we have to add an empty channel axis to it after the N dimension
-            target_batch = target_batch[:, None]
-
-        target_slice = batch2img(target_batch)
-        out_slice = batch2img(out_batch)
-        if is_classification:
-            target_slice = target_slice.squeeze(0)  # Squeeze empty axis that was added above
-        elif target_slice.shape[0] == 3:  # Assume RGB values
-            # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
-            target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
-            out_slice = np.moveaxis(out_slice, 0, -1)
-        else:
-            raise RuntimeError(
-                f'Can\t prepare targets of shape {target_batch.shape} for plotting.'
-            )
-
-        self.tb.log_image(f'{group}/inp', inp_slice, step=self.step, cmap='gray')
-        self.tb.log_image(
-            f'{group}/target', target_slice, step=self.step, num_classes=self.num_classes
-        )
-
-        # Only make pred and overlay plots in classification scenarios
-        if is_classification:
-            # Plot each class probmap individually
-            for c in range(out_slice.shape[0]):
-                self.tb.log_image(f'{group}/c{c}', out_slice[c], step=self.step, cmap='gray')
-
-            pred_slice = out_slice.argmax(0)
-            self.tb.log_image(
-                f'{group}/pred_slice', pred_slice, step=self.step, num_classes=self.num_classes
-            )
-
-            inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-            target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
-            pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=self.overlay_alpha)
-            self.tb.log_image(
-                f'{group}/target_overlay', target_slice_ov, step=self.step, colorbar=False
-            )
-            self.tb.log_image(
-                f'{group}/pred_overlay', pred_slice_ov, step=self.step, colorbar=False
-            )
-            # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
-            # TODO: What's up with the colorbar in overlay plots?
-            # TODO: When plotting overlay images, they appear darker than they should.
-            #       This normalization issue gets worse with higher alpha values
-            #       (i.e. with more contribution of the overlayed label map).
-            #       Don't know how to fix this currently.
-        elif is_regression:
-            self.tb.log_image(f'{group}/out', out_slice, step=self.step)
 
     # TODO: Make more configurable
     def _preview_inference(
