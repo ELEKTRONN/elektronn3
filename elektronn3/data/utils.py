@@ -32,21 +32,27 @@ def _to_full_numpy(seq) -> np.ndarray:
                          'or a sequence of h5py.Datasets.')
 
 
-# TODO: This and calculate_stds break if sequence elements have different shapes!
 def calculate_means(inputs: Sequence) -> Tuple[float]:
-    inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
-    # Select dimensions to reduce over: Every dimension except C (1)
-    reduce_dims = tuple([0] + list(range(inputs.ndim))[2:])  # = (0, 2, 3, ...)
-    means = inputs.mean(axis=reduce_dims)
+    inputs = [
+        _to_full_numpy(inp)
+        .reshape(inp.shape[0], -1)  # Flatten every dim except C
+        for inp in inputs
+    ]
+    # Preserve C, but concatenate everything else into one flat dimension
+    inputs = np.concatenate(inputs, axis=1)
+    means = np.mean(inputs, axis=1)
     return tuple(means)
 
 
-# TODO: Respect separate channels
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
-    inputs = _to_full_numpy(inputs)
-    # Select dimensions to reduce over: Every dimension except C (1)
-    reduce_dims = tuple([0] + list(range(inputs.ndim))[2:])  # = (0, 2, 3, ...)
-    stds = inputs.std(axis=reduce_dims)
+    inputs = [
+        _to_full_numpy(inp)
+            .reshape(inp.shape[0], -1)  # Flatten every dim except C
+        for inp in inputs
+    ]
+    # Preserve C, but concatenate everything else into one flat dimension
+    inputs = np.concatenate(inputs, axis=1)
+    stds = np.std(inputs, axis=1)
     return tuple(stds)
 
 
