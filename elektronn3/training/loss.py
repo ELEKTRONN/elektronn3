@@ -11,12 +11,10 @@ from elektronn3.training.lovasz_losses import lovasz_softmax
 # TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
 
 
-def _channelwise_sum(x):
+def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
-    s = x.sum(0)  # Sum over batch dimension N
-    while s.dim() != 1:  # Repeatedly reduce until only the C dim remains
-        s = s.sum(1)
-    return s
+    reduce_dims = tuple([0] + list(range(x.dim()))[2:])  # = (0, 2, 3, ...)
+    return x.sum(dim=reduce_dims)
 
 
 # Simple n-dimensional dice loss. Minimalistic version for easier verification
