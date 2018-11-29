@@ -5,6 +5,7 @@ from typing import Optional, Dict
 
 import numpy as np
 import torch
+from torch.nn import functional as F
 from skimage.color import label2rgb
 
 from elektronn3.data.utils import squash01
@@ -23,8 +24,8 @@ def _tb_log_preview(
         tile_shape=trainer.preview_tile_shape,
         overlap_shape=trainer.preview_overlap_shape
     )
-    if not trainer.model_has_softmax_outputs:
-        out_batch = out_batch.softmax(1)  # Apply softmax before plotting
+    if trainer.apply_softmax_for_prediction:
+        out_batch = F.softmax(out_batch, 1)  # Apply softmax before plotting
 
     batch2img = trainer._get_batch2img_function(out_batch, z_plane)
 
@@ -60,8 +61,8 @@ def _tb_log_sample_images(
     """
 
     out_batch = images['out']
-    if not trainer.model_has_softmax_outputs:
-        out_batch = out_batch.softmax(1)  # Apply softmax before plotting
+    if trainer.apply_softmax_for_prediction:
+        out_batch = F.softmax(out_batch, 1)  # Apply softmax before plotting
 
     batch2img = trainer._get_batch2img_function(out_batch, z_plane)
 

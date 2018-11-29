@@ -181,10 +181,10 @@ class Predictor:
             the CPU is used as a fallback if no GPUs can be found.
         multi_gpu: Enable multi-GPU inference (using
             ``torch.nn.DataParallel``).
-        model_has_softmax_outputs: If ``True``, it is assumed that the outputs
-            of ``model`` are already softmax probabilities. If ``False``
+        apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
-            model, in order to get probability tensors as inference outputs.
+            model, in order to get probability tensors as inference outputs
+            from networks that don't already apply softmax.
     Examples:
         >>> cnn = nn.Sequential(
         ...     nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
@@ -200,7 +200,7 @@ class Predictor:
             state_dict_src: Optional[Union[str, dict]] = None,
             device: Optional[Union[torch.device, str]] = None,
             multi_gpu: bool = True,
-            model_has_softmax_outputs: bool = False
+            apply_softmax: bool = True
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -223,7 +223,7 @@ class Predictor:
                 ' a state_dict object (dict) or None.')
         if state_dict is not None:
             set_state_dict(model, state_dict)
-        if not model_has_softmax_outputs:
+        if apply_softmax:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         self.model.eval()
         if multi_gpu:

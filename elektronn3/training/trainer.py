@@ -111,12 +111,12 @@ class Trainer:
             ``exp_name``.
             If ``tensorboard_root_path`` is not set, tensorboard logs are
             written to ``save_path`` (next to model checkpoints, plots etc.).
-        model_has_softmax_outputs: If ``False`` (default),
+        apply_softmax_for_prediction: If ``True`` (default),
             the softmax operation is performed on network outputs before
             plotting them, so raw network outputs get converted into predicted
             class probabilities.
-            Set this to ``True`` if the output of ``model`` is already a
-            softmax output.
+            Set this to ``False`` if the output of ``model`` is already a
+            softmax output or if you don't want softmax outputs at all.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -183,7 +183,7 @@ class Trainer:
             overlay_alpha: float = 0.2,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
-            model_has_softmax_outputs: bool = False,
+            apply_softmax_for_prediction: bool = True,
             ignore_errors: bool = False,
             ipython_on_error: bool = False,
             classes: Optional[Sequence[int]] = None,
@@ -226,7 +226,7 @@ class Trainer:
         self.batchsize = batchsize
         self.num_workers = num_workers
         # TODO: This could be automatically determined by parsing the model
-        self.model_has_softmax_outputs = model_has_softmax_outputs
+        self.apply_softmax_for_prediction = apply_softmax_for_prediction
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
 
@@ -589,7 +589,7 @@ class Trainer:
             model=self.model,
             device=self.device,
             multi_gpu=False,
-            model_has_softmax_outputs=self.model_has_softmax_outputs,
+            apply_softmax=self.apply_softmax_for_prediction,
         )
         out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
         out_np = predictor.predict_proba(

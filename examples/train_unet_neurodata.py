@@ -195,7 +195,7 @@ if __name__ == "__main__":
     class_weights = torch.tensor([0.2653,  0.7347])
 
     # criterion = nn.CrossEntropyLoss(weight=class_weights)
-    criterion = DiceLoss()
+    criterion = DiceLoss(apply_softmax=True)
 
     # Create trainer
     trainer = Trainer(
@@ -212,6 +212,7 @@ if __name__ == "__main__":
         schedulers={"lr": lr_sched},
         valid_metrics=valid_metrics,
         preview_batch=preview_batch,
+        apply_softmax_for_prediction=True,
         # TODO: Tune these:
         preview_tile_shape=(32, 64, 64),
         preview_overlap_shape=(32, 64, 64)

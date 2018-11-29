@@ -5,11 +5,11 @@
 # Authors: Martin Drawitsch
 
 import torch
-from torch.nn import functional as F
 
 from elektronn3.training.lovasz_losses import lovasz_softmax
 
 # TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
+
 
 def _channelwise_sum(x):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
@@ -35,9 +35,9 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
 
 
 class DiceLoss(torch.nn.Module):
-    def __init__(self, softmax=True, weight=torch.tensor(1.)):
+    def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
         super().__init__()
-        if softmax:
+        if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
             self.softmax = lambda x: x  # Identity (no softmax)
@@ -51,9 +51,9 @@ class DiceLoss(torch.nn.Module):
 
 class LovaszLoss(torch.nn.Module):
     """https://arxiv.org/abs/1705.08790"""
-    def __init__(self, softmax=True):
+    def __init__(self, apply_softmax=True):
         super().__init__()
-        if softmax:
+        if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
             self.softmax = lambda x: x  # Identity (no softmax)
