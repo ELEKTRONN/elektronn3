@@ -158,7 +158,7 @@ class PatchCreator(data.Dataset):
         # batch properties
         self.train = train
         self.warp = warp
-        self.warp_kwargs = warp_kwargs
+        self.warp_kwargs = warp_kwargs if warp_kwargs is not None else {}
 
         # general properties
         input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
@@ -228,7 +228,11 @@ class PatchCreator(data.Dataset):
         input_src, target_src = self._getcube()  # get cube randomly
         while True:
             try:
-                # TODO: Limit validation data warping
+                # TODO: Don't _try_ to warp with p=self.warp, but _do_ warp with p=self.warp.
+                #       Currently if a warping attempt fails, the retry-cut won't necessarily
+                #       apply warping. Since sampling warped regions fails more often than
+                #       sampling without warping, there is an unwanted bias towards unwarped
+                #       samples.
                 inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
 
@@ -448,7 +452,7 @@ class PatchCreator(data.Dataset):
         inp_h5sets, target_h5sets = [], []
         modestr = 'Training' if self.train else 'Validation'
         memstr = ' (in memory)' if self.in_memory else ''
-        print(f'\n{modestr} data set{memstr}:')
+        logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
             inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
@@ -456,8 +460,8 @@ class PatchCreator(data.Dataset):
                 inp_h5 = inp_h5.value
                 target_h5 = target_h5.value
 
-            print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
-            print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
+            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
+            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
             inp_h5sets.append(inp_h5)
             target_h5sets.append(target_h5)
         print()
@@ -490,8 +494,8 @@ def get_preview_batch(
                 f'Requested {preview_shape}, but can only deliver {tuple(inp_shape)}.'
             )
     memstr = ' (in memory)' if in_memory else ''
-    print(f'\nPreview data{memstr}:')
-    print(f'  input:       {fname}[{key}]: {inp_h5.shape} ({inp_h5.dtype})\n')
+    logger.info(f'\nPreview data{memstr}:')
+    logger.info(f'  input:       {fname}[{key}]: {inp_h5.shape} ({inp_h5.dtype})\n')
     inp_np = slice_h5(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
     inp_np, _ = transform(inp_np, None)
     inp = torch.from_numpy(inp_np)

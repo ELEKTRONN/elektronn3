@@ -249,7 +249,7 @@ class Trainer:
                 f'{self.save_path} already exists.\nPlease choose a '
                 'different combination of save_root and exp_name.'
             )
-        os.makedirs(self.save_path, exist_ok=True)
+        os.makedirs(self.save_path)
         logger.info(f'Writing files to save_path {self.save_path}/')
 
         self.terminate = False
