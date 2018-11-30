@@ -36,6 +36,7 @@ try:
     tensorboard_available = True
 except:
     tensorboard_available = False
+    TensorBoardLogger = 'TensorBoardLogger'  # Workaround for type hint
     logger.exception('Tensorboard not available.')
 
 
