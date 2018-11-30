@@ -244,7 +244,13 @@ class Trainer:
             exp_name = model.__class__.__name__ + '__' + timestamp
         self.exp_name = exp_name
         self.save_path = os.path.join(save_root, exp_name)
-        os.makedirs(self.save_path, exist_ok=True)  # TODO: Warn if directory already exists
+        if os.path.isdir(self.save_path):
+            raise RuntimeError(
+                f'{self.save_path} already exists.\nPlease choose a '
+                'different combination of save_root and exp_name.'
+            )
+        os.makedirs(self.save_path, exist_ok=True)
+        logger.info(f'Writing files to save_path {self.save_path}/')
 
         self.terminate = False
         self.step = 0
