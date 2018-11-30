@@ -250,7 +250,7 @@ class Trainer:
                 'different combination of save_root and exp_name.'
             )
         os.makedirs(self.save_path)
-        logger.info(f'Writing files to save_path {self.save_path}/')
+        logger.info(f'Writing files to save_path {self.save_path}/\n')
 
         self.terminate = False
         self.step = 0

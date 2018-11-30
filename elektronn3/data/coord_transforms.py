@@ -329,7 +329,7 @@ def warp_slice(
         # add 1 because linear interp
         hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
         if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[-3:]):
-             raise WarpingOOBError("Out of bounds for target_src")
+            raise WarpingOOBError("Out of bounds for target_src")
         # dtype is float as well here because of the static typing of the
         # numba-compiled map_coordinates functions
         target_cut = slice_h5(target_src, lo_targ, hi_targ + 1, dtype=floatX)

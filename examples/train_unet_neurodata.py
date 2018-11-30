@@ -143,11 +143,11 @@ if __name__ == "__main__":
         target_h5data=target_h5data[:2],
         train=True,
         epoch_size=args.epoch_size,
-
-        warp=0.5,
+        warp=0.2,
         warp_kwargs={
             'sample_aniso': True,
             'perspective': True,
+            'warp_amount': 0.1,
         },
         transform=train_transform,**common_data_kwargs
     )
@@ -157,10 +157,7 @@ if __name__ == "__main__":
         train=False,
         epoch_size=10,  # How many samples to use for each validation run
         warp=0,
-        warp_kwargs={
-            'sample_aniso': True,
-            'warp_amount': 0.8,  # Strength
-        },transform=valid_transform,
+        transform=valid_transform,
         **common_data_kwargs
     )
 
