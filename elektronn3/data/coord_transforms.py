@@ -287,58 +287,61 @@ def warp_slice(
 
     # check corners
     src_corners = src_corners[:,:3]
-    lo = np.min(np.floor(src_corners), 0).astype(np.int)
-    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int) # add 1 because linear interp
-    if np.any(lo < 0) or np.any(hi >= sh):
-        raise WarpingOOBError("Out of bounds")
     # compute/transform dense coords
     dest_coords = make_dest_coords(patch_shape)
-    src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1],[1]])
-    if np.any(M[3,:3] != 0): # homogeneous divide
-        src_coords /= src_coords[...,3][...,None]
+    src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1], [1]])
+    if np.any(M[3, :3] != 0):  # homogeneous divide
+        src_coords /= src_coords[..., 3][..., None]
     # cut patch
-    src_coords = src_coords[...,:3]
-    # Add 1 to hi to include this coordinate!
-    img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
+    src_coords = src_coords[..., :3]
 
-    inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
-    lo = lo.astype(floatX)
-    for k in range(n_f):
-        map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
     if target_src is not None:
         target_patch_shape = tuple(target_patch_shape)
         n_f_t = target_src.shape[0]
 
-        off = np.subtract(sh, target_src.shape[-3:])
-        if np.any(np.mod(off, 2)):
+        target_src_offset = np.subtract(sh, target_src.shape[-3:])
+        if np.any(np.mod(target_src_offset, 2)):
             raise ValueError("targets must be centered w.r.t. images")
-        off //= 2
+        target_src_offset //= 2
 
-        off_ps = np.subtract(patch_shape, target_patch_shape)
-        if np.any(np.mod(off_ps, 2)):
+        target_offset = np.subtract(patch_shape, target_patch_shape)
+        if np.any(np.mod(target_offset, 2)):
             raise ValueError("targets must be centered w.r.t. images")
-        off_ps //= 2
+        target_offset //= 2
 
         src_coords_target = src_coords[
-            off_ps[0]:off_ps[0] + target_patch_shape[0],
-            off_ps[1]:off_ps[1] + target_patch_shape[1],
-            off_ps[2]:off_ps[2] + target_patch_shape[2]
+            target_offset[0]:target_offset[0] + target_patch_shape[0],
+            target_offset[1]:target_offset[1] + target_patch_shape[1],
+            target_offset[2]:target_offset[2] + target_patch_shape[2]
         ]
         # shift coords to be w.r.t. to origin of target_src array
-        lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - off).astype(np.int)
+        lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - target_src_offset).astype(np.int)
         # add 1 because linear interp
-        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
+        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - target_src_offset + 1).astype(np.int)
         if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[-3:]):
             raise WarpingOOBError("Out of bounds for target_src")
+
+    lo = np.min(np.floor(src_corners), 0).astype(np.int)
+    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int) # add 1 because linear interp
+    if np.any(lo < 0) or np.any(hi >= sh):
+        raise WarpingOOBError("Out of bounds for inp_src")
+
+    # Slice and interpolate input
+    # Add 1 to hi to include this coordinate!
+    img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
+    inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
+    lo = lo.astype(floatX)
+    for k in range(n_f):
+        map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
+
+    # Slice and interpolate target
+    if target_src is not None:
         # dtype is float as well here because of the static typing of the
         # numba-compiled map_coordinates functions
         target_cut = slice_h5(target_src, lo_targ, hi_targ + 1, dtype=floatX)
-
-        # TODO: This and the checks below only make sense for discrete targets. Continuous targets are currently BROKEN.
-        n_target_classes = target_cut.max()
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
         target = np.zeros((n_f_t,) + target_patch_shape, dtype=floatX)
-        lo_targ = (lo_targ + off).astype(floatX)
+        lo_targ = (lo_targ + target_src_offset).astype(floatX)
         if target_discrete_ix is None:
             target_discrete_ix = [True for i in range(n_f_t)]
         else:
@@ -349,13 +352,9 @@ def warp_slice(
                 map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target[k])
             else:
                 map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
-
-        if np.any(target > n_target_classes):
-            print(f'warp_slice: Invalid target: max = {target.max()}. Clipping target...')
-            target = target.clip(0, n_target_classes)
-            # TODO: Or should we just throw an error? (~ WarpingOOB)
     else:
         target = None
+
     return inp, target
 
 
