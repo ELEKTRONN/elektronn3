@@ -40,7 +40,7 @@ class PatchCreator(data.Dataset):
     Optionally, the source coordinates from which patches
     are sliced are obtained by random warping with affine or perspective
     transformations for efficient augmentation and avoiding border artifacts
-    (see ``warp``, ``warp_kwargs``).
+    (see ``warp_prob``, ``warp_kwargs``).
     Note that whereas other warping-based image augmentation systems usually
     warp images themselves, elektronn3 performs warping transformations on
     the **coordinates** from which image patches are sliced and obtains voxel
@@ -93,7 +93,7 @@ class PatchCreator(data.Dataset):
             data.
             If ``True``, training data is returned.
             If ``False``, validation data is returned.
-        warp: ratio of training samples that should be obtained using
+        warp_prob: ratio of training samples that should be obtained using
             geometric warping augmentations.
         warp_kwargs: kwargs that are passed through to
             :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`.
@@ -136,7 +136,7 @@ class PatchCreator(data.Dataset):
             target_dtype: np.dtype = np.int64,
             train: bool = True,
             preview_shape: Optional[Sequence[int]] = None,
-            warp: Union[bool, float] = False,
+            warp_prob: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
@@ -147,7 +147,7 @@ class PatchCreator(data.Dataset):
         if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         if not train:
-            if warp:
+            if warp_prob > 0:
                 logger.warning(
                     'Augmentations should not be used on validation data.'
                 )
@@ -157,7 +157,7 @@ class PatchCreator(data.Dataset):
 
         # batch properties
         self.train = train
-        self.warp = warp
+        self.warp_prob = warp_prob
         self.warp_kwargs = warp_kwargs if warp_kwargs is not None else {}
 
         # general properties
@@ -233,7 +233,7 @@ class PatchCreator(data.Dataset):
                 #       apply warping. Since sampling warped regions fails more often than
                 #       sampling without warping, there is an unwanted bias towards unwarped
                 #       samples.
-                inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
+                inp, target = self.warp_cut(input_src, target_src, self.warp_prob, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
 
                 # TODO: Remove this stupid check ASAP once https://github.com/ELEKTRONN/elektronn3/issues/10 is fixed.
@@ -314,7 +314,7 @@ class PatchCreator(data.Dataset):
             self,
             inp_src: h5py.Dataset,
             target_src: h5py.Dataset,
-            warp: Union[float, bool],
+            warp_prob: Union[float, bool],
             warp_kwargs: Dict[str, Any]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -324,7 +324,7 @@ class PatchCreator(data.Dataset):
         The same random warping transformation is each applied to both input
         and target.
 
-        Warping is randomly applied with the probability defined by the ``warp``
+        Warping is randomly applied with the probability defined by the ``warp_prob``
         parameter (see below).
 
         Parameters
@@ -333,9 +333,9 @@ class PatchCreator(data.Dataset):
             Input image source (in HDF5)
         target_src: h5py.Dataset
             Target image source (in HDF5)
-        warp: float or bool
+        warp_prob: float or bool
             False/True disable/enable warping completely.
-            If ``warp`` is a float, it is used as the ratio of inputs that
+            If ``warp_prob`` is a float, it is used as the ratio of inputs that
             should be warped.
             E.g. 0.5 means approx. every second call to this function actually
             applies warping to the image-target pair.
@@ -351,10 +351,10 @@ class PatchCreator(data.Dataset):
         target_src: np.ndarray
             (Warped) target slice
         """
-        if (warp is True) or (warp == 1):  # always warp
+        if (warp_prob is True) or (warp_prob == 1):  # always warp
             do_warp = True
-        elif 0 < warp < 1:  # warp only a fraction of examples
-            do_warp = True if (self.rng.rand() < warp) else False
+        elif 0 < warp_prob < 1:  # warp only a fraction of examples
+            do_warp = True if (self.rng.rand() < warp_prob) else False
         else:  # never warp
             do_warp = False
 
@@ -454,7 +454,7 @@ class PatchCreator(data.Dataset):
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
+            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]#[:, 50:-50, 100:-100, 100:-100]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
             if self.in_memory:
                 inp_h5 = inp_h5.value
