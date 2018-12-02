@@ -226,14 +226,10 @@ class PatchCreator(data.Dataset):
 
         self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
+        warp_prob = self.warp_prob
         while True:
             try:
-                # TODO: Don't _try_ to warp with p=self.warp, but _do_ warp with p=self.warp.
-                #       Currently if a warping attempt fails, the retry-cut won't necessarily
-                #       apply warping. Since sampling warped regions fails more often than
-                #       sampling without warping, there is an unwanted bias towards unwarped
-                #       samples.
-                inp, target = self.warp_cut(input_src, target_src, self.warp_prob, self.warp_kwargs)
+                inp, target = self.warp_cut(input_src, target_src, warp_prob, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
 
                 # TODO: Remove this stupid check ASAP once https://github.com/ELEKTRONN/elektronn3/issues/10 is fixed.
@@ -243,6 +239,10 @@ class PatchCreator(data.Dataset):
                     logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
                     continue
             except coord_transforms.WarpingOOBError:
+                # Temporarily set warp_prob to 1 to make sure that the next attempt
+                #  will also try to use warping. Otherwise, self.warp_prob would not
+                #  reflect the actual probability of a sample being obtained by warping.
+                warp_prob = 1
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)

@@ -585,6 +585,7 @@ class Trainer:
             raise ValueError('Only 4D and 5D tensors are supported.')
 
     # TODO: Make more configurable
+    # TODO: Inference on secondary GPU
     def _preview_inference(
             self,
             inp: np.ndarray,
