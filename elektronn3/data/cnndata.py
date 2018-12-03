@@ -231,13 +231,6 @@ class PatchCreator(data.Dataset):
             try:
                 inp, target = self.warp_cut(input_src, target_src, warp_prob, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
-
-                # TODO: Remove this stupid check ASAP once https://github.com/ELEKTRONN/elektronn3/issues/10 is fixed.
-                # Assuming classes are [0, 1, ..., num_classes - 1]
-                if target.max() > self.num_classes - 1:
-                    # TODO: Find out where to catch this early / prevent this issue from happening
-                    logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
-                    continue
             except coord_transforms.WarpingOOBError:
                 # Temporarily set warp_prob to 1 to make sure that the next attempt
                 #  will also try to use warping. Otherwise, self.warp_prob would not
