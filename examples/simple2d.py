@@ -9,8 +9,8 @@
 """
 Demo of a 2D semantic segmentation workflow.
 
-It doesn't really learn anything useful, since both model and dataset
-are far too small. It just serves as a quick demo for how 2D stuff can
+It doesn't really learn anything useful, since the dataset
+is far too small. It just serves as a quick demo for how 2D stuff can
 be implemented.
 """
 
@@ -21,14 +21,17 @@ import torch
 from torch import nn
 from torch import optim
 
+from elektronn3.models.unet import UNet
+
 
 def get_model():
     # Initialize neural network model
-    model = nn.Sequential(
-        nn.Conv2d(1, 32, 3, padding=1), nn.ReLU(),
-        nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
-        nn.Conv2d(32, 32, 3, padding=1), nn.ReLU(),
-        nn.Conv2d(32, 2, 1)
+    model = UNet(
+        n_blocks=4,
+        start_filts=32,
+        activation='relu',
+        batch_norm=True,
+        dim=2
     ).to(device)
     return model
 
@@ -86,9 +89,14 @@ if __name__ == "__main__":
         transforms.Normalize(mean=dataset_mean, std=dataset_std)
     ]
     train_transform = transforms.Compose(common_transforms + [
-        transforms.RandomCrop((128, 128))  # Use smaller patches for training
+        transforms.RandomCrop((128, 128)),  # Use smaller patches for training
+        transforms.RandomFlip(),
+        transforms.AdditiveGaussianNoise(prob=0.5, sigma=0.1)
     ])
-    valid_transform = transforms.Compose(common_transforms + [])# Specify data set
+    valid_transform = transforms.Compose(common_transforms + [
+        transforms.RandomCrop((144, 144))
+    ])
+    # Specify data set
     train_dataset = SimpleNeuroData2d(train=True, transform=train_transform,
                                       num_classes=2)
     valid_dataset = SimpleNeuroData2d(train=False, transform=valid_transform,
