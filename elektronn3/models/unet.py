@@ -269,6 +269,7 @@ class UpConv(nn.Module):
         return x
 
 
+# TODO: Suppress known TracerWarnings?
 class UNet(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
 
@@ -330,11 +331,7 @@ class UNet(nn.Module):
                   doubled in the H and W image dimensions)
             **Important note**: Always make sure that the spatial shape of
             your input is divisible by the number of blocks, because
-            else, concatenating downsampled features will fail and you will
-            probably get a PyTorch ``RuntimeError`` with a message like
-            "Sizes of tensors must match except in dimension 1".
-            For performance reasons we don't check this condition before/during
-            network execution.
+            else, concatenating downsampled features will fail.
         start_filts: Number of filters for the first convolution layer.
             Note: The filter counts of the later layers depend on the
             choice of `merge_mode`.
@@ -456,7 +453,7 @@ class UNet(nn.Module):
         self.out_channels = out_channels
         self.in_channels = in_channels
         self.start_filts = start_filts
-        self.depth = n_blocks
+        self.n_blocks = n_blocks
         self.batch_norm = batch_norm
 
         self.down_convs = []
@@ -513,6 +510,8 @@ class UNet(nn.Module):
 
         self.reset_params()
 
+        self.pool_error_str = f'Spatial input shape has to be divisible by {4 * n_blocks}!'
+
     @staticmethod
     def weight_init(m):
         if isinstance(m, (nn.Conv3d, nn.Conv2d, nn.ConvTranspose3d, nn.ConvTranspose2d)):
@@ -529,7 +528,10 @@ class UNet(nn.Module):
         # Encoder pathway, save outputs for merging
         for i, module in enumerate(self.down_convs):
             _print(f'D{i}: {module}')
-
+            # Note that this check won't be picked up by PyTorch's tracing JIT compiler,
+            #  so it won't impact execution speed if it's jit-compiled.
+            if torch.any(torch.tensor(x.shape[2:]) % 2 != 0):
+                raise RuntimeError(self.pool_error_str)
             x, before_pool = module(x)
             _print(before_pool.shape)
             encoder_outs.append(before_pool)
