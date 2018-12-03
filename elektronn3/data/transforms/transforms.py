@@ -348,7 +348,7 @@ class RandomCrop:
         spatial_slice = [  # Slice only the content within the coordinate bounds
             slice(coords_lo[i], coords_hi[i]) for i in range(ndim_spatial)
         ]
-        full_slice = nonspatial_slice + spatial_slice
+        full_slice = tuple(nonspatial_slice + spatial_slice)
         inp_cropped = inp[full_slice]
         if target is None:
             return inp_cropped, target
