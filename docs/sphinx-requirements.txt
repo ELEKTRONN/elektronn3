@@ -16,8 +16,8 @@ pillow
 colorlog
 
 # For tensorboard logger (not strictly required):
-tensorboard
-tensorflow
+#tensorboard
+#tensorflow
 
 # For building documentation:
 sphinx
