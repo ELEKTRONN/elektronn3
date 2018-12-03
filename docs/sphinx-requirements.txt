@@ -1,7 +1,7 @@
 # Requirements for building the sphinx documentation.
 
-# Small CPU-only package, because PyPI package is ~ 500 MiB:
-http://download.pytorch.org/whl/cpu/torch-0.4.0-cp36-cp36m-linux_x86_64.whl
+# Small CPU-only package:
+https://download.pytorch.org/whl/nightly/cpu/torch_nightly-1.0.0.dev20181203-cp36-cp36m-linux_x86_64.whl
 
 numpy
 scipy
@@ -16,8 +16,8 @@ pillow
 colorlog
 
 # For tensorboard logger (not strictly required):
-tensorboard>=1.8.0
-tensorflow>=1.8.0
+tensorboard
+tensorflow
 
 # For building documentation:
 sphinx
