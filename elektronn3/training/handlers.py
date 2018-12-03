@@ -10,6 +10,7 @@ from skimage.color import label2rgb
 
 from elektronn3.data.utils import squash01
 
+
 # TODO: Support regression scenario
 def _tb_log_preview(
         trainer: 'Trainer',  # For some reason Trainer can't be imported

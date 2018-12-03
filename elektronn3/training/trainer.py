@@ -528,11 +528,12 @@ class Trainer:
                 for name, evaluator in self.valid_metrics.items():
                     stats[name] += evaluator(target, out) / len(self.valid_loader)
 
-        self.sample_plotting_handler(
-            self,
-            {'inp': inp, 'out': out, 'target': target},
-            group='val_samples'
-        )
+        if self.tb:
+            self.sample_plotting_handler(
+                self,
+                {'inp': inp, 'out': out, 'target': target},
+                group='val_samples'
+            )
 
         stats['val_loss'] = val_loss
 

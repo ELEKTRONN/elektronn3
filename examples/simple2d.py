@@ -33,6 +33,8 @@ def get_model():
         batch_norm=True,
         dim=2
     ).to(device)
+    # x = torch.randn(1, 1, 64, 64, device=device)
+    # model = torch.jit.trace(model, x)
     return model
 
 
