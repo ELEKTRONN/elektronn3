@@ -244,7 +244,7 @@ class PatchCreator(data.Dataset):
                 #  reflect the actual probability of a sample being obtained by warping.
                 warp_prob = 1
                 self.n_failed_warp += 1
-                if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
+                if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
                     fail_percentage = int(round(100 * fail_ratio))
                     # Note that this warning will be spammed once the conditions are met.
