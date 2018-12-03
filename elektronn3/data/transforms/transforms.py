@@ -401,8 +401,12 @@ class RandomFlip:
         for dim in range(self.ndim_spatial):
             if flip_dims[dim]:
                 inp = np.flip(inp, dim)
+                # PyTorch DataLoader doesn't support negative strides, so we
+                #  have to remove them by forcing contiguous memory layout.
+                inp = np.ascontiguousarray(inp)
                 if target is not None:
                     target = np.flip(target, dim)
+                    target = np.ascontiguousarray(target)
         return inp, target
 
 
