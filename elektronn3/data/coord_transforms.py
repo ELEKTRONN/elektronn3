@@ -24,6 +24,15 @@ from elektronn3.data.utils import slice_h5
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)#target='parallel',
 def map_coordinates_nearest(src, coords, lo, dest):
+    """Generalized ufunc that performs nearest-neighbor interpolation,
+    given a floating point coordinate array.
+
+    **IMPORTANT NOTE**: This function does not do any bounds checking and will
+    read from unallocated memory if you pass out-of-bounds coordinates!
+    Always make sure that every coodinate in ``coords - lo`` actually *has* a
+    nearest neighbor inside the bounds of ``src``.
+    Otherwise, ``dest`` will be filled with garbage values from uninitialized
+    memory or will cause a segmentation fault."""
     u = np.int32(np.round(coords[0] - lo[0]))
     v = np.int32(np.round(coords[1] - lo[1]))
     w = np.int32(np.round(coords[2] - lo[2]))
@@ -310,24 +319,23 @@ def warp_slice(
         target_offset //= 2
 
         src_coords_target = src_coords[
-            target_offset[0]:target_offset[0] + target_patch_shape[0],
-            target_offset[1]:target_offset[1] + target_patch_shape[1],
-            target_offset[2]:target_offset[2] + target_patch_shape[2]
+            target_offset[0] : target_offset[0] + target_patch_shape[0],
+            target_offset[1] : target_offset[1] + target_patch_shape[1],
+            target_offset[2] : target_offset[2] + target_patch_shape[2]
         ]
         # shift coords to be w.r.t. to origin of target_src array
         lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - target_src_offset).astype(np.int)
-        # add 1 because linear interp
-        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - target_src_offset + 1).astype(np.int)
+        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - target_src_offset).astype(np.int)
         if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[-3:]):
             raise WarpingOOBError("Out of bounds for target_src")
 
     lo = np.min(np.floor(src_corners), 0).astype(np.int)
-    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int) # add 1 because linear interp
+    hi = np.max(np.ceil(src_corners), 0).astype(np.int)
     if np.any(lo < 0) or np.any(hi >= sh):
         raise WarpingOOBError("Out of bounds for inp_src")
 
     # Slice and interpolate input
-    # Add 1 to hi to include this coordinate!
+    # Slice to hi + 1 because interpolation potentially needs this value.
     img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
     inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
     lo = lo.astype(floatX)
@@ -338,6 +346,7 @@ def warp_slice(
     if target_src is not None:
         # dtype is float as well here because of the static typing of the
         # numba-compiled map_coordinates functions
+        # Slice to hi + 1 because interpolation potentially needs this value.
         target_cut = slice_h5(target_src, lo_targ, hi_targ + 1, dtype=floatX)
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
         target = np.zeros((n_f_t,) + target_patch_shape, dtype=floatX)
