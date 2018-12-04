@@ -177,7 +177,7 @@ class DownConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
                  batch_norm=False, dim=3):
-        super(DownConv, self).__init__()
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -218,7 +218,7 @@ class UpConv(nn.Module):
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
                  activation='relu', batch_norm=False, dim=3):
-        super(UpConv, self).__init__()
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -405,7 +405,7 @@ class UNet(nn.Module):
             batch_norm: bool = True,
             dim: int = 3,
     ):
-        super(UNet, self).__init__()
+        super().__init__()
 
         if n_blocks < 1:
             raise ValueError('n_blocks must be > 1.')
@@ -510,7 +510,7 @@ class UNet(nn.Module):
 
         self.reset_params()
 
-        self.pool_error_str = f'Spatial input shape has to be divisible by {4 * n_blocks}!'
+        self.pool_error_str = f'Spatial input shape has to be divisible by {2 ** n_blocks}!'
 
     @staticmethod
     def weight_init(m):
