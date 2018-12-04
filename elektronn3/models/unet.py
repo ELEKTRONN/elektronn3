@@ -548,6 +548,8 @@ class UNet(nn.Module):
         # nn.CrossEntropyLoss is your training script,
         # as this module includes a softmax already.
         x = self.conv_final(x)
+        # Temporarily store output for receptive field estimation using fornoxai/receptivefield
+        self.feature_maps = [x]
         return x
 
 

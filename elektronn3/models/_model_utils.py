@@ -12,6 +12,54 @@ import torch
 from torch import nn
 
 
+def visualize_receptive_field(
+        model: torch.nn.Module,
+        input_shape: Tuple[int, ...] = (96, 96, 1),  # (H, W, C) order!
+        interactive=False
+) -> None:
+    """Visualize analytical and effective receptive filelds of a network.
+
+    Requires https://github.com/fornaxai/receptivefield to work
+    (``pip install receptivefield``).
+
+    Only works for 2D inputs (tensor layout (N, C, H, W)!
+
+    Also requires that the ``model`` stores its output (or an intermediate
+    layer output of interest) as ``self.feature_maps[0]`` before returning,
+    (see bottom of :py:meth:`elektronn3.models.unet.UNet.forward`).
+
+    Example::
+    >>> from elektronn3.models._model_utils import visualize_receptive_field
+    >>> from elektronn3.models.unet import UNet
+    >>> model = UNet(
+    ...     in_channels=1,
+    ...     out_channels=2,
+    ...     n_blocks=3,
+    ...     activation='lin',
+    ...     dim=2,
+    ... )
+    >>> input_shape = (96, 96, 1)
+    >>> visualize_receptive_field(model, input_shape, interactive=True)
+
+    input_shape = (96, 96, 1)
+    visualize_receptive_field(model, input_shape, interactive=True)"""
+    from receptivefield.pytorch import PytorchReceptiveField
+    import matplotlib.pyplot as plt
+
+    def model_fn():
+        return model.eval()
+
+    rf = PytorchReceptiveField(model_fn)
+    rf_params = rf.compute(input_shape=input_shape)
+    center = (input_shape[0] // 2, input_shape[1] // 2)
+
+    fig, ax = plt.subplots()
+    rf.plot_gradient_at(fm_id=0, point=center, axis=ax)
+    if interactive:
+        plt.show()
+    return fig
+
+
 def find_first(model: nn.Module, module_type: type = nn.Conv2d) -> Tuple[str, nn.Module]:
     """Return the first submodule of an nn.Module with a certain type."""
     for name, mod in model.named_modules():
