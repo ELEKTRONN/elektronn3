@@ -28,6 +28,7 @@ dependencies:
   - tqdm >=4.23.3
   - numpy >=1.14.2
   - scikit-learn >=0.19.1
+  - scikit-image >=0.14.1
   - scipy >=1.1.0
   - pytorch >=0.4.1  # pytorch-cpu also works, but it's not recommended.
 #  - cudatoolkit =8.*  # Uncomment/modify for a specific CUDA version

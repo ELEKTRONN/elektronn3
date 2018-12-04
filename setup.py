@@ -28,8 +28,10 @@ setup(
         'pillow',
         'colorlog',
         'tqdm',
-        'tensorboard>=1.8.0',
-        'tensorflow>=1.8.0',
+        'scikit-learn',
+        'scikit-image',
+        'tensorboard',
+        'tensorflow',
     ],
 
 )

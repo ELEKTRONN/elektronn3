@@ -10,6 +10,7 @@ matplotlib
 seaborn
 numba
 scikit-learn
+scikit-image
 ipython
 tqdm
 pillow
