@@ -464,7 +464,6 @@ class ElasticTransform:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
             return inp, target
-        print(inp.shape)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         deformed_img = np.empty_like(inp)
         for c in channels:
