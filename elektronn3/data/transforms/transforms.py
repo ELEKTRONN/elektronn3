@@ -217,7 +217,6 @@ class RandomGrayAugment:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
-
         nc = len(channels)
         aug = inp.copy()  # Copy so we don't overwrite inp
         # The calculations below have to be performed on inputs that have a
@@ -251,7 +250,8 @@ class RandomGaussianBlur:
                 augmentation. The input is returned unmodified with a probability
                 of ``1 - prob``.
             rng: Optional random state for deterministic execution
-            aniso_factor:
+            aniso_factor: a tuple or an array to apply the anisotropy, must
+                match the dimension of the input
 
         """
 
@@ -262,15 +262,12 @@ class RandomGaussianBlur:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None,
             aniso_factor: Optional = None,
-            #aniso_factor: float = 1.0,
     ):
-        #self.sigma = sigma
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
         self.gaussian_std= HalfNormal(sigma=sigma, rng=rng)
-        self.aniso_factor = (1,1,1) if aniso_factor is None else aniso_factor
-        #self.aniso_factor = (1,1,1) if aniso_factor == 1.0 else aniso_factor
+        self.aniso_factor = (1,1,1) if aniso_factor is None or aniso_factor == 1.0 else aniso_factor
 
         if aniso_factor  is not None:
             if isinstance(aniso_factor, (list, tuple)):
@@ -288,14 +285,17 @@ class RandomGaussianBlur:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
             return inp, target
-        if inp.ndim ==2:
-            self.aniso_factor = (self.aniso_factor[0], self.aniso_factor[1])
 
-        sigma = self.gaussian_std(shape=inp.ndim)
-        aniso_sigma = np.divide(sigma, self.aniso_factor)
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        blurred_inp = np.empty_like(inp)
+        for c in channels:
+            shape = inp[c].shape
+            if inp[c].ndim ==2:
+                self.aniso_factor = (self.aniso_factor[0], self.aniso_factor[1])
+            sigma = self.gaussian_std(shape=inp[c].ndim)
+            aniso_sigma = np.divide(sigma, self.aniso_factor)
+            blurred_inp[c] = gaussian_filter(inp[c], sigma=aniso_sigma)
 
-
-        blurred_inp = gaussian_filter(inp, sigma=aniso_sigma)
         return blurred_inp, target
 
 
@@ -441,46 +441,52 @@ class ElasticTransform:
             self,
             sigma: float = 4,
             alpha: float = 100,
-            #channels: Optional[Sequence[int]] = None,
+            channels: Optional[Sequence[int]] = None,
             #prob: float = 1.0,     DO WE NEED THIS ?
             rng: Optional[np.random.RandomState] = None,
 
     ):
         self.sigma = sigma
         self.alpha = alpha
+        self.channels = channels
         # self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
 
     def __call__(
             self,
             inp: np.ndarray,
-            # target: Optional[np.ndarray] = None  # returned without modifications
+            target: Optional[np.ndarray] = None  # returned without modifications
 
     ) -> Tuple[np.ndarray, np.ndarray]:
         # if self.rng.rand() > self.prob:
         #     return inp, target
 
-        shape = inp.shape
 
-        if inp.ndim ==3 :
-            dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dz = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            x, y, z = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
-            indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(z + dz, (-1, 1))
+        #print("printing image dimension:", inp.shape)
 
-        elif inp.ndim == 2 :
-            dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dy = gaussian_filter((self.rng.rand(*shape)* 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
-            indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        deformed_img = np.empty_like(inp)
+        for c in channels:
+            shape = inp[c].shape
+            if inp[c].ndim ==3 :
+                dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                dz = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                x, y, z = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
+                indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(z + dz, (-1, 1))
 
-        else:
-            raise ValueError("Image dimension not understood!")
+            elif inp[c].ndim == 2 :
+                dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                dy = gaussian_filter((self.rng.rand(*shape)* 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
+                indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
 
-        deformed_img = map_coordinates(inp, indices, order=1).reshape(shape)
+            else:
+                raise ValueError("Image dimension not understood!")
 
-        return deformed_img
+            deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
+
+        return deformed_img, target
 
 
 class SqueezeTarget:
