@@ -435,21 +435,25 @@ class ElasticTransform:
             alpha: Strength of the elastic transform
 
             rng: Optional random state for deterministic execution
+
+        The input image should be of dimensions (C, H, W) or (C, D, H, W).
+        C must be included.
+
     """
 
     def __init__(
             self,
             sigma: float = 4,
-            alpha: float = 100,
+            alpha: float = 10,
             channels: Optional[Sequence[int]] = None,
-            #prob: float = 1.0,     DO WE NEED THIS ?
+            prob: float = 0.25,
             rng: Optional[np.random.RandomState] = None,
 
     ):
         self.sigma = sigma
         self.alpha = alpha
         self.channels = channels
-        # self.prob = prob
+        self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
 
     def __call__(
@@ -458,12 +462,9 @@ class ElasticTransform:
             target: Optional[np.ndarray] = None  # returned without modifications
 
     ) -> Tuple[np.ndarray, np.ndarray]:
-        # if self.rng.rand() > self.prob:
-        #     return inp, target
-
-
-        #print("printing image dimension:", inp.shape)
-
+        if self.rng.rand() > self.prob:
+            return inp, target
+        print(inp.shape)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         deformed_img = np.empty_like(inp)
         for c in channels:
