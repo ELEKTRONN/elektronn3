@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 import traceback
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Union
 
 import h5py
 import numpy as np
@@ -120,7 +120,7 @@ def calculate_nd_slice(src, coords_lo, coords_hi):
 
 
 def slice_h5(
-        src: h5py.Dataset,
+        src: Union[h5py.Dataset, np.ndarray],
         coords_lo: Sequence[int],
         coords_hi: Sequence[int],
         dtype: type = np.float32,
@@ -128,12 +128,11 @@ def slice_h5(
         max_retries: int = 5,
         check_bounds=True,
 ) -> np.ndarray:
-    """ Slice a patch of image data out of a h5py dataset.
+    """ Slice a patch of 3D image data out of a h5py dataset.
 
     Args:
         src: Source data set from which to read data.
-            The expected data shape is (C, D, H, W), so 3D images with a
-            channel-first layout (standard for most PyTorch code).
+            The expected data shapes are (C, D, H, W) or (D, H, W).
         coords_lo: Lower bound of the coordinates where data should be read
             from in ``src``.
         coords_hi: Upper bound of the coordinates where data should be read
@@ -171,12 +170,21 @@ def slice_h5(
         ## srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
         ## cut = srcv[full_slice]
 
-        cut = src[
-            :,
-            coords_lo[0]:coords_hi[0],
-            coords_lo[1]:coords_hi[1],
-            coords_lo[2]:coords_hi[2]
-        ]
+        if src.ndim == 4:
+            cut = src[
+                :,
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        elif src.ndim == 3:
+            cut = src[
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        else:
+            raise ValueError(f'Expected src.ndim to be 3 or 4, but got {src.ndim} instead.')
     # Work around mysterious random HDF5 read errors by recursively calling
     #  this function from within itself until it works again or until
     #  max_retries is exceeded.
