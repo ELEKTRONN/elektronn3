@@ -25,7 +25,12 @@ from elektronn3.data.utils import slice_h5
               '(x,y,z),(i),(i)->()', nopython=True)#target='parallel',
 def map_coordinates_nearest(src, coords, lo, dest):
     """Generalized ufunc that performs nearest-neighbor interpolation,
-    given a floating point coordinate array.
+    given a floating point coordinate array expressed by ``coords - lo``.
+
+    We don't pass ``coords - lo`` directly as an argument because we want to
+    compute it inside the gufunc for performance reasons (the simple subtraction
+    ``coords - lo`` in normal numpy code actually takes longer than executing
+    the gufunc for the whole array!)
 
     **IMPORTANT NOTE**: This function does not do any bounds checking and will
     read from unallocated memory if you pass out-of-bounds coordinates!
@@ -42,6 +47,20 @@ def map_coordinates_nearest(src, coords, lo, dest):
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)# target='parallel'
 def map_coordinates_linear(src, coords, lo, dest):
+    """Generalized ufunc that performs trilinear interpolation,
+    given a floating point coordinate array expressed by ``coords - lo``.
+
+    We don't pass ``coords - lo`` directly as an argument because we want to
+    compute it inside the gufunc for performance reasons (the simple subtraction
+    ``coords - lo`` in normal numpy code actually takes longer than executing
+    the gufunc for the whole array!)
+
+    **IMPORTANT NOTE**: This function does not do any bounds checking and will
+    read from unallocated memory if you pass out-of-bounds coordinates!
+    Always make sure that every coodinate in ``coords - lo + 1`` is within the
+    bounds of ``src``.
+    Otherwise, ``dest`` will be filled with garbage values from uninitialized
+    memory or will cause a segmentation fault."""
     u = coords[0] - lo[0]
     v = coords[1] - lo[1]
     w = coords[2] - lo[2]
@@ -224,7 +243,8 @@ class WarpingOOBError(ValueError):
 
 
 def warp_slice(
-        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None
+        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None,
+        debug=True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
@@ -284,7 +304,9 @@ def warp_slice(
         )
     elif len(inp_src.shape) == 4:
         n_f = inp_src.shape[0]
-        sh = inp_src.shape[1:]
+        # Spatial shapes of input and target data sources
+        inp_src_shape = np.array(inp_src.shape[-3:])
+        target_src_shape = np.array(target_src.shape[-3:])
     else:
         raise ValueError('inp_src wrong dim/shape')
 
@@ -308,7 +330,7 @@ def warp_slice(
         target_patch_shape = tuple(target_patch_shape)
         n_f_t = target_src.shape[0]
 
-        target_src_offset = np.subtract(sh, target_src.shape[-3:])
+        target_src_offset = np.subtract(inp_src_shape, target_src.shape[-3:])
         if np.any(np.mod(target_src_offset, 2)):
             raise ValueError("targets must be centered w.r.t. images")
         target_src_offset //= 2
@@ -319,19 +341,19 @@ def warp_slice(
         target_offset //= 2
 
         src_coords_target = src_coords[
-            target_offset[0] : target_offset[0] + target_patch_shape[0],
-            target_offset[1] : target_offset[1] + target_patch_shape[1],
-            target_offset[2] : target_offset[2] + target_patch_shape[2]
+            target_offset[0]:(target_offset[0] + target_patch_shape[0]),
+            target_offset[1]:(target_offset[1] + target_patch_shape[1]),
+            target_offset[2]:(target_offset[2] + target_patch_shape[2])
         ]
         # shift coords to be w.r.t. to origin of target_src array
         lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - target_src_offset).astype(np.int)
-        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - target_src_offset).astype(np.int)
-        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[-3:]):
+        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) + 1 - target_src_offset).astype(np.int)
+        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src_shape - 1):
             raise WarpingOOBError("Out of bounds for target_src")
 
     lo = np.min(np.floor(src_corners), 0).astype(np.int)
-    hi = np.max(np.ceil(src_corners), 0).astype(np.int)
-    if np.any(lo < 0) or np.any(hi >= sh):
+    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int)
+    if np.any(lo < 0) or np.any(hi >= inp_src_shape - 1):
         raise WarpingOOBError("Out of bounds for inp_src")
 
     # Slice and interpolate input
@@ -339,6 +361,12 @@ def warp_slice(
     img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
     inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
     lo = lo.astype(floatX)
+
+    if debug and np.any((src_coords - lo).max(2).max(1).max(0) >= img_cut.shape[-3:]):
+        raise RuntimeError(f'Warping is broken: src_coords check failed (too high).\n{(src_coords - lo).max(2).max(1).max(0), img_cut.shape[-3:]}')
+    if debug and np.any((src_coords - lo).min(2).min(1).min(0) < 0):
+        raise RuntimeError(f'Warping is broken: src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
+
     for k in range(n_f):
         map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
 
@@ -356,6 +384,11 @@ def warp_slice(
         else:
             target_discrete_ix = [i in target_discrete_ix for i in range(n_f_t)]
 
+        if debug and np.any((src_coords_target - lo_targ).max(2).max(1).max(0) >= target_cut.shape[-3:]):
+            raise RuntimeError(f'Warping is broken: src_coords_target check failed (too high).\n{(src_coords_target - lo_targ).max(2).max(1).max(0)}\n{target_cut.shape[-3:]}')
+        if debug and np.any((src_coords_target - lo_targ).min(2).min(1).min(0) < 0):
+            raise RuntimeError(f'Warping is broken: src_coords_target check failed (negative indices).\n{(src_coords_target - lo_targ).min(2).min(1).min(0)}')
+
         for k, discr in enumerate(target_discrete_ix):
             if discr:
                 map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target[k])
@@ -363,6 +396,11 @@ def warp_slice(
                 map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
     else:
         target = None
+
+    if debug and np.any(np.isnan(inp)):
+        raise RuntimeError('Warping is broken: inp contains NaN.')
+    if debug and np.any(np.isnan(target)):
+        raise RuntimeError('Warping is broken: target contains NaN.')
 
     return inp, target
 
