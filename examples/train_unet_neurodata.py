@@ -136,7 +136,7 @@ if __name__ == "__main__":
     common_data_kwargs = {  # Common options for training and valid sets.
         'aniso_factor': 2,
         'patch_shape': (48, 96, 96),
-        'classes': [0, 1],
+        'num_classes': 2,
     }
     train_dataset = PatchCreator(
         input_h5data=input_h5data[:2],

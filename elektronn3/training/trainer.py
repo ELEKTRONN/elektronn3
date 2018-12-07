@@ -127,13 +127,13 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
-        classes: Optionally specifies the different target
+        num_classes: Optionally specifies the total number of different target
             classes for classification tasks. If this is not set manually,
             the ``Trainer`` checks if the ``train_dataset`` provides this
             value. If available, ``self.num_classes`` is set to
-            ``self.train_dataset.classes``. Otherwise, it is set to
+            ``self.train_dataset.num_classes``. Otherwise, it is set to
             ``None``.
-            The ``classes`` attribute is used for plotting purposes and is
+            The ``num_classes`` attribute is used for plotting purposes and is
             not strictly required for training.
         sample_plotting_handler: Function that receives training and
             validation samples and is responsible for visualizing them by
@@ -187,7 +187,7 @@ class Trainer:
             apply_softmax_for_prediction: bool = True,
             ignore_errors: bool = False,
             ipython_on_error: bool = False,
-            classes: Optional[Sequence[int]] = None,
+            num_classes: Optional[int] = None,
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
     ):
@@ -259,11 +259,10 @@ class Trainer:
         self.schedulers = schedulers
 
         # Determine optional dataset properties
-        self.classes = classes
+        self.num_classes = num_classes
         self.num_classes = None
-        if hasattr(self.train_dataset, 'classes'):
-            self.classes = self.train_dataset.classes
-            self.num_classes = len(self.train_dataset.classes)
+        if hasattr(self.train_dataset, 'num_classes'):
+            self.num_classes = self.train_dataset.num_classes
 
         if not tensorboard_available and enable_tensorboard:
             enable_tensorboard = False

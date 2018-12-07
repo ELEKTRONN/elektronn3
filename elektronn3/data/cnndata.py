@@ -114,7 +114,7 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-        classes: The different target classes that exist
+        num_classes: The total number of different target classes that exist
             in the data set. Setting this is optional, but some features might
             only work if this is specified.
         in_memory: If ``True``, all data set files are immediately loaded
@@ -140,7 +140,7 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
-            classes: Optional[Sequence[int]] = None,
+            num_classes: Optional[int] = None,
             in_memory: bool = False,
     ):
         # Early checks
@@ -174,8 +174,7 @@ class PatchCreator(data.Dataset):
         #       could be used for adding support for targets that are not
         #       labelled in the expected order [0, 1, ..., num_classes - 1] or
         #       as a whitelist that excludes classes that should be ignored.
-        self.classes = classes
-        self.num_classes = None if classes is None else len(classes)
+        self.num_classes = num_classes
         self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)

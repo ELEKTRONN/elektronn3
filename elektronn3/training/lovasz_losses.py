@@ -166,7 +166,7 @@ def lovasz_softmax(probas, labels, only_present=False, per_image=False, ignore=N
     Multi-class Lovasz-Softmax loss
       probas: [B, C, H, W] Variable, class probabilities at each prediction (between 0 and 1)
       labels: [B, H, W] Tensor, ground truth labels (between 0 and C - 1)
-      only_present: average only on classes present in ground truth
+      only_present: average only on num_classes present in ground truth
       per_image: compute the loss per image instead of per batch
       ignore: void class labels
     """
@@ -183,7 +183,7 @@ def lovasz_softmax_flat(probas, labels, only_present=False):
     Multi-class Lovasz-Softmax loss
       probas: [P, C] Variable, class probabilities at each prediction (between 0 and 1)
       labels: [P] Tensor, ground truth labels (between 0 and C - 1)
-      only_present: average only on classes present in ground truth
+      only_present: average only on num_classes present in ground truth
     """
     C = probas.size(1)
     losses = []
