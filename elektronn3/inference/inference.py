@@ -161,9 +161,12 @@ class Predictor:
 
             - If ``model`` is a ``torch.nn.Module`` object, it is used
               directly.
+            - If ``model`` is a path (string) to a serialized TorchScript
+              module (.pts), it is loaded from the file and mapped to the
+              specified ``device``.
             - If ``model`` is a path (string) to a pickled PyTorch module (.pt)
               (**not** a pickled ``state_dict``), it is loaded from the file
-              and mapped to the specified ``device``.
+              and mapped to the specified ``device`` as well.
             - If ``model`` is a path to an elektronn3 save directory,
               the model is automatically initialized from the training script
               (.py) by calling its ``get_model()`` function and the
@@ -207,9 +210,15 @@ class Predictor:
         self.device = device
         if isinstance(model, str):
             if os.path.isfile(model):
-                model = torch.load(model, map_location=device)
+                # TODO: Find a better way to find out beforehand if it's a TorchScript module.
+                #  We're just pretending to know .pts means TorchScript, although no-one except
+                #  us even uses this extension...
+                if model.endswith('.pts'):
+                    model = torch.jit.load(model, map_location=device)
+                else:
+                    model = torch.load(model, map_location=device)
             elif os.path.isdir(model):
-                model = load_model_from_savedir(model)
+                model = load_model_from_savedir(model, device)
             else:
                 raise ValueError(f'Model path {model} not found.')
         self.model = model
@@ -228,7 +237,6 @@ class Predictor:
         self.model.eval()
         if multi_gpu:
             self.model = nn.DataParallel(self.model)
-        self.model.to(self.device)
 
     def _predict(self, inp: torch.Tensor) -> np.ndarray:
         inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
@@ -399,25 +407,35 @@ def set_state_dict(model: torch.nn.Module, state_dict: dict):
         model.load_state_dict(new_state_dict)
 
 
-def load_model_from_savedir(src: str) -> torch.nn.Module:
+def load_model_from_savedir(
+        save_dir: str,
+        device: Union[torch.device, str] = None
+) -> torch.nn.Module:
     """
     Load the *best* trained elektronn3 model from a save directory.
 
     Args:
-        src: Source path to model directory. Directory must contain training
+        save_dir: Path to model directory. Directory must contain a "model_best.pts"
+            file containing a serialized TorchScript model OR a training
             script and a model checkpoint .pth file.
+        device: Device to map the model to.
 
     Returns:
         Trained model
     """
+    model_file = os.path.join(save_dir, 'model_best.pts')
+    if os.path.isfile(model_file):
+        model = torch.jit.load(model_file, map_location=device)
+        return model
+    print(f'{model_file} not found. Using a state_dict instead.')
     # get architecture definition
-    train_script = glob.glob(f'{src}/*.py')
+    train_script = glob.glob(f'{save_dir}/*.py')
     assert len(train_script) == 1, "Multiple/None trainer file(s). " \
                                    "Ill-defined trainer script."
     exec(open(train_script[0]).read(), globals())
     assert "get_model" in globals(), "'get_model' not defiend in trainer script."
     # get state dict path
-    state_dict_p = glob.glob(f'{src}/*.pth')
+    state_dict_p = glob.glob(f'{save_dir}/*.pth')
     if len(state_dict_p) > 1:
         best_p = ["_best" in sp for sp in state_dict_p]
         if np.sum(best_p) == 1:
@@ -428,4 +446,4 @@ def load_model_from_savedir(src: str) -> torch.nn.Module:
     # model = Predictor(get_model(), state_dict_p[0])
     model = get_model()  # get_model() is defined dynamically by exec(open(...)) above
     set_state_dict(model, state_dict)
-    return model
+    return model.to(device)
