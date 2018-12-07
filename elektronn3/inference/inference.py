@@ -182,8 +182,6 @@ class Predictor:
             a string like ``'cpu'``, ``'cuda:0'`` etc.
             If not specified (``None``), available GPUs are automatically used;
             the CPU is used as a fallback if no GPUs can be found.
-        multi_gpu: Enable multi-GPU inference (using
-            ``torch.nn.DataParallel``).
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
@@ -202,7 +200,6 @@ class Predictor:
             model: Union[nn.Module, str],
             state_dict_src: Optional[Union[str, dict]] = None,
             device: Optional[Union[torch.device, str]] = None,
-            multi_gpu: bool = True,
             apply_softmax: bool = True
     ):
         if device is None:
@@ -235,8 +232,6 @@ class Predictor:
         if apply_softmax:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         self.model.eval()
-        if multi_gpu:
-            self.model = nn.DataParallel(self.model)
 
     def _predict(self, inp: torch.Tensor) -> np.ndarray:
         inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
@@ -426,6 +421,7 @@ def load_model_from_savedir(
     model_file = os.path.join(save_dir, 'model_best.pts')
     if os.path.isfile(model_file):
         model = torch.jit.load(model_file, map_location=device)
+        print(f'Sucessfully loaded {model_file}')
         return model
     print(f'{model_file} not found. Using a state_dict instead.')
     # get architecture definition
