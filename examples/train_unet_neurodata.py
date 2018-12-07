@@ -67,13 +67,15 @@ if torch.__version__.startswith('0'):
 
 def get_model(trace: bool = True):
     # Initialize neural network model
-    model = UNet(
-        n_blocks=3,
-        start_filts=32,
-        planar_blocks=(1,),
-        activation='relu',
-        batch_norm=True
-    ).to(device)
+    # model = UNet(
+    #     n_blocks=3,
+    #     start_filts=32,
+    #     planar_blocks=(1,),
+    #     activation='relu',
+    #     batch_norm=True
+    # ).to(device)
+    from elektronn3.models.se3 import SE3Model
+    model = SE3Model().to(device)
     if trace:
         x = torch.randn(1, 1, 32, 64, 64, device=device)
         model = torch.jit.trace(model, x)
@@ -99,7 +101,7 @@ if __name__ == "__main__":
 
     max_steps = args.max_steps
     max_runtime = args.max_runtime
-    lr = 0.0004
+    lr = 1e-2#0.0004
     lr_stepsize = 1000
     lr_dec = 0.995
     batch_size = 1
@@ -164,7 +166,7 @@ if __name__ == "__main__":
     preview_batch = get_preview_batch(
         fname=os.path.join(data_root, 'raw_2.h5'),
         key='raw',
-        preview_shape=(32, 320, 320),
+        preview_shape=(32, 128, 128),
         transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
     )
 
