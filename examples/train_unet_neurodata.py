@@ -110,10 +110,7 @@ if __name__ == "__main__":
             model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
         except _pickle.UnpicklingError as exc:
             # Assume it's a complete saved ScriptModule
-            model = torch.jit.load(os.path.expanduser(args.resume))
-            # TODO: Rewrite this when ScriptModule.to() is supported
-            if 'cuda' in str(device):  # (Ignoring device number!)
-                model.cuda()
+            model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
 
     # These statistics are computed from the training dataset.
     # Remember to re-compute and change them when switching the dataset.
