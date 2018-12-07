@@ -597,7 +597,6 @@ class Trainer:
         predictor = Predictor(
             model=self.model,
             device=self.device,
-            multi_gpu=False,
             apply_softmax=self.apply_softmax_for_prediction,
         )
         out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
