@@ -328,7 +328,8 @@ class Trainer:
                 running_vx_size = 0
                 timer = Timer()
                 for inp, target in self.train_loader:
-                    inp, target = inp.to(self.device), target.to(self.device)
+                    inp = inp.to(self.device, non_blocking=True)
+                    target = target.to(self.device, non_blocking=True)
 
                     # forward pass
                     out = self.model(inp)
@@ -520,7 +521,8 @@ class Trainer:
         val_loss = 0
         stats = {name: 0 for name in self.valid_metrics.keys()}
         for inp, target in self.valid_loader:
-            inp, target = inp.to(self.device), target.to(self.device)
+            inp = inp.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True)
             with torch.no_grad():
                 out = self.model(inp)
                 val_loss += self.criterion(out, target).item() / len(self.valid_loader)
