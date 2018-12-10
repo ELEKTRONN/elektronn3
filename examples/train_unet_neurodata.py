@@ -206,6 +206,7 @@ if __name__ == "__main__":
         schedulers={"lr": lr_sched},
         valid_metrics=valid_metrics,
         preview_batch=preview_batch,
+        preview_interval=5,
         apply_softmax_for_prediction=True,
         # TODO: Tune these:
         preview_tile_shape=(32, 64, 64),

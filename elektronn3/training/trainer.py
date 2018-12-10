@@ -92,6 +92,12 @@ class Trainer:
             disabled.
         preview_tile_shape
         preview_overlap_shape
+        preview_interval: Determines how often to perform preview inference.
+            Preview inference is performed every ``preview_interval`` epochs
+            during training. Regardless of this value, preview predictions
+            will also be performed once after epoch 1.
+            (To disable preview predictions altogether, just set
+            ``preview_batch = None``).
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
             See :py:class:`torch.utils.data.DataLoader`
@@ -145,7 +151,7 @@ class Trainer:
             regression.
         preview_plotting_handler: Function that is responsible for producing
             previews and visualizing/plotting/logging them.
-            It is called once after each training epoch.
+            It is called once each ``preview_interval`` epochs.
             If ``None``, a tensorboard-based default handler is used that
             works for most classification scenarios.
     """
@@ -158,6 +164,7 @@ class Trainer:
     tb: TensorBoardLogger
     terminate: bool
     step: int
+    epoch: int
     train_loader: torch.utils.data.DataLoader
     valid_loader: torch.utils.data.DataLoader
     exp_name: str
@@ -177,6 +184,7 @@ class Trainer:
             preview_batch: Optional[torch.Tensor] = None,
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
             preview_overlap_shape: Optional[Tuple[int, ...]] = None,
+            preview_interval: int = 5,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -222,6 +230,7 @@ class Trainer:
         self.preview_batch = preview_batch
         self.preview_tile_shape = preview_tile_shape
         self.preview_overlap_shape = preview_overlap_shape
+        self.preview_interval = preview_interval
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -254,6 +263,7 @@ class Trainer:
 
         self.terminate = False
         self.step = 0
+        self.epoch = 0
         if schedulers is None:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
@@ -386,6 +396,7 @@ class Trainer:
                         logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
                         self.terminate = True
                         break
+                self.epoch += 1
                 stats['tr_accuracy'] = running_acc / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
@@ -425,9 +436,11 @@ class Trainer:
                     self.tb_log_scalars(stats, 'stats')
                     self.tb_log_scalars(misc, 'misc')
                     if self.preview_batch is not None:
-                        # TODO: Free as much GPU memory as possible to make more room for preview inference
-                        # TODO: Also save preview inference results in a (3D) HDF5 file
-                        self.preview_plotting_handler(self)
+                        if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                            # TODO: Free as much GPU memory as possible to make more
+                            #       room for preview inference
+                            # TODO: Also save preview inference results in a (3D) HDF5 file
+                            self.preview_plotting_handler(self)
                     self.sample_plotting_handler(self, images, group='tr_samples')
                     self.tb.writer.flush()
 
