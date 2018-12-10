@@ -3,7 +3,6 @@
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
-import glob
 import itertools
 import os
 import time
@@ -167,14 +166,6 @@ class Predictor:
             - If ``model`` is a path (string) to a pickled PyTorch module (.pt)
               (**not** a pickled ``state_dict``), it is loaded from the file
               and mapped to the specified ``device`` as well.
-            - If ``model`` is a path to an elektronn3 save directory,
-              the model is automatically initialized from the training script
-              (.py) by calling its ``get_model()`` function and the
-              ``state_dict`` is loaded from the best (or only) available
-              ``state_dict`` checkpoint (.pth) file.
-              This only works if the network model is defined in a dedicated
-              ``get_model()`` function within the training script that was
-              used.
         state_dict_src: Path to ``state_dict`` file (.pth) or loaded
             ``state_dict`` or ``None``. If not ``None``, the ``state_dict`` of
             the ``model`` is replaced with it.
@@ -214,8 +205,6 @@ class Predictor:
                     model = torch.jit.load(model, map_location=device)
                 else:
                     model = torch.load(model, map_location=device)
-            elif os.path.isdir(model):
-                model = load_model_from_savedir(model, device)
             else:
                 raise ValueError(f'Model path {model} not found.')
         self.model = model
@@ -400,46 +389,3 @@ def set_state_dict(model: torch.nn.Module, state_dict: dict):
         for k, v in state_dict.items():
             new_state_dict[k.replace('module.', '')] = v
         model.load_state_dict(new_state_dict)
-
-
-def load_model_from_savedir(
-        save_dir: str,
-        device: Union[torch.device, str] = None
-) -> torch.nn.Module:
-    """
-    Load the *best* trained elektronn3 model from a save directory.
-
-    Args:
-        save_dir: Path to model directory. Directory must contain a "model_best.pts"
-            file containing a serialized TorchScript model OR a training
-            script and a model checkpoint .pth file.
-        device: Device to map the model to.
-
-    Returns:
-        Trained model
-    """
-    model_file = os.path.join(save_dir, 'model_best.pts')
-    if os.path.isfile(model_file):
-        model = torch.jit.load(model_file, map_location=device)
-        print(f'Sucessfully loaded {model_file}')
-        return model
-    print(f'{model_file} not found. Using a state_dict instead.')
-    # get architecture definition
-    train_script = glob.glob(f'{save_dir}/*.py')
-    assert len(train_script) == 1, "Multiple/None trainer file(s). " \
-                                   "Ill-defined trainer script."
-    exec(open(train_script[0]).read(), globals())
-    assert "get_model" in globals(), "'get_model' not defiend in trainer script."
-    # get state dict path
-    state_dict_p = glob.glob(f'{save_dir}/*.pth')
-    if len(state_dict_p) > 1:
-        best_p = ["_best" in sp for sp in state_dict_p]
-        if np.sum(best_p) == 1:
-            state_dict_p = [state_dict_p[np.argmax(best_p)]]
-    assert len(state_dict_p) == 1, "Multiple/no state dict file(s). " \
-                                   "Ill-defined state dict file."
-    state_dict = torch.load(state_dict_p[0])
-    # model = Predictor(get_model(), state_dict_p[0])
-    model = get_model()  # get_model() is defined dynamically by exec(open(...)) above
-    set_state_dict(model, state_dict)
-    return model.to(device)
