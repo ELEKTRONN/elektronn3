@@ -154,7 +154,7 @@ def slice_h5(
     if check_bounds:
         if np.any(np.array(coords_lo) < 0):
             raise RuntimeError(f'coords_lo={coords_lo} exceeds src shape {src.shape[-3:]}')
-        if np.any(np.array(coords_hi) >= np.array(src.shape[-3:])):
+        if np.any(np.array(coords_hi) > np.array(src.shape[-3:])):
             raise RuntimeError(f'coords_hi={coords_hi} exceeds src shape {src.shape[-3:]}')
     if max_retries <= 0:
         logger.error(
