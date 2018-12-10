@@ -76,8 +76,17 @@ def tiled_apply(
     """
     if isinstance(inp, torch.Tensor):
         inp = inp.cpu().numpy()
-    assert inp.ndim - 2 == len(tile_shape) == len(overlap_shape), 'tile shape and overlap don\'t match input shape.'
-    assert np.all(np.mod(inp.shape[2:], tile_shape) == 0), 'inp has to be divisible by tile_shape'
+    if not (inp.ndim - 2 == len(tile_shape) == len(overlap_shape)):
+        raise ValueError(
+            f'tile shape (ndim={len(tile_shape)}) and overlap shape '
+            f'(ndim={len(overlap_shape)}) don\'t match input shape '
+            f'(ndim={inp.ndim}.'
+        )
+    if not np.all(np.mod(inp.shape[2:], tile_shape) == 0):
+        raise ValueError(
+            f'spatial inp shape {tuple(inp.shape[2:])} has to be divisible '
+            f'by tile_shape {tile_shape}.'
+        )
 
     if verbose:
         _tqdm = tqdm
