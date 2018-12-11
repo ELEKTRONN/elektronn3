@@ -50,13 +50,6 @@ args = parser.parse_args()
 
 torch.manual_seed(0)
 
-
-if torch.__version__.startswith('0'):
-    args.disable_trace = True
-    print('Disabling JIT tracing because PyTorch version is too old to work '
-          'reliably with tracing. Please upgrade to PyTorch 1.0 (nightly) or '
-          'run with the --disable-trace option.')
-
 if not args.disable_cuda and torch.cuda.is_available():
     device = torch.device('cuda')
 else:

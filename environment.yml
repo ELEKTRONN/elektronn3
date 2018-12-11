@@ -31,7 +31,7 @@ dependencies:
   - scikit-image >=0.14.1
   - scipy >=1.1.0
   - tensorboardx >=1.4
-  - pytorch >=0.4.1  # pytorch-cpu also works, but it's not recommended.
+  - pytorch >=1.0.0  # pytorch-cpu also works, but it's not recommended.
 #  - cudatoolkit =8.*  # Uncomment/modify for a specific CUDA version
 #  - cuda80
 

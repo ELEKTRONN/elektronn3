@@ -17,7 +17,7 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 
 - Linux (support for Windows, MacOS and other systems is not planned)
 - Python 3.6 or later
-- PyTorch 0.4.1 or a recent nightly version (1.0.0 preview)
+- PyTorch 1.0
 - For other requirements see `requirements.txt`
 
 
