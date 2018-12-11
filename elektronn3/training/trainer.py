@@ -15,6 +15,7 @@ from typing import Tuple, Dict, Optional, Callable, Any, Sequence
 import inspect
 import IPython
 import numpy as np
+import tensorboardX
 import torch
 import torch.utils.data
 from torch.optim.lr_scheduler import StepLR
@@ -30,8 +31,6 @@ from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
-
-from .tensorboard import TensorBoardLogger
 
 
 class NaNException(RuntimeError):
@@ -155,7 +154,7 @@ class Trainer:
     # TODO: Maybe there should be an option to completely disable exception
     #       hooks and IPython integration, so Ctrl-C directly terminates.
 
-    tb: TensorBoardLogger
+    tb: tensorboardX.SummaryWriter
     terminate: bool
     step: int
     epoch: int
@@ -282,7 +281,7 @@ class Trainer:
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
             # TODO: Make always_flush user-configurable here:
-            self.tb = TensorBoardLogger(log_dir=tb_path, always_flush=False)
+            self.tb = tensorboardX.SummaryWriter(log_dir=tb_path)
 
         self.train_loader = DelayedDataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
@@ -433,7 +432,6 @@ class Trainer:
                             # TODO: Also save preview inference results in a (3D) HDF5 file
                             self.preview_plotting_handler(self)
                     self.sample_plotting_handler(self, images, group='tr_samples')
-                    self.tb.flush()
 
                 # Save trained model state
                 self.save_model()
@@ -553,42 +551,7 @@ class Trainer:
             tag: str = 'default'
     ) -> None:
         for key, value in scalars.items():
-            self.tb.log_scalar(f'{tag}/{key}', value, self.step)
-
-    @staticmethod
-    def _get_batch2img_function(
-            batch: torch.Tensor,
-            z_plane: Optional[int] = None
-    ) -> Callable[[torch.Tensor], np.ndarray]:
-        """
-        Defines ``batch2img`` function dynamically, depending on tensor shapes.
-
-        ``batch2img`` slices a 4D or 5D tensor to (C, H, W) shape, moves it to
-        host memory and converts it to a numpy array.
-        By arbitrary choice, the first element of a batch is always taken here.
-        In the 5D case, the D (depth) dimension is sliced at z_plane.
-
-        This function is useful for plotting image samples during training.
-
-        Args:
-            batch: 4D or 5D tensor, used for shape analysis.
-            z_plane: Index of the spatial plane where a 5D image tensor should
-                be sliced. If not specified, this is automatically set to half
-                the size of the D dimension.
-
-        Returns:
-            Function that slices a plottable 2D image out of a torch.Tensor
-            with batch and channel dimensions.
-        """
-        if batch.dim() == 5:  # (N, C, D, H, W)
-            if z_plane is None:
-                z_plane = batch.shape[2] // 2
-            assert z_plane in range(batch.shape[2])
-            return lambda x: x[0, :, z_plane].cpu().numpy()
-        elif batch.dim() == 4:  # (N, C, H, W)
-            return lambda x: x[0, :].cpu().numpy()
-        else:
-            raise ValueError('Only 4D and 5D tensors are supported.')
+            self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     # TODO: Make more configurable
     # TODO: Inference on secondary GPU

@@ -1,14 +1,89 @@
 # These are default plotting handlers that work in some common training
 #  scenarios, but won't work in every case:
 
-from typing import Optional, Dict
+from typing import Dict, Optional, Callable
 
+import matplotlib.figure
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch.nn import functional as F
 from skimage.color import label2rgb
+from torch.nn import functional as F
 
 from elektronn3.data.utils import squash01
+
+
+def plot_image(
+        image: np.ndarray,
+        cmap=None,
+        num_classes=None,
+        colorbar=True,
+) -> matplotlib.figure.Figure:
+    """Plots a 2D image to a malplotlib figure.
+
+    For gray-scale images, use ``cmap='gray'``.
+    For label matrices (segmentation targets or class predictions),
+    specify the global number of possible classes in ``num_classes``."""
+
+    # Determine colormap and set discrete color values if needed.
+    vmin, vmax = None, None
+    ticks = None
+    if cmap is None and num_classes is not None:
+        # Assume label matrix with qualitative classes, no meaningful order
+        # Using rainbow because IMHO all actually qualitative colormaps
+        #  are incredibly ugly.
+        cmap = plt.cm.get_cmap('viridis', num_classes)
+        ticks = np.arange(num_classes)
+
+    if num_classes is not None:  # For label matrices
+        # Prevent colormap normalization. If vmax is not set, the colormap
+        #  is dynamically rescaled to fit between the minimum and maximum
+        #  values of the image to be plotted. This could lead to misleading
+        #  visualizations if the maximum value of the array to be plotted
+        #  is less than the global maximum of classes.
+        vmin = 0
+        vmax = num_classes
+
+    fig, ax = plt.subplots()
+    aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+    if colorbar:
+        fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
+    return fig
+
+
+def _get_batch2img_function(
+        batch: torch.Tensor,
+        z_plane: Optional[int] = None
+) -> Callable[[torch.Tensor], np.ndarray]:
+    """
+    Defines ``batch2img`` function dynamically, depending on tensor shapes.
+
+    ``batch2img`` slices a 4D or 5D tensor to (C, H, W) shape, moves it to
+    host memory and converts it to a numpy array.
+    By arbitrary choice, the first element of a batch is always taken here.
+    In the 5D case, the D (depth) dimension is sliced at z_plane.
+
+    This function is useful for plotting image samples during training.
+
+    Args:
+        batch: 4D or 5D tensor, used for shape analysis.
+        z_plane: Index of the spatial plane where a 5D image tensor should
+            be sliced. If not specified, this is automatically set to half
+            the size of the D dimension.
+
+    Returns:
+        Function that slices a plottable 2D image out of a torch.Tensor
+        with batch and channel dimensions.
+    """
+    if batch.dim() == 5:  # (N, C, D, H, W)
+        if z_plane is None:
+            z_plane = batch.shape[2] // 2
+        assert z_plane in range(batch.shape[2])
+        return lambda x: x[0, :, z_plane].cpu().numpy()
+    elif batch.dim() == 4:  # (N, C, H, W)
+        return lambda x: x[0, :].cpu().numpy()
+    else:
+        raise ValueError('Only 4D and 5D tensors are supported.')
 
 
 # TODO: Support regression scenario
@@ -28,20 +103,32 @@ def _tb_log_preview(
     if trainer.apply_softmax_for_prediction:
         out_batch = F.softmax(out_batch, 1)  # Apply softmax before plotting
 
-    batch2img = trainer._get_batch2img_function(out_batch, z_plane)
+    batch2img = _get_batch2img_function(out_batch, z_plane)
 
     out_slice = batch2img(out_batch)
     pred_slice = out_slice.argmax(0)
 
     for c in range(out_slice.shape[0]):
-        trainer.tb.log_image(f'{group}/c{c}', out_slice[c], trainer.step, cmap='gray')
-    trainer.tb.log_image(f'{group}/pred', pred_slice, trainer.step, num_classes=trainer.num_classes)
+        trainer.tb.add_figure(
+            f'{group}/c{c}',
+            plot_image(out_slice[c], cmap='gray'),
+            trainer.step
+        )
+    trainer.tb.add_figure(
+        f'{group}/pred',
+        plot_image(pred_slice, num_classes=trainer.num_classes),
+        trainer.step
+    )
 
     # This is only run once per training, because the ground truth for
     # previews is constant (always the same preview inputs/targets)
     if trainer._first_plot:
         inp_slice = batch2img(trainer.preview_batch)[0]
-        trainer.tb.log_image(f'{group}/inp', inp_slice, step=0, cmap='gray')
+        trainer.tb.add_figure(
+            f'{group}/inp',
+            plot_image(inp_slice, cmap='gray'),
+            global_step=0
+        )
         trainer._first_plot = False
 
 
@@ -65,7 +152,7 @@ def _tb_log_sample_images(
     if trainer.apply_softmax_for_prediction:
         out_batch = F.softmax(out_batch, 1)  # Apply softmax before plotting
 
-    batch2img = trainer._get_batch2img_function(out_batch, z_plane)
+    batch2img = _get_batch2img_function(out_batch, z_plane)
 
     inp_slice = batch2img(images['inp'])[0]
     target_batch = images['target']
@@ -96,30 +183,46 @@ def _tb_log_sample_images(
             f'Can\t prepare targets of shape {target_batch.shape} for plotting.'
         )
 
-    trainer.tb.log_image(f'{group}/inp', inp_slice, step=trainer.step, cmap='gray')
-    trainer.tb.log_image(
-        f'{group}/target', target_slice, step=trainer.step, num_classes=trainer.num_classes
+    trainer.tb.add_figure(
+        f'{group}/inp',
+        plot_image(inp_slice, cmap='gray'),
+        global_step=trainer.step
+    )
+    trainer.tb.add_figure(
+        f'{group}/target',
+        plot_image(target_slice, num_classes=trainer.num_classes),
+        global_step=trainer.step
     )
 
     # Only make pred and overlay plots in classification scenarios
     if is_classification:
         # Plot each class probmap individually
         for c in range(out_slice.shape[0]):
-            trainer.tb.log_image(f'{group}/c{c}', out_slice[c], step=trainer.step, cmap='gray')
+            trainer.tb.add_figure(
+                f'{group}/c{c}',
+                plot_image(out_slice[c], cmap='gray'),
+                global_step=trainer.step
+            )
 
         pred_slice = out_slice.argmax(0)
-        trainer.tb.log_image(
-            f'{group}/pred_slice', pred_slice, step=trainer.step, num_classes=trainer.num_classes
+        trainer.tb.add_figure(
+            f'{group}/pred_slice',
+            plot_image(pred_slice, num_classes=trainer.num_classes),
+            global_step=trainer.step
         )
 
         inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
         target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
         pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
-        trainer.tb.log_image(
-            f'{group}/target_overlay', target_slice_ov, step=trainer.step, colorbar=False
+        trainer.tb.add_figure(
+            f'{group}/target_overlay',
+            plot_image(target_slice_ov, colorbar=False),
+            global_step=trainer.step
         )
-        trainer.tb.log_image(
-            f'{group}/pred_overlay', pred_slice_ov, step=trainer.step, colorbar=False
+        trainer.tb.add_figure(
+            f'{group}/pred_overlay',
+            plot_image(pred_slice_ov, colorbar=False),
+            global_step=trainer.step
         )
         # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
         # TODO: What's up with the colorbar in overlay plots?
@@ -128,4 +231,4 @@ def _tb_log_sample_images(
         #       (i.e. with more contribution of the overlayed label map).
         #       Don't know how to fix this currently.
     elif is_regression:
-        trainer.tb.log_image(f'{group}/out', out_slice, step=trainer.step)
+        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice), global_step=trainer.step)
