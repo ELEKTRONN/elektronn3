@@ -397,7 +397,7 @@ class Trainer:
         running_mean_target = 0
         running_vx_size = 0
         timer = Timer()
-        for inp, target in self.train_loader:
+        for i, (inp, target) in enumerate(self.train_loader):
             inp = inp.to(self.device, non_blocking=True)
             target = target.to(self.device, non_blocking=True)
 
@@ -413,23 +413,14 @@ class Trainer:
             loss.backward()
             self.optimizer.step()
 
-            # Prevent accidental autograd overheads after optimizer step
-            inp.detach_()
-            target.detach_()
-            out.detach_()
-            loss.detach_()
+            with torch.no_grad():
+                loss = float(loss)
+                stats['tr_loss'] += loss
+                acc = float(metrics.bin_accuracy(target, out))  # TODO
+                mean_target = float(target.to(torch.float32).mean())
+                print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
+                self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
-            # get training performance
-            stats['tr_loss'] += float(loss)
-            acc = metrics.bin_accuracy(target, out)  # TODO
-            mean_target = target.to(torch.float32).mean()
-            print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
-            self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
-
-            # Preserve training batch and network output for later visualization
-            images['inp'] = inp.cpu()
-            images['target'] = target.cpu()
-            images['out'] = out.cpu()
             # this was changed to support ReduceLROnPlateau which does not implement get_lr
             misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
             # update schedules
@@ -437,7 +428,7 @@ class Trainer:
                 # support ReduceLROnPlateau; doc. uses validation loss instead
                 # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
                 if "metrics" in inspect.signature(sched.step).parameters:
-                    sched.step(metrics=float(loss))
+                    sched.step(metrics=loss)
                 else:
                     sched.step()
 
@@ -445,7 +436,12 @@ class Trainer:
             running_mean_target += mean_target
             running_vx_size += inp.numel()
 
-            del inp, target, out  # Free memory
+            if i == len(self.train_loader) - 1:  # Last step in this epoch
+                # Preserve last training batch and network output for later
+                # visualization
+                images['inp'] = inp.detach().cpu()
+                images['target'] = target.detach().cpu()
+                images['out'] = out.detach().cpu()
 
             self.step += 1
             if self.step >= max_steps:
