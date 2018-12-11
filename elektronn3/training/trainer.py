@@ -303,6 +303,90 @@ class Trainer:
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
+    def _train_epoch(self, max_steps, max_runtime):
+        # --> self.train()
+        self.model.train()
+
+        # Scalar training stats that should be logged and written to tensorboard later
+        stats: Dict[str, float] = {'tr_loss': 0.0}
+        # Other scalars to be logged
+        misc: Dict[str, float] = {}
+        # Hold image tensors for real-time training sample visualization in tensorboard
+        images: Dict[str, torch.Tensor] = {}
+
+        running_acc = 0
+        running_mean_target = 0
+        running_vx_size = 0
+        timer = Timer()
+        for inp, target in self.train_loader:
+            inp = inp.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True)
+
+            # forward pass
+            out = self.model(inp)
+            loss = self.criterion(out, target)
+            if torch.isnan(loss):
+                logger.error('NaN loss detected! Aborting training.')
+                raise NaNException
+
+            # update step
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            # Prevent accidental autograd overheads after optimizer step
+            inp.detach_()
+            target.detach_()
+            out.detach_()
+            loss.detach_()
+
+            # get training performance
+            stats['tr_loss'] += float(loss)
+            acc = metrics.bin_accuracy(target, out)  # TODO
+            mean_target = target.to(torch.float32).mean()
+            print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
+            self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
+
+            # Preserve training batch and network output for later visualization
+            images['inp'] = inp.cpu()
+            images['target'] = target.cpu()
+            images['out'] = out.cpu()
+            # this was changed to support ReduceLROnPlateau which does not implement get_lr
+            misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
+            # update schedules
+            for sched in self.schedulers.values():
+                # support ReduceLROnPlateau; doc. uses validation loss instead
+                # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
+                if "metrics" in inspect.signature(sched.step).parameters:
+                    sched.step(metrics=float(loss))
+                else:
+                    sched.step()
+
+            running_acc += acc
+            running_mean_target += mean_target
+            running_vx_size += inp.numel()
+
+            del inp, target, out  # Free memory
+
+            self.step += 1
+            if self.step >= max_steps:
+                logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
+                self.terminate = True
+                break
+            if datetime.datetime.now() >= self.end_time:
+                logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
+                self.terminate = True
+                break
+
+        stats['tr_accuracy'] = running_acc / len(self.train_loader)
+        stats['tr_loss'] /= len(self.train_loader)
+        misc['tr_speed'] = len(self.train_loader) / timer.t_passed
+        misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
+        misc['mean_target'] = running_mean_target / len(self.train_loader)
+
+        return stats, misc, images
+
+
     # TODO: Modularize, make some general parts reusable for other trainers.
     def train(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
@@ -313,85 +397,9 @@ class Trainer:
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
         while not self.terminate:
             try:
-                # --> self.train()
-                self.model.train()
-
-                # Scalar training stats that should be logged and written to tensorboard later
-                stats: Dict[str, float] = {'tr_loss': 0.0}
-                # Other scalars to be logged
-                misc: Dict[str, float] = {}
-                # Hold image tensors for real-time training sample visualization in tensorboard
-                images: Dict[str, torch.Tensor] = {}
-
-                running_acc = 0
-                running_mean_target = 0
-                running_vx_size = 0
-                timer = Timer()
-                for inp, target in self.train_loader:
-                    inp = inp.to(self.device, non_blocking=True)
-                    target = target.to(self.device, non_blocking=True)
-
-                    # forward pass
-                    out = self.model(inp)
-                    loss = self.criterion(out, target)
-                    if torch.isnan(loss):
-                        logger.error('NaN loss detected! Aborting training.')
-                        raise NaNException
-
-                    # update step
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    self.optimizer.step()
-
-                    # Prevent accidental autograd overheads after optimizer step
-                    inp.detach_()
-                    target.detach_()
-                    out.detach_()
-                    loss.detach_()
-
-                    # get training performance
-                    stats['tr_loss'] += float(loss)
-                    acc = metrics.bin_accuracy(target, out)  # TODO
-                    mean_target = target.to(torch.float32).mean()
-                    print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
-                    self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
-
-                    # Preserve training batch and network output for later visualization
-                    images['inp'] = inp.cpu()
-                    images['target'] = target.cpu()
-                    images['out'] = out.cpu()
-                    # this was changed to support ReduceLROnPlateau which does not implement get_lr
-                    misc['learning_rate'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
-                    # update schedules
-                    for sched in self.schedulers.values():
-                        # support ReduceLROnPlateau; doc. uses validation loss instead
-                        # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
-                        if "metrics" in inspect.signature(sched.step).parameters:
-                            sched.step(metrics=float(loss))
-                        else:
-                            sched.step()
-
-                    running_acc += acc
-                    running_mean_target += mean_target
-                    running_vx_size += inp.numel()
-
-                    del inp, target, out  # Free memory
-
-                    self.step += 1
-                    if self.step >= max_steps:
-                        logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
-                        self.terminate = True
-                        break
-                    if datetime.datetime.now() >= self.end_time:
-                        logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
-                        self.terminate = True
-                        break
+                stats, misc, images = self._train_epoch(max_steps, max_runtime)
                 self.epoch += 1
-                stats['tr_accuracy'] = running_acc / len(self.train_loader)
-                stats['tr_loss'] /= len(self.train_loader)
-                misc['tr_speed'] = len(self.train_loader) / timer.t_passed
-                misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
-                mean_target = running_mean_target / len(self.train_loader)
+
                 if self.valid_dataset is None:
                     stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
                 else:
@@ -414,7 +422,7 @@ class Trainer:
 
                 # Logging to stdout, text log file
                 text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
-                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", mean_target * 100, tr_loss_gain)
+                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", misc['mean_target'] * 100, tr_loss_gain)
                 text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
 
