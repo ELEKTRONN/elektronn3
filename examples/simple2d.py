@@ -145,4 +145,4 @@ bk = Backup(script_path=__file__,
             save_path=trainer.save_path).archive_backup()
 
 # Start training
-trainer.train(max_steps)
+trainer.run(max_steps)

@@ -52,7 +52,7 @@ class TripletNetTrainer(Trainer):
         self.latent_distr = latent_distr
 
     # overwrite train and validate method
-    def train(self, max_steps: int = 1) -> None:
+    def run(self, max_steps: int = 1) -> None:
         """Train the network for ``max_steps`` steps.
 
         After each training epoch, validation performance is measured and
@@ -310,7 +310,7 @@ class TripletNetTrainer(Trainer):
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
 
-    def validate(self) -> Tuple[float, float]:
+    def _validate(self) -> Tuple[float, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
         start = time.time()
         val_loss = 0.

@@ -382,7 +382,7 @@ class Predictor:
 
 
 # TODO: This can be replaced with a single model.load_state_dict(state_dict) call
-#       after a while, because Trainer.save_model() now always saves unwrapped
+#       after a while, because Trainer._save_model() now always saves unwrapped
 #       modules if a parallel wrapper is detected. Or should we still keep this
 #       for better support of models accidentally saved in wrapped state?
 def set_state_dict(model: torch.nn.Module, state_dict: dict):

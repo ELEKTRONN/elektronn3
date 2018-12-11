@@ -204,7 +204,7 @@ trainer = Trainer(
 Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
 # Start training
-trainer.train(max_steps=max_steps, max_runtime=max_runtime)
+trainer.run(max_steps=max_steps, max_runtime=max_runtime)
 
 
 # How to re-calculate mean, std and class_weights for other datasets:

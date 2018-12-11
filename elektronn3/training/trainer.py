@@ -303,8 +303,7 @@ class Trainer:
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
-    def _train_epoch(self, max_steps, max_runtime):
-        # --> self.train()
+    def _train(self, max_steps, max_runtime):
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
@@ -388,7 +387,7 @@ class Trainer:
 
 
     # TODO: Modularize, make some general parts reusable for other trainers.
-    def train(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
+    def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
 
         After each training epoch, validation performance is measured and
@@ -397,13 +396,13 @@ class Trainer:
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
         while not self.terminate:
             try:
-                stats, misc, images = self._train_epoch(max_steps, max_runtime)
+                stats, misc, images = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
                 if self.valid_dataset is None:
                     stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
                 else:
-                    valid_stats = self.validate()
+                    valid_stats = self._validate()
                     stats.update(valid_stats)
 
 
@@ -431,8 +430,8 @@ class Trainer:
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self.tb_log_scalars(stats, 'stats')
-                    self.tb_log_scalars(misc, 'misc')
+                    self._tb_log_scalars(stats, 'stats')
+                    self._tb_log_scalars(misc, 'misc')
                     if self.preview_batch is not None:
                         if self.epoch % self.preview_interval == 0 or self.epoch == 1:
                             # TODO: Free as much GPU memory as possible to make more
@@ -442,11 +441,11 @@ class Trainer:
                     self.sample_plotting_handler(self, images, group='tr_samples')
 
                 # Save trained model state
-                self.save_model()
+                self._save_model()
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self.save_model(suffix='_best')
+                    self._save_model(suffix='_best')
             except KeyboardInterrupt:
                 IPython.embed(header=self._shell_info)
                 if self.terminate:
@@ -465,9 +464,9 @@ class Trainer:
                         return
                 else:
                     raise e
-        self.save_model(suffix='_final')
+        self._save_model(suffix='_final')
 
-    def save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
+    def _save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
         """Save/serialize trained model state to files.
 
         If the model uses a parallel wrapper like ``torch.nn.DataParallel``,
@@ -525,7 +524,7 @@ class Trainer:
             else:
                 raise exc
 
-    def validate(self) -> Dict[str, float]:
+    def _validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = 0
@@ -553,7 +552,7 @@ class Trainer:
         # TODO: Refactor: Remove side effects (plotting)
         return stats
 
-    def tb_log_scalars(
+    def _tb_log_scalars(
             self,
             scalars: Dict[str, float],
             tag: str = 'default'
