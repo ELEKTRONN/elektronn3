@@ -303,6 +303,86 @@ class Trainer:
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
+    # TODO: Modularize, make some general parts reusable for other trainers.
+    def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
+        """Train the network for ``max_steps`` steps.
+
+        After each training epoch, validation performance is measured and
+        visualizations are computed and logged to tensorboard."""
+        self.start_time = datetime.datetime.now()
+        self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
+        while not self.terminate:
+            try:
+                stats, misc, images = self._train(max_steps, max_runtime)
+                self.epoch += 1
+
+                if self.valid_dataset is None:
+                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
+                else:
+                    valid_stats = self._validate()
+                    stats.update(valid_stats)
+
+
+                # Update history tracker (kind of made obsolete by tensorboard)
+                # TODO: Decide what to do with this, now that most things are already in tensorboard.
+                if self.step // len(self.train_dataset) > 1:
+                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
+                else:
+                    tr_loss_gain = 0
+                self._tracker.update_history([
+                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
+                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
+                ])  # 0's correspond to mom and gradnet (?)
+                t = pretty_string_time(self._timer.t_passed)
+                loss_smooth = self._tracker.loss._ema
+
+                # Logging to stdout, text log file
+                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
+                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", misc['mean_target'] * 100, tr_loss_gain)
+                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
+                logger.info(text)
+
+                # Plot tracker stats to pngs in save_path
+                self._tracker.plot(self.save_path)
+
+                # Reporting to tensorboard logger
+                if self.tb:
+                    self._tb_log_scalars(stats, 'stats')
+                    self._tb_log_scalars(misc, 'misc')
+                    if self.preview_batch is not None:
+                        if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                            # TODO: Free as much GPU memory as possible to make more
+                            #       room for preview inference
+                            # TODO: Also save preview inference results in a (3D) HDF5 file
+                            self.preview_plotting_handler(self)
+                    self.sample_plotting_handler(self, images, group='tr_samples')
+
+                # Save trained model state
+                self._save_model()
+                # TODO: Support other metrics for determining what's the "best" model?
+                if stats['val_loss'] < self.best_val_loss:
+                    self.best_val_loss = stats['val_loss']
+                    self._save_model(suffix='_best')
+            except KeyboardInterrupt:
+                IPython.embed(header=self._shell_info)
+                if self.terminate:
+                    return
+            except Exception as e:
+                traceback.print_exc()
+                if self.ignore_errors:
+                    # Just print the traceback and try to carry on with training.
+                    # This can go wrong in unexpected ways, so don't leave the training unattended.
+                    pass
+                elif self.ipython_on_error:
+                    print("\nEntering Command line such that Exception can be "
+                          "further inspected by user.\n\n")
+                    IPython.embed(header=self._shell_info)
+                    if self.terminate:
+                        return
+                else:
+                    raise e
+        self._save_model(suffix='_final')
+
     def _train(self, max_steps, max_runtime):
         self.model.train()
 
@@ -385,86 +465,33 @@ class Trainer:
 
         return stats, misc, images
 
+    def _validate(self) -> Dict[str, float]:
+        self.model.eval()  # Set dropout and batchnorm to eval mode
 
-    # TODO: Modularize, make some general parts reusable for other trainers.
-    def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
-        """Train the network for ``max_steps`` steps.
+        val_loss = 0
+        stats = {name: 0 for name in self.valid_metrics.keys()}
+        for inp, target in self.valid_loader:
+            inp = inp.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True)
+            with torch.no_grad():
+                out = self.model(inp)
+                val_loss += self.criterion(out, target).item() / len(self.valid_loader)
+                for name, evaluator in self.valid_metrics.items():
+                    stats[name] += evaluator(target, out) / len(self.valid_loader)
 
-        After each training epoch, validation performance is measured and
-        visualizations are computed and logged to tensorboard."""
-        self.start_time = datetime.datetime.now()
-        self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
-        while not self.terminate:
-            try:
-                stats, misc, images = self._train(max_steps, max_runtime)
-                self.epoch += 1
+        if self.tb:
+            self.sample_plotting_handler(
+                self,
+                {'inp': inp, 'out': out, 'target': target},
+                group='val_samples'
+            )
 
-                if self.valid_dataset is None:
-                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
-                else:
-                    valid_stats = self._validate()
-                    stats.update(valid_stats)
+        stats['val_loss'] = val_loss
 
+        self.model.train()  # Reset model to training mode
 
-                # Update history tracker (kind of made obsolete by tensorboard)
-                # TODO: Decide what to do with this, now that most things are already in tensorboard.
-                if self.step // len(self.train_dataset) > 1:
-                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
-                else:
-                    tr_loss_gain = 0
-                self._tracker.update_history([
-                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
-                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
-                ])  # 0's correspond to mom and gradnet (?)
-                t = pretty_string_time(self._timer.t_passed)
-                loss_smooth = self._tracker.loss._ema
-
-                # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
-                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", misc['mean_target'] * 100, tr_loss_gain)
-                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
-                logger.info(text)
-
-                # Plot tracker stats to pngs in save_path
-                self._tracker.plot(self.save_path)
-
-                # Reporting to tensorboard logger
-                if self.tb:
-                    self._tb_log_scalars(stats, 'stats')
-                    self._tb_log_scalars(misc, 'misc')
-                    if self.preview_batch is not None:
-                        if self.epoch % self.preview_interval == 0 or self.epoch == 1:
-                            # TODO: Free as much GPU memory as possible to make more
-                            #       room for preview inference
-                            # TODO: Also save preview inference results in a (3D) HDF5 file
-                            self.preview_plotting_handler(self)
-                    self.sample_plotting_handler(self, images, group='tr_samples')
-
-                # Save trained model state
-                self._save_model()
-                # TODO: Support other metrics for determining what's the "best" model?
-                if stats['val_loss'] < self.best_val_loss:
-                    self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best')
-            except KeyboardInterrupt:
-                IPython.embed(header=self._shell_info)
-                if self.terminate:
-                    return
-            except Exception as e:
-                traceback.print_exc()
-                if self.ignore_errors:
-                    # Just print the traceback and try to carry on with training.
-                    # This can go wrong in unexpected ways, so don't leave the training unattended.
-                    pass
-                elif self.ipython_on_error:
-                    print("\nEntering Command line such that Exception can be "
-                          "further inspected by user.\n\n")
-                    IPython.embed(header=self._shell_info)
-                    if self.terminate:
-                        return
-                else:
-                    raise e
-        self._save_model(suffix='_final')
+        # TODO: Refactor: Remove side effects (plotting)
+        return stats
 
     def _save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
         """Save/serialize trained model state to files.
@@ -523,34 +550,6 @@ class Trainer:
                 model.save(model_path)
             else:
                 raise exc
-
-    def _validate(self) -> Dict[str, float]:
-        self.model.eval()  # Set dropout and batchnorm to eval mode
-
-        val_loss = 0
-        stats = {name: 0 for name in self.valid_metrics.keys()}
-        for inp, target in self.valid_loader:
-            inp = inp.to(self.device, non_blocking=True)
-            target = target.to(self.device, non_blocking=True)
-            with torch.no_grad():
-                out = self.model(inp)
-                val_loss += self.criterion(out, target).item() / len(self.valid_loader)
-                for name, evaluator in self.valid_metrics.items():
-                    stats[name] += evaluator(target, out) / len(self.valid_loader)
-
-        if self.tb:
-            self.sample_plotting_handler(
-                self,
-                {'inp': inp, 'out': out, 'target': target},
-                group='val_samples'
-            )
-
-        stats['val_loss'] = val_loss
-
-        self.model.train()  # Reset model to training mode
-
-        # TODO: Refactor: Remove side effects (plotting)
-        return stats
 
     def _tb_log_scalars(
             self,
