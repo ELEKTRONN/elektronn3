@@ -22,11 +22,22 @@ def visualize_receptive_field(
     Requires https://github.com/fornaxai/receptivefield to work
     (``pip install receptivefield``).
 
-    Only works for 2D inputs (tensor layout (N, C, H, W)!
-
-    Also requires that the ``model`` stores its output (or an intermediate
-    layer output of interest) as ``self.feature_maps[0]`` before returning,
-    (see bottom of :py:meth:`elektronn3.models.unet.UNet.forward`).
+    Limitations:
+    - Only works for 2D inputs (tensor layout (N, C, H, W)!
+    - Doesn't work with ScriptModules (yet). As a workaround, you can
+      construct a new model (``pymodel``) with the same code (but without
+      compiling it) and set its ``state_dict`` to the ``state_dict`` of the
+      compiled model (``scriptmodel``) as follows:
+      >>> # Python-defined standard PyTorch model
+      >>> pymodel: torch.nn.Module
+      >>> # Equivalent TorchScript representation of pymodel
+      >>> scriptmodel: torch.jit.ScriptModule
+      >>> # Update pymodel state
+      >>> pymodel.load_state_dict(scriptmodel.state_dict())
+      Then you can safely pass ``pymodel`` to ``visualize_receptive_field``.
+    - Requires that the ``model`` stores its output (or an intermediate
+      layer output of interest) as ``self.feature_maps[0]`` before returning,
+      (see bottom of :py:meth:`elektronn3.models.unet.UNet.forward`).
 
     Example::
     >>> from elektronn3.models._model_utils import visualize_receptive_field
@@ -38,6 +49,7 @@ def visualize_receptive_field(
     ...     activation='lin',
     ...     dim=2,
     ... )
+    >>> # (Train model for a few iterations here)
     >>> input_shape = (96, 96, 1)
     >>> visualize_receptive_field(model, input_shape, interactive=True)
 
