@@ -31,13 +31,7 @@ from elektronn3 import __file__ as arch_src
 
 logger = logging.getLogger('elektronn3log')
 
-try:
-    from .tensorboard import TensorBoardLogger
-    tensorboard_available = True
-except:
-    tensorboard_available = False
-    TensorBoardLogger = 'TensorBoardLogger'  # Workaround for type hint
-    logger.exception('Tensorboard not available.')
+from .tensorboard import TensorBoardLogger
 
 
 class NaNException(RuntimeError):
@@ -274,9 +268,6 @@ class Trainer:
         if hasattr(self.train_dataset, 'num_classes'):
             self.num_classes = self.train_dataset.num_classes
 
-        if not tensorboard_available and enable_tensorboard:
-            enable_tensorboard = False
-            logger.warning('Tensorboard is not available, so it has to be disabled.')
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
             if self.sample_plotting_handler is None:
@@ -442,7 +433,7 @@ class Trainer:
                             # TODO: Also save preview inference results in a (3D) HDF5 file
                             self.preview_plotting_handler(self)
                     self.sample_plotting_handler(self, images, group='tr_samples')
-                    self.tb.writer.flush()
+                    self.tb.flush()
 
                 # Save trained model state
                 self.save_model()

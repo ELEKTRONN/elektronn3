@@ -13,7 +13,7 @@ ipython
 tqdm
 pillow
 colorlog
+tensorboardX
 
-# For tensorboard logger (not strictly required):
+# For hosting a tensorboard server (not strictly required):
 tensorboard>=1.8.0
-tensorflow>=1.8.0

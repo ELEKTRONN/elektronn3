@@ -15,10 +15,7 @@ ipython
 tqdm
 pillow
 colorlog
-
-# For tensorboard logger (not strictly required):
-#tensorboard
-#tensorflow
+tensorboardX
 
 # For building documentation:
 sphinx
