@@ -432,7 +432,7 @@ class PatchCreator(data.Dataset):
             print('\nIt looks like you are referencing the neuro_data_cdhw dataset.\n'
                   'To install the neuro_data_xzy dataset to the default location, run:\n'
                   '  $ wget https://github.com/ELEKTRONN/elektronn.github.io/releases/download/neuro_data_cdhw/neuro_data_cdhw.zip\n'
-                  '  $ unzip neuro_data_cdhw.zip -d ~/neuro_data_zxy')
+                  '  $ unzip neuro_data_cdhw.zip -d ~/neuro_data_cdhw')
         if notfound:
             print('\nPlease fetch the necessary dataset and/or '
                   'change the relevant file paths in the network config.')
