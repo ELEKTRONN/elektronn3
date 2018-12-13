@@ -198,6 +198,14 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'preview_tile_shape and preview_overlap_shape!'
             )
+        if num_workers > 1 and 'PatchCreator' in str(type(train_dataset)):
+            logger.warning(
+                'Training with num_workers > 1 can cause instabilities if '
+                'you are using PatchCreator.\nBe advised that PatchCreator '
+                'might randomly deliver broken batches in your training and '
+                'can crash it at any point of time.\n'
+                'Please set num_workers to 1 or 0.\n'
+            )
         self.ignore_errors = ignore_errors
         self.ipython_on_error = ipython_on_error
         self.device = device
