@@ -391,7 +391,7 @@ class Trainer:
         # Other scalars to be logged
         misc: Dict[str, float] = {}
         # Hold image tensors for real-time training sample visualization in tensorboard
-        images: Dict[str, torch.Tensor] = {}
+        images: Dict[str, np.ndarray] = {}
 
         running_acc = 0
         running_mean_target = 0
@@ -439,9 +439,9 @@ class Trainer:
             if i == len(self.train_loader) - 1:  # Last step in this epoch
                 # Preserve last training batch and network output for later
                 # visualization
-                images['inp'] = inp.detach().cpu()
-                images['target'] = target.detach().cpu()
-                images['out'] = out.detach().cpu()
+                images['inp'] = inp.detach().cpu().numpy()
+                images['target'] = target.detach().cpu().numpy()
+                images['out'] = out.detach().cpu().numpy()
 
             self.step += 1
             if self.step >= max_steps:
@@ -478,7 +478,11 @@ class Trainer:
         if self.tb:
             self.sample_plotting_handler(
                 self,
-                {'inp': inp, 'out': out, 'target': target},
+                {
+                    'inp': inp.detach().cpu().numpy(),
+                    'out': out.detach().cpu().numpy(),
+                    'target': target.detach().cpu().numpy()
+                },
                 group='val_samples'
             )
 

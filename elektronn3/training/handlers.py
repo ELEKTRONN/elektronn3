@@ -52,9 +52,9 @@ def plot_image(
 
 
 def _get_batch2img_function(
-        batch: torch.Tensor,
+        batch: np.ndarray,
         z_plane: Optional[int] = None
-) -> Callable[[torch.Tensor], np.ndarray]:
+) -> Callable[[np.ndarray], np.ndarray]:
     """
     Defines ``batch2img`` function dynamically, depending on tensor shapes.
 
@@ -72,16 +72,16 @@ def _get_batch2img_function(
             the size of the D dimension.
 
     Returns:
-        Function that slices a plottable 2D image out of a torch.Tensor
+        Function that slices a plottable 2D image out of a np.ndarray
         with batch and channel dimensions.
     """
-    if batch.dim() == 5:  # (N, C, D, H, W)
+    if batch.ndim == 5:  # (N, C, D, H, W)
         if z_plane is None:
             z_plane = batch.shape[2] // 2
         assert z_plane in range(batch.shape[2])
-        return lambda x: x[0, :, z_plane].cpu().numpy()
-    elif batch.dim() == 4:  # (N, C, H, W)
-        return lambda x: x[0, :].cpu().numpy()
+        return lambda x: x[0, :, z_plane]
+    elif batch.ndim == 4:  # (N, C, H, W)
+        return lambda x: x[0, :]
     else:
         raise ValueError('Only 4D and 5D tensors are supported.')
 
@@ -101,7 +101,21 @@ def _tb_log_preview(
         overlap_shape=trainer.preview_overlap_shape
     )
     if trainer.apply_softmax_for_prediction:
-        out_batch = F.softmax(out_batch, 1)  # Apply softmax before plotting
+        out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
+
+    if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them
+        # See comments in the 5D section in _tb_log_sample_images
+        inp_video = squash01(inp_batch)
+        trainer.tb.add_video(
+            f'{group}_vid/inp', inp_video, global_step=trainer.step
+        )
+        for c in range(out_batch.shape[1]):
+            trainer.tb.add_video(
+                f'{group}_vid/out{c}',
+                squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
+                global_step=trainer.step
+            )
+
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
 
@@ -135,7 +149,7 @@ def _tb_log_preview(
 # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
 def _tb_log_sample_images(
         trainer: 'Trainer',
-        images: Dict[str, torch.Tensor],
+        images: Dict[str, np.ndarray],
         z_plane: Optional[int] = None,
         group: str = 'sample'
 ) -> None:
@@ -148,17 +162,19 @@ def _tb_log_sample_images(
         distorted/weirdly colored.
     """
 
+    inp_batch = images['inp']
+    target_batch = images['target']
     out_batch = images['out']
+
     if trainer.apply_softmax_for_prediction:
-        out_batch = F.softmax(out_batch, 1)  # Apply softmax before plotting
+        out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
 
     inp_slice = batch2img(images['inp'])[0]
-    target_batch = images['target']
 
     # Check if the network is being trained for classification
-    is_classification = target_batch.dim() == out_batch.dim() - 1
+    is_classification = target_batch.ndim == out_batch.ndim - 1
     # If it's not classification, we assume a regression scenario
     is_regression = np.all(target_batch.shape == out_batch.shape)
     # If not exactly one of the scenarios is detected, we can't handle it
@@ -182,6 +198,32 @@ def _tb_log_sample_images(
         raise RuntimeError(
             f'Can\t prepare targets of shape {target_batch.shape} for plotting.'
         )
+
+    if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them
+        # We re-interpret the D dimension as the temporal dimension T of the video
+        #  -> (N, C, T, H, W)
+        # Inputs and outputs need to be squashed to the (0, 1) intensity range
+        #  for video rendering, otherwise they will appear as random noise.
+        # Since tensorboardX's add_video only supports (N, C, T, H, W) tensors,
+        #  we have to add a fake C dimension to the (N, D, H, W) target tensors
+        #  and replace the C dimension of output tensors by empty C dimensions
+        #  to visualize each channel separately.
+        inp_video = squash01(inp_batch)
+        target_video = target_batch
+        if target_video.ndim == 4:
+            target_video = target_video[:, None]
+        trainer.tb.add_video(
+            f'{group}_vid/inp', inp_video, global_step=trainer.step
+        )
+        trainer.tb.add_video(
+            f'{group}_vid/target', target_video, global_step=trainer.step
+        )
+        for c in range(out_batch.shape[1]):
+            trainer.tb.add_video(
+                f'{group}_vid/out{c}',
+                squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
+                global_step=trainer.step
+            )
 
     trainer.tb.add_figure(
         f'{group}/inp',
