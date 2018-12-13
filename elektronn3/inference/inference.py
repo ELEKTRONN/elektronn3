@@ -182,6 +182,7 @@ class Predictor:
             a string like ``'cpu'``, ``'cuda:0'`` etc.
             If not specified (``None``), available GPUs are automatically used;
             the CPU is used as a fallback if no GPUs can be found.
+        float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
@@ -200,11 +201,18 @@ class Predictor:
             model: Union[nn.Module, str],
             state_dict_src: Optional[Union[str, dict]] = None,
             device: Optional[Union[torch.device, str]] = None,
+            float16: bool = False,
             apply_softmax: bool = True
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
+        self.float16 = float16
+        if float16 and not isinstance(model, str):
+            raise NotImplementedError(
+                'float16 inference is currently only supported for models '
+                'that are passed as file paths (strings).'
+            )
         if isinstance(model, str):
             if os.path.isfile(model):
                 # TODO: Find a better way to find out beforehand if it's a TorchScript module.
@@ -229,10 +237,15 @@ class Predictor:
             set_state_dict(model, state_dict)
         if apply_softmax:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
+        if float16:
+            self.model.half()  # This is destructive. float32 params are lost!
         self.model.eval()
 
     def _predict(self, inp: torch.Tensor) -> np.ndarray:
-        inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
+        if self.float16:
+            inp = torch.as_tensor(inp, dtype=torch.float16, device=self.device)
+        else:
+            inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
         out = self.model(inp)
         out = out.cpu().numpy()
         return out
@@ -325,8 +338,8 @@ class Predictor:
                 performance impact and can even raise OOM errors, so make
                 sure to manually set it for every non-trivial inference problem!
                 If you know how many classes your model predicts
-                (``num_classes``), you can easily calculate ``out_shape``
-                yourself as follows:
+                (``num_classes``) and if your model preserves spatial shape,
+                you can easily calculate ``out_shape`` yourself as follows:
                 >>> num_classes: int = ?  # E.g. for binary classification it's 2
                 >>> out_shape = (inp.shape[0], num_classes, *inp.shape[2:])
 
@@ -354,7 +367,10 @@ class Predictor:
             if out_shape is None:
                 # Test inference to figure out shapes
                 # TODO: out_shape is unnecessary iff num_batches == 1 AND no tiling is used.
-                inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
+                if self.float16:
+                    inp = torch.as_tensor(inp, dtype=torch.float16, device=self.device)
+                else:
+                    inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
                 # TODO (high priority): This can cause OOM with large inputs/models!
                 #  Therefore it's not a reliable way of inferring out_shape.
                 test_out = self.model(inp[:1].to(self.device))
