@@ -44,6 +44,19 @@ def map_coordinates_nearest(src, coords, lo, dest):
     dest[0] = src[u,v,w]
 
 
+@numba.jit(nopython=True)
+def _loop_map_coordinates_nearest(src, coords, lo, dest):
+    """Loop-based alternative implementation of map_coordinates_nearest()
+    for easier debugging."""
+    for z in range(coords.shape[0]):
+        for y in range(coords.shape[1]):
+            for x in range(coords.shape[2]):
+                u = np.int32(np.round(coords[z, y, x, 0] - lo[0]))
+                v = np.int32(np.round(coords[z, y, x, 1] - lo[1]))
+                w = np.int32(np.round(coords[z, y, x, 2] - lo[2]))
+                dest[z, y, x] = src[u,v,w]
+
+
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)# target='parallel'
 def map_coordinates_linear(src, coords, lo, dest):
@@ -82,6 +95,36 @@ def map_coordinates_linear(src, coords, lo, dest):
           src[u1, v1, w0] * du * dv * (1-dw) +\
           src[u1, v1, w1] * du * dv * dw
     dest[0] = val
+
+
+@numba.jit(nopython=True)
+def _loop_map_coordinates_linear(src, coords, lo, dest):
+    """Loop-based alternative implementation of map_coordinates_linear()
+    for easier debugging."""
+    for z in range(coords.shape[0]):
+        for y in range(coords.shape[1]):
+            for x in range(coords.shape[2]):
+                u = coords[z, y, x, 0] - lo[0]
+                v = coords[z, y, x, 1] - lo[1]
+                w = coords[z, y, x, 2] - lo[2]
+                u0 = np.int32(u)
+                u1 = u0 + 1
+                du = u - u0
+                v0 = np.int32(v)
+                v1 = v0 + 1
+                dv = v - v0
+                w0 = np.int32(w)
+                w1 = w0 + 1
+                dw = w - w0
+                val = src[u0, v0, w0] * (1-du) * (1-dv) * (1-dw) +\
+                      src[u1, v0, w0] * du * (1-dv) * (1-dw) +\
+                      src[u0, v1, w0] * (1-du) * dv * (1-dw) +\
+                      src[u0, v0, w1] * (1-du) * (1-dv) * dw +\
+                      src[u1, v0, w1] * du * (1-dv) * dw +\
+                      src[u0, v1, w1] * (1-du) * dv * dw +\
+                      src[u1, v1, w0] * du * dv * (1-dw) +\
+                      src[u1, v1, w1] * du * dv * dw
+                dest[z, y, x] = val
 
 
 @lru_cache(maxsize=1)
@@ -392,8 +435,21 @@ def warp_slice(
         for k, discr in enumerate(target_discrete_ix):
             if discr:
                 map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target[k])
+
+                if debug:
+                    unique_cut = np.unique(target_cut[k])
+                    unique_warp = np.unique(target[k])
+                    if len(unique_cut) != len(unique_warp) or np.any(unique_cut != unique_warp):
+                        raise RuntimeError(
+                            f'Invalid target encountered:\n\nunique_cut=\n{unique_cut}\n'
+                            f'unique_warp=\n{unique_warp}\nM_inv=\n{M_inv}\n'
+                            f'src_coords_target - lo_targ=\n{src_coords_target - lo_targ}\n'
+                        )
             else:
                 map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
+
+
+
     else:
         target = None
 
