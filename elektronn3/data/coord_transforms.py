@@ -20,6 +20,8 @@ from elektronn3.data.utils import slice_h5
 #  support for user-defined transforms, similar to the image transforms pipeline).
 #  Code for HDF5 slicing and voxel value interpolation should be in separate modules.
 
+numba.config.THREADING_LAYER = 'tbb'
+
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)#target='parallel',

@@ -25,6 +25,7 @@ setup(
         'h5py',
         'matplotlib',
         'numba',
+        'tbb',
         'ipython',
         'pillow',
         'colorlog',

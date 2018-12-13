@@ -7,6 +7,7 @@ h5py
 matplotlib
 seaborn
 numba
+tbb
 scikit-learn
 scikit-image
 ipython
