@@ -29,6 +29,9 @@ from elektronn3.training import metrics
 from elektronn3.data.utils import squash01
 from elektronn3 import __file__ as arch_src
 
+from apex import amp
+
+
 logger = logging.getLogger('elektronn3log')
 
 try:
@@ -280,9 +283,16 @@ class Trainer:
                         logger.error('NaN loss detected! Aborting training.')
                         raise NaNException
 
+                    #mixed precision with apex
+                    amp_handle = amp.init(enabled=True)
+
+
                     # update step
                     self.optimizer.zero_grad()
-                    loss.backward()
+                    #loss.backward()
+                    # mixed precision with apex
+                    with amp_handle.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
                     self.optimizer.step()
 
                     # Prevent accidental autograd overheads after optimizer step
