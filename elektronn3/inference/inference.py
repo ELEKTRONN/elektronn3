@@ -368,14 +368,14 @@ class Predictor:
                 # Test inference to figure out shapes
                 # TODO: out_shape is unnecessary iff num_batches == 1 AND no tiling is used.
                 if self.float16:
-                    inp = torch.as_tensor(inp, dtype=torch.float16, device=self.device)
+                    test_inp = torch.as_tensor(inp, dtype=torch.float16, device=self.device)
                 else:
-                    inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
+                    test_inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
                 # TODO (high priority): This can cause OOM with large inputs/models!
                 #  Therefore it's not a reliable way of inferring out_shape.
-                test_out = self.model(inp[:1].to(self.device))
+                test_out = self.model(test_inp[:1].to(self.device))
                 out_shape = tuple([inp_batch_size] + list(test_out.shape)[1:])
-                del test_out
+                del test_inp, test_out
 
             num_batches = int(np.ceil(inp_batch_size / batch_size))
             if num_batches == 1:  # Predict everything in one step
