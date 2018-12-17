@@ -15,7 +15,7 @@ torchvsion.transforms, but there are two key differences:
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
-from typing import Sequence, Tuple, Optional, Dict, Any, Callable
+from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
 
 import numpy as np
 import skimage.exposure
@@ -91,10 +91,28 @@ class Lambda:
 
 
 class Normalize:
-    """Normalizes inputs with supplied per-channel means and stds."""
-    def __init__(self, mean: Sequence[float], std: Sequence[float]):
+    """Normalizes inputs with supplied per-channel means and stds.
+
+    Args:
+        mean: Global mean value(s) of the inputs. Can either be a sequence
+            of float values where each value corresponds to a channel
+            or a single float value (only for single-channel data).
+        std: Global standard deviation value(s) of the inputs. Can either
+            be a sequence of float values where each value corresponds to a
+            channel or a single float value (only for single-channel data).
+    """
+    def __init__(
+            self,
+            mean: Union[Sequence[float], float],
+            std: Union[Sequence[float], float]
+    ):
         self.mean = np.array(mean)
         self.std = np.array(std)
+        # Unsqueeze first dimensions if mean and scalar are passed as scalars
+        if self.mean.ndim == 0:
+            self.mean = self.mean[None]
+        if self.std.ndim == 0:
+            self.std = self.std[None]
 
     def __call__(
             self,
