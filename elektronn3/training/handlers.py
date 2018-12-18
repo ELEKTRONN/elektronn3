@@ -93,15 +93,16 @@ def _tb_log_preview(
         group: str = 'preview'
 ) -> None:
     """Preview from constant region of preview batch data."""
-    inp_batch = trainer.preview_batch.numpy()
+    inp_batch = trainer.preview_batch
     # TODO: Replace this with elektronn3.inference.Predictor usage
     out_batch = trainer._preview_inference(
         inp=inp_batch,
         tile_shape=trainer.preview_tile_shape,
         overlap_shape=trainer.preview_overlap_shape
     )
+    inp_batch = inp_batch.numpy()
     if trainer.apply_softmax_for_prediction:
-        out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
+        out_batch = F.softmax(out_batch, 1).numpy()
 
     if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them
         # See comments in the 5D section in _tb_log_sample_images

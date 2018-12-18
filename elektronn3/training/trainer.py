@@ -587,10 +587,7 @@ class Trainer:
             out_shape=out_shape,
             apply_softmax=self.apply_softmax_for_prediction,
         )
-        out_np = predictor.predict_proba(
-            inp=inp,
-        )
-        out = torch.as_tensor(out_np)
+        out = predictor.predict_proba(inp)
         return out
 
 

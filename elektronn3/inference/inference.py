@@ -23,14 +23,14 @@ def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
 
 
 def tiled_apply(
-        func: Callable[[np.ndarray], np.ndarray],
+        func: Callable[[torch.Tensor], torch.Tensor],
         inp: Union[np.ndarray, torch.Tensor],
         tile_shape: Sequence[int],
         overlap_shape: Sequence[int],
         out_shape: Sequence[int],
         final_crop_enabled: bool = True,
         verbose: bool = False
-) -> np.ndarray:
+) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
 
     Each tile of the output results from applying a callable ``func`` on an
@@ -48,7 +48,7 @@ def tiled_apply(
 
     Although this function is mainly intended for the purpose of neural network
     inference, ``func`` doesn't have to be a neural network but can be
-    any ``Callable[[np.ndarray], np.ndarray]`` that operates on n-dimensional
+    any ``Callable[[torch.Tensor], torch.Tensor]`` that operates on n-dimensional
     image data of shape (N, C, ...) and preserves spatial shape.
     ("..." is a placeholder for the spatial dimensions, so for example
     H(eight) and W(idth).)
@@ -74,17 +74,16 @@ def tiled_apply(
             cropping itself.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
-
+Tensor
     Returns:
-        Output tensor, as a numpy array of the same shape as the input tensor.
+        Output tensor, as a torch tensor of the same shape as the input tensor.
     """
-    if isinstance(inp, torch.Tensor):
-        inp = inp.cpu().numpy()
-    if not (inp.ndim - 2 == len(tile_shape) == len(overlap_shape)):
+    inp = torch.as_tensor(inp)
+    if not (inp.dim() - 2 == len(tile_shape) == len(overlap_shape)):
         raise ValueError(
             f'tile shape (ndim={len(tile_shape)}) and overlap shape '
             f'(ndim={len(overlap_shape)}) don\'t match input shape '
-            f'(ndim={inp.ndim}.'
+            f'(ndim={inp.dim()}.'
         )
     if not np.all(np.mod(inp.shape[2:], tile_shape) == 0):
         raise ValueError(
@@ -99,20 +98,19 @@ def tiled_apply(
             return x
 
     inp_shape = np.array(inp.shape)
-    # Debug: Elements in the final output that remain at NaN mark unchanged regions,
-    #  so if you reproducibly encounter NaN values, there's probably a bug here.
-    out = np.zeros(out_shape, dtype=inp.dtype) * np.nan  # TODO: Remove nan multiplication?
+    out = torch.empty(out_shape, dtype=inp.dtype)
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap = np.array(overlap_shape)
 
+    # TODO: The comment below needs to be re-evaluated because we're now using torch instead of numpy
     # Create padded input with overlap
     # np.pad() was used here previously, but it's been replaced due to
     #  performance issues. We should give it a try again though, because maybe
     #  it was just a temporary bug (TODO). Possibly related:
     #  https://github.com/numpy/numpy/issues/11126
     padded_shape = inp_shape + np.array((0, 0, *overlap * 2))
-    inp_padded = np.zeros(padded_shape, dtype=inp.dtype)
+    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
 
     padslice = _extend_nc([slice(l, h) for l, h in zip(overlap, padded_shape[2:] - overlap)])
     inp_padded[padslice] = inp
@@ -295,12 +293,7 @@ class Predictor:
             self.model.half()  # This is destructive. float32 params are lost!
         self.model.eval()
 
-    def _predict(self, inp: torch.Tensor) -> np.ndarray:
-        if self.float16:
-            inp = torch.as_tensor(inp, dtype=torch.float16)
-        else:
-            inp = torch.as_tensor(inp, dtype=torch.float32)
-        # inp.pin_memory()  # Disabled due to method call overhead. TODO: Try re-enabling after other optimizations
+    def _predict(self, inp: torch.Tensor) -> torch.Tensor:
         inp = inp.to(self.device)
         with torch.no_grad():
             out = self.model(inp)
@@ -309,10 +302,10 @@ class Predictor:
                 slice(l, h)
                 for l, h in zip(self.overlap_shape, self.overlap_shape + self.tile_shape)
             ])
-            out = out[crop_slice].cpu().numpy()
+            out = out[crop_slice].cpu()
         return out
 
-    def _tiled_predict(self, inp: np.ndarray) -> np.ndarray:
+    def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
         """ Tiled inference with overlapping input tiles."""
         return tiled_apply(
             self._predict,
@@ -328,7 +321,7 @@ class Predictor:
             self,
             inp: torch.Tensor,
             num_batches: int,
-    ) -> np.ndarray:
+    ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
         out = np.empty(self.out_shape, dtype=np.float32)
@@ -358,11 +351,12 @@ class Predictor:
         #       and then calculate out_shape internally from it?
         if self.verbose:
             start = time.time()
-
-        if isinstance(inp, torch.Tensor):
-            # It's often easier to operate on numpy arrays, so we keep it in
-            #  numpy and cast to torch tensors only when necessary.
-            inp = inp.cpu().numpy()
+        if self.float16:
+            inp = torch.as_tensor(inp, dtype=torch.float16)
+        else:
+            inp = torch.as_tensor(inp, dtype=torch.float32)
+        inp.requires_grad_(False)
+        # inp.pin_memory()
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         if self.tile_shape is None:
@@ -379,7 +373,7 @@ class Predictor:
 
         if self.verbose:
             dtime = time.time() - start
-            speed = inp.size / dtime / 1e6
+            speed = inp.numel() / dtime / 1e6
             print(f'Inference speed: {speed:.2f} MPix/s, time: {dtime:.2f}.')
         return out
 
