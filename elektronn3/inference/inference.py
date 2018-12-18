@@ -11,7 +11,7 @@ from typing import Optional, Tuple, Union, Callable, Sequence
 
 import numpy as np
 import torch
-import torch.nn as nn
+from torch import nn
 from tqdm import tqdm
 
 
@@ -25,9 +25,10 @@ def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
 def tiled_apply(
         func: Callable[[np.ndarray], np.ndarray],
         inp: Union[np.ndarray, torch.Tensor],
-        tile_shape: Tuple[int, ...],
-        overlap_shape: Tuple[int, ...],
-        out_shape: Tuple[int, ...],
+        tile_shape: Sequence[int],
+        overlap_shape: Sequence[int],
+        out_shape: Sequence[int],
+        final_crop_enabled: bool = True,
         verbose: bool = False
 ) -> np.ndarray:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -68,6 +69,9 @@ def tiled_apply(
             Note: ``func(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
+        final_crop_enabled: If ``True``, crop the output to not include the
+            overlap regions. If ``False``, ``func`` has is expected to handle
+            cropping itself.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
 
@@ -114,11 +118,12 @@ def tiled_apply(
     inp_padded[padslice] = inp
     del inp
 
-    crop_low_corner = overlap.copy()
-    crop_high_corner = tile_shape + overlap
-    # Used to crop the network output tile to the relevant, unpadded region
-    #  that will be written to the final output
-    final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
+    if final_crop_enabled:
+        crop_low_corner = overlap.copy()
+        crop_high_corner = tile_shape + overlap
+        # Used to crop the output tile to the relevant, unpadded region
+        #  that will be written to the final output
+        final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
 
     tiles = np.ceil(out_shape[2:] / tile_shape).astype(int)
     num_tiles = np.prod(tiles)
@@ -150,10 +155,11 @@ def tiled_apply(
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
         inp_tile = inp_padded[inp_slice]
-        out_tile_with_overlap = func(inp_tile)
+        out_tile = func(inp_tile)
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
-        out_tile = out_tile_with_overlap[final_crop_slice]
+        if final_crop_enabled:
+            out_tile = out_tile[final_crop_slice]
         out[out_slice] = out_tile
     return out
 
@@ -208,10 +214,6 @@ class Predictor:
             Note: ``model(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
-            ``out_shape`` will be inferred if it is ``None``.
-            Warning: Automatically inferring ``out_shape`` has a significant
-            performance impact and can even raise OOM errors, so make
-            sure to manually set it for every non-trivial inference problem!
             If you know how many channels your model output has
             (``num_classes``, ``num_out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
@@ -251,7 +253,11 @@ class Predictor:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
         self.batch_size = batch_size
+        if tile_shape is not None:
+            tile_shape = np.array(tile_shape)
         self.tile_shape = tile_shape
+        if overlap_shape is not None:
+            overlap_shape = np.array(overlap_shape)
         self.overlap_shape = overlap_shape
         self.out_shape = out_shape
         self.float16 = float16
@@ -294,49 +300,42 @@ class Predictor:
             inp = torch.as_tensor(inp, dtype=torch.float16)
         else:
             inp = torch.as_tensor(inp, dtype=torch.float32)
-        inp.pin_memory()
+        # inp.pin_memory()  # Disabled due to method call overhead. TODO: Try re-enabling after other optimizations
         inp = inp.to(self.device)
-        out = self.model(inp)
-        # TODO: Crop output to relevant region! This is extremely important to make the transfer to CPU faster.
-        out = out.cpu().numpy()
+        with torch.no_grad():
+            out = self.model(inp)
+            # Crop away the overlap to reduce expensive device-to-host transfers
+            crop_slice = _extend_nc([
+                slice(l, h)
+                for l, h in zip(self.overlap_shape, self.overlap_shape + self.tile_shape)
+            ])
+            out = out[crop_slice].cpu().numpy()
         return out
 
-    def _tiled_predict(
-            self,
-            inp: np.ndarray,
-            tile_shape: Tuple[int, ...],
-            overlap_shape: Tuple[int, ...],
-            out_shape: Tuple[int, ...],
-            verbose: bool = False
-    ) -> np.ndarray:
+    def _tiled_predict(self, inp: np.ndarray) -> np.ndarray:
         """ Tiled inference with overlapping input tiles."""
         return tiled_apply(
             self._predict,
-            inp=inp, tile_shape=tile_shape, overlap_shape=overlap_shape,
-            out_shape=out_shape, verbose=verbose
+            inp=inp,
+            tile_shape=self.tile_shape,
+            overlap_shape=self.overlap_shape,
+            out_shape=self.out_shape,
+            final_crop_enabled=False,  # See crop in self._predict()
+            verbose=self.verbose
         )
 
     def _splitbatch_predict(
             self,
             inp: torch.Tensor,
             num_batches: int,
-            batch_size: int,
-            tile_shape: Tuple[int, ...],
-            overlap_shape: Tuple[int, ...],
-            out_shape: Tuple[int, ...],
-            verbose: bool = False
     ) -> np.ndarray:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
-        out = np.empty(out_shape, dtype=np.float32)
+        out = np.empty(self.out_shape, dtype=np.float32)
         for k in range(0, num_batches):
-            low = batch_size * k
-            high = batch_size * (k + 1)
-            out[low:high] = self._tiled_predict(
-                inp[low:high], tile_shape=tile_shape,
-                overlap_shape=overlap_shape, out_shape=out_shape,
-                verbose=verbose
-            )
+            low = self.batch_size * k
+            high = self.batch_size * (k + 1)
+            out[low:high] = self._tiled_predict(inp[low:high])
         return out
 
     def predict_proba(
@@ -367,39 +366,16 @@ class Predictor:
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         if self.tile_shape is None:
-            tile_shape = spatial_shape
+            self.tile_shape = spatial_shape
         if self.overlap_shape is None:
-            overlap_shape = np.zeros(len(spatial_shape), dtype=np.int)
+            self.overlap_shape = np.zeros(len(spatial_shape), dtype=np.int)
         if self.batch_size is None:
-            batch_size = inp_batch_size
-        with torch.no_grad():
-            if self.out_shape is None:
-                # Test inference to figure out shapes
-                # TODO: out_shape is unnecessary iff num_batches == 1 AND no tiling is used.
-                if self.float16:
-                    test_inp = torch.as_tensor(inp, dtype=torch.float16, device=self.device)
-                else:
-                    test_inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
-                # TODO (high priority): This can cause OOM with large inputs/models!
-                #  Therefore it's not a reliable way of inferring out_shape.
-                test_out = self.model(test_inp[:1].to(self.device))
-                # Assuming that all inputs have the same shapes
-                self.out_shape = tuple([inp_batch_size] + list(test_out.shape)[1:])
-                del test_inp, test_out
-
-            num_batches = int(np.ceil(inp_batch_size / self.batch_size))
-            if num_batches == 1:  # Predict everything in one step
-                out = self._tiled_predict(
-                    inp=inp, tile_shape=self.tile_shape,
-                    overlap_shape=self.overlap_shape,
-                    out_shape=self.out_shape, verbose=self.verbose
-                )
-            else:  # Split input batch into smaller batches and predict separately
-                out = self._splitbatch_predict(
-                    inp=inp, num_batches=num_batches, batch_size=self.batch_size,
-                    tile_shape=self.tile_shape, overlap_shape=self.overlap_shape,
-                    out_shape=self.out_shape, verbose=self.verbose
-                )
+            self.batch_size = inp_batch_size
+        num_batches = int(np.ceil(inp_batch_size / self.batch_size))
+        if num_batches == 1:  # Predict everything in one step
+            out = self._tiled_predict(inp=inp)
+        else:  # Split input batch into smaller batches and predict separately
+            out = self._splitbatch_predict(inp=inp, num_batches=num_batches)
 
         if self.verbose:
             dtime = time.time() - start
