@@ -291,10 +291,13 @@ class Predictor:
 
     def _predict(self, inp: torch.Tensor) -> np.ndarray:
         if self.float16:
-            inp = torch.as_tensor(inp, dtype=torch.float16, device=self.device)
+            inp = torch.as_tensor(inp, dtype=torch.float16)
         else:
-            inp = torch.as_tensor(inp, dtype=torch.float32, device=self.device)
+            inp = torch.as_tensor(inp, dtype=torch.float32)
+        inp.pin_memory()
+        inp = inp.to(self.device)
         out = self.model(inp)
+        # TODO: Crop output to relevant region! This is extremely important to make the transfer to CPU faster.
         out = out.cpu().numpy()
         return out
 
