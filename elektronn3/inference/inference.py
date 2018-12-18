@@ -182,11 +182,49 @@ class Predictor:
             a string like ``'cpu'``, ``'cuda:0'`` etc.
             If not specified (``None``), available GPUs are automatically used;
             the CPU is used as a fallback if no GPUs can be found.
+        batch_size: Maximum batch size with which to perform
+            inference. In general, a higher ``batch_size`` will give you
+            higher prediction speed, but prediction will consume more
+            GPU memory. Reduce the ``batch_size`` if you run out of memory.
+            If this is ``None`` (default), the input batch size is used
+            as the prediction batch size.
+        tile_shape: Spatial shape of the output tiles to use for inference.
+            The spatial shape of the input tensors has to be divisible by
+            the ``tile_shape``.
+        overlap_shape: Spatial shape of the overlap by which input tiles are
+            extended w.r.t. the ``tile_shape`` of the resulting output tiles.
+            The ``overlap_shape`` should be close to the effective receptive
+            field of the network architecture that's used for inference.
+            Note that ``tile_shape + 2 * overlap`` needs to be a valid
+            input shape for the inference network architecture, so
+            depending on your network architecture (especially pooling layers
+            and strides), you might need to adjust your ``overlap_shape``.
+            If your inference fails due to shape issues, as a rule of thumb,
+            try adjusting your ``overlap_shape`` so that
+            ``tile_shape + 2 * overlap`` is divisible by 16 or 32.
+        out_shape: Expected shape of the output tensor
+            It doesn't just refer to spatial shape, but to the actual tensor
+            shape including N and C dimensions.
+            Note: ``model(inp)`` is never actually executed – ``out_shape`` is
+            merely used to pre-allocate the output tensor so it can be filled
+            later.
+            ``out_shape`` will be inferred if it is ``None``.
+            Warning: Automatically inferring ``out_shape`` has a significant
+            performance impact and can even raise OOM errors, so make
+            sure to manually set it for every non-trivial inference problem!
+            If you know how many channels your model output has
+            (``num_classes``, ``num_out_channels``) and if your model
+            preserves spatial shape, you can easily calculate ``out_shape``
+            yourself as follows:
+            >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
+            >>> out_shape = (inp.shape[0], num_out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        verbose: If ``True``, report inference speed.
+
     Examples:
         >>> cnn = nn.Sequential(
         ...     nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
@@ -201,18 +239,28 @@ class Predictor:
             model: Union[nn.Module, str],
             state_dict_src: Optional[Union[str, dict]] = None,
             device: Optional[Union[torch.device, str]] = None,
+            batch_size: Optional[int] = None,
+            tile_shape: Optional[Tuple[int, ...]] = None,
+            overlap_shape: Optional[Tuple[int, ...]] = None,
+            out_shape: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
-            apply_softmax: bool = True
+            apply_softmax: bool = True,
+            verbose: bool = False,
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
+        self.batch_size = batch_size
+        self.tile_shape = tile_shape
+        self.overlap_shape = overlap_shape
+        self.out_shape = out_shape
         self.float16 = float16
         if float16 and not isinstance(model, str):
             raise NotImplementedError(
                 'float16 inference is currently only supported for models '
                 'that are passed as file paths (strings).'
             )
+        self.verbose = verbose
         if isinstance(model, str):
             if os.path.isfile(model):
                 # TODO: Find a better way to find out beforehand if it's a TorchScript module.
@@ -291,11 +339,6 @@ class Predictor:
     def predict_proba(
             self,
             inp: Union[np.ndarray, torch.Tensor],
-            batch_size: Optional[int] = None,
-            tile_shape: Optional[Tuple[int, ...]] = None,
-            overlap_shape: Optional[Tuple[int, ...]] = None,
-            verbose: bool = False,
-            out_shape: Optional[Tuple[int, ...]] = None,
     ):
         """ Predict class probabilites of an input tensor.
 
@@ -305,50 +348,13 @@ class Predictor:
                 Note that ``inp`` is automatically converted to
                 the specified ``dtype`` (default: ``torch.float32``) before
                 inference.
-            batch_size: Maximum batch size with which to perform
-                inference. In general, a higher ``batch_size`` will give you
-                higher prediction speed, but prediction will consume more
-                GPU memory. Reduce the ``batch_size`` if you run out of memory.
-                If this is ``None`` (default), the input batch size is used
-                as the prediction batch size.
-            tile_shape: Spatial shape of the output tiles to use for inference.
-                The spatial shape of the ``inp`` tensor has to be divisible by
-                the ``tile_shape``.
-            overlap_shape: Spatial shape of the overlap by which input tiles are
-                extended w.r.t. the ``tile_shape`` of the resulting output tiles.
-                The ``overlap_shape`` should be close to the effective receptive
-                field of the network architecture that's used for inference.
-                Note that ``tile_shape + 2 * overlap`` needs to be a valid
-                input shape for the inference network architecture, so
-                depending on your network architecture (especially pooling layers
-                and strides), you might need to adjust your ``overlap_shape``.
-                If your inference fails due to shape issues, as a rule of thumb,
-                try adjusting your ``overlap_shape`` so that
-                ``tile_shape + 2 * overlap`` is divisible by 16 or 32.
-            verbose: If ``True``, report inference speed.
-            out_shape: Expected shape of the output tensor that would result from
-                applying ``func`` to ``inp`` (``func(inp).shape``).
-                It doesn't just refer to spatial shape, but to the actual tensor
-                shape including N and C dimensions.
-                Note: ``func(inp)`` is never actually executed – ``out_shape`` is
-                merely used to pre-allocate the output tensor so it can be filled
-                later.
-                ``out_shape`` will be inferred if it is ``None``.
-                Warning: Automatically inferring ``out_shape`` has a significant
-                performance impact and can even raise OOM errors, so make
-                sure to manually set it for every non-trivial inference problem!
-                If you know how many classes your model predicts
-                (``num_classes``) and if your model preserves spatial shape,
-                you can easily calculate ``out_shape`` yourself as follows:
-                >>> num_classes: int = ?  # E.g. for binary classification it's 2
-                >>> out_shape = (inp.shape[0], num_classes, *inp.shape[2:])
 
         Returns:
             Model output
         """
         # TODO: Maybe change signature to not require out_shape but num_classes
         #       and then calculate out_shape internally from it?
-        if verbose:
+        if self.verbose:
             start = time.time()
 
         if isinstance(inp, torch.Tensor):
@@ -357,14 +363,14 @@ class Predictor:
             inp = inp.cpu().numpy()
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
-        if tile_shape is None:
+        if self.tile_shape is None:
             tile_shape = spatial_shape
-        if overlap_shape is None:
+        if self.overlap_shape is None:
             overlap_shape = np.zeros(len(spatial_shape), dtype=np.int)
-        if batch_size is None:
+        if self.batch_size is None:
             batch_size = inp_batch_size
         with torch.no_grad():
-            if out_shape is None:
+            if self.out_shape is None:
                 # Test inference to figure out shapes
                 # TODO: out_shape is unnecessary iff num_batches == 1 AND no tiling is used.
                 if self.float16:
@@ -374,23 +380,25 @@ class Predictor:
                 # TODO (high priority): This can cause OOM with large inputs/models!
                 #  Therefore it's not a reliable way of inferring out_shape.
                 test_out = self.model(test_inp[:1].to(self.device))
-                out_shape = tuple([inp_batch_size] + list(test_out.shape)[1:])
+                # Assuming that all inputs have the same shapes
+                self.out_shape = tuple([inp_batch_size] + list(test_out.shape)[1:])
                 del test_inp, test_out
 
-            num_batches = int(np.ceil(inp_batch_size / batch_size))
+            num_batches = int(np.ceil(inp_batch_size / self.batch_size))
             if num_batches == 1:  # Predict everything in one step
                 out = self._tiled_predict(
-                    inp=inp, tile_shape=tile_shape,
-                    overlap_shape=overlap_shape, out_shape=out_shape, verbose=verbose
+                    inp=inp, tile_shape=self.tile_shape,
+                    overlap_shape=self.overlap_shape,
+                    out_shape=self.out_shape, verbose=self.verbose
                 )
             else:  # Split input batch into smaller batches and predict separately
                 out = self._splitbatch_predict(
-                    inp=inp, num_batches=num_batches, batch_size=batch_size,
-                    tile_shape=tile_shape, overlap_shape=overlap_shape,
-                    out_shape=out_shape, verbose=verbose
+                    inp=inp, num_batches=num_batches, batch_size=self.batch_size,
+                    tile_shape=self.tile_shape, overlap_shape=self.overlap_shape,
+                    out_shape=self.out_shape, verbose=self.verbose
                 )
 
-        if verbose:
+        if self.verbose:
             dtime = time.time() - start
             speed = inp.size / dtime / 1e6
             print(f'Inference speed: {speed:.2f} MPix/s, time: {dtime:.2f}.')

@@ -576,19 +576,19 @@ class Trainer:
             overlap_shape: Optional[Tuple[int, ...]] = None,
             verbose: bool = True,
     ) -> torch.Tensor:
+        out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
         predictor = Predictor(
             model=self.model,
             device=self.device,
-            apply_softmax=self.apply_softmax_for_prediction,
-        )
-        out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
-        out_np = predictor.predict_proba(
-            inp=inp,
             batch_size=1,
             tile_shape=tile_shape,
             overlap_shape=overlap_shape,
             verbose=verbose,
-            out_shape=out_shape
+            out_shape=out_shape,
+            apply_softmax=self.apply_softmax_for_prediction,
+        )
+        out_np = predictor.predict_proba(
+            inp=inp,
         )
         out = torch.as_tensor(out_np)
         return out
