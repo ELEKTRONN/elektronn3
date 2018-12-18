@@ -153,7 +153,7 @@ Tensor
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
         inp_tile = inp_padded[inp_slice]
-        out_tile = func(inp_tile)
+        out_tile = func(inp_tile).to(torch.float32)
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         if final_crop_enabled:
@@ -294,6 +294,8 @@ class Predictor:
         self.model.eval()
 
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
+        if self.float16:
+            inp = inp.to(torch.float16)
         inp = inp.to(self.device)
         with torch.no_grad():
             out = self.model(inp)
@@ -324,7 +326,7 @@ class Predictor:
     ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
-        out = np.empty(self.out_shape, dtype=np.float32)
+        out = torch.empty(tuple(self.out_shape), dtype=np.float32)
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
@@ -351,10 +353,11 @@ class Predictor:
         #       and then calculate out_shape internally from it?
         if self.verbose:
             start = time.time()
-        if self.float16:
-            inp = torch.as_tensor(inp, dtype=torch.float16)
-        else:
-            inp = torch.as_tensor(inp, dtype=torch.float32)
+        # Unfortunately we need to force inputs to be float32 because PyTorch
+        #  lacks support for even the most basic operations on float16 tensors
+        #  on CPU. If float16-mode is enabled, inputs are down-cast to float16
+        #  just in time for inference in self._predict()
+        inp = torch.as_tensor(inp, dtype=torch.float32)
         inp.requires_grad_(False)
         # inp.pin_memory()
         inp_batch_size = inp.shape[0]
