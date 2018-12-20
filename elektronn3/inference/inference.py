@@ -24,7 +24,7 @@ def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
 
 def tiled_apply(
         func: Callable[[torch.Tensor], torch.Tensor],
-        inp: Union[np.ndarray, torch.Tensor],
+        inp: torch.Tensor,
         tile_shape: Sequence[int],
         overlap_shape: Sequence[int],
         out_shape: Sequence[int],
@@ -45,6 +45,9 @@ def tiled_apply(
 
     This function assumes that ``inp.shape[2:] == func(inp).shape[2:]``,
     i.e. that the function keeps the spatial shape unchanged.
+
+    It can run on GPU or CPU transparently, depending on the device that
+    ``inp`` is allocated on.
 
     Although this function is mainly intended for the purpose of neural network
     inference, ``func`` doesn't have to be a neural network but can be
@@ -78,7 +81,6 @@ Tensor
     Returns:
         Output tensor, as a torch tensor of the same shape as the input tensor.
     """
-    inp = torch.as_tensor(inp)
     if not (inp.dim() - 2 == len(tile_shape) == len(overlap_shape)):
         raise ValueError(
             f'tile shape (ndim={len(tile_shape)}) and overlap shape '
@@ -98,7 +100,7 @@ Tensor
             return x
 
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=inp.dtype)
+    out = torch.empty(out_shape, dtype=inp.dtype, device=inp.device)
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap = np.array(overlap_shape)
@@ -110,7 +112,7 @@ Tensor
     #  it was just a temporary bug (TODO). Possibly related:
     #  https://github.com/numpy/numpy/issues/11126
     padded_shape = inp_shape + np.array((0, 0, *overlap * 2))
-    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
+    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype, device=inp.device)
 
     padslice = _extend_nc([slice(l, h) for l, h in zip(overlap, padded_shape[2:] - overlap)])
     inp_padded[padslice] = inp
@@ -153,12 +155,13 @@ Tensor
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
         inp_tile = inp_padded[inp_slice]
-        out_tile = func(inp_tile).to(torch.float32)
+        out_tile = func(inp_tile)
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         if final_crop_enabled:
             out_tile = out_tile[final_crop_slice]
         out[out_slice] = out_tile
+
     return out
 
 
@@ -264,6 +267,7 @@ class Predictor:
                 'float16 inference is currently only supported for models '
                 'that are passed as file paths (strings).'
             )
+        self.dtype = torch.float16 if float16 else torch.float32
         self.verbose = verbose
         if isinstance(model, str):
             if os.path.isfile(model):
@@ -291,21 +295,19 @@ class Predictor:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
+        self.crop_slice = _extend_nc([
+            slice(l, h)
+            for l, h in zip(self.overlap_shape, self.overlap_shape + self.tile_shape)
+        ])
         self.model.eval()
 
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
-        if self.float16:
-            inp = inp.to(torch.float16)
         inp = inp.to(self.device)
         with torch.no_grad():
             out = self.model(inp)
-            # Crop away the overlap to reduce expensive device-to-host transfers
-            crop_slice = _extend_nc([
-                slice(l, h)
-                for l, h in zip(self.overlap_shape, self.overlap_shape + self.tile_shape)
-            ])
-            out = out[crop_slice].cpu()
-        return out
+            # Crop away the overlap to reduce expensive device-to-host transfers # TODO: Obsolete?
+            out_crop = out[self.crop_slice]
+        return out_crop
 
     def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
         """ Tiled inference with overlapping input tiles."""
@@ -353,13 +355,10 @@ class Predictor:
         #       and then calculate out_shape internally from it?
         if self.verbose:
             start = time.time()
-        # Unfortunately we need to force inputs to be float32 because PyTorch
-        #  lacks support for even the most basic operations on float16 tensors
-        #  on CPU. If float16-mode is enabled, inputs are down-cast to float16
-        #  just in time for inference in self._predict()
-        inp = torch.as_tensor(inp, dtype=torch.float32)
+        inp = torch.as_tensor(inp, dtype=self.dtype)
+        inp.pin_memory()
+        inp = inp.to(self.device, non_blocking=True)
         inp.requires_grad_(False)
-        # inp.pin_memory()
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         if self.tile_shape is None:
@@ -374,10 +373,15 @@ class Predictor:
         else:  # Split input batch into smaller batches and predict separately
             out = self._splitbatch_predict(inp=inp, num_batches=num_batches)
 
+        # Explicit synchronization so the next GPU operation won't be
+        #  mysteriously slow. If we don't synchronize manually here, profilers
+        #  will misleadingly report a huge amount of time spent in out.cpu()
+        torch.cuda.synchronize()
+        out = out.cpu()
         if self.verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
-            print(f'Inference speed: {speed:.2f} MPix/s, time: {dtime:.2f}.')
+            print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
 
 
