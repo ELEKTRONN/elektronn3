@@ -72,9 +72,6 @@ def tiled_apply(
             Note: ``func(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
-        final_crop_enabled: If ``True``, crop the output to not include the
-            overlap regions. If ``False``, ``func`` has is expected to handle
-            cropping itself.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
 Tensor
@@ -105,12 +102,7 @@ Tensor
     tile_shape = np.array(tile_shape)
     overlap = np.array(overlap_shape)
 
-    # TODO: The comment below needs to be re-evaluated because we're now using torch instead of numpy
     # Create padded input with overlap
-    # np.pad() was used here previously, but it's been replaced due to
-    #  performance issues. We should give it a try again though, because maybe
-    #  it was just a temporary bug (TODO). Possibly related:
-    #  https://github.com/numpy/numpy/issues/11126
     padded_shape = inp_shape + np.array((0, 0, *overlap * 2))
     inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype, device=inp.device)
 
@@ -118,12 +110,11 @@ Tensor
     inp_padded[padslice] = inp
     del inp
 
-    if final_crop_enabled:
-        crop_low_corner = overlap.copy()
-        crop_high_corner = tile_shape + overlap
-        # Used to crop the output tile to the relevant, unpadded region
-        #  that will be written to the final output
-        final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
+    crop_low_corner = overlap.copy()
+    crop_high_corner = tile_shape + overlap
+    # Used to crop the output tile to the relevant, unpadded region
+    #  that will be written to the final output
+    final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
 
     tiles = np.ceil(out_shape[2:] / tile_shape).astype(int)
     num_tiles = np.prod(tiles)
@@ -158,8 +149,7 @@ Tensor
         out_tile = func(inp_tile)
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
-        if final_crop_enabled:
-            out_tile = out_tile[final_crop_slice]
+        out_tile = out_tile[final_crop_slice]
         out[out_slice] = out_tile
 
     return out
@@ -295,19 +285,14 @@ class Predictor:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
-        self.crop_slice = _extend_nc([
-            slice(l, h)
-            for l, h in zip(self.overlap_shape, self.overlap_shape + self.tile_shape)
-        ])
         self.model.eval()
 
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
-        inp = inp.to(self.device)
         with torch.no_grad():
-            out = self.model(inp)
-            # Crop away the overlap to reduce expensive device-to-host transfers # TODO: Obsolete?
-            out_crop = out[self.crop_slice]
-        return out_crop
+            # TODO: Why do we need to wrap this in torch.no_grad() although
+            #  inp.requires_grad = False? Without torch.no_grad(), memory
+            #  usage explodes.
+            return self.model(inp)
 
     def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
         """ Tiled inference with overlapping input tiles."""
@@ -358,7 +343,6 @@ class Predictor:
         inp = torch.as_tensor(inp, dtype=self.dtype)
         inp.pin_memory()
         inp = inp.to(self.device, non_blocking=True)
-        inp.requires_grad_(False)
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         if self.tile_shape is None:
