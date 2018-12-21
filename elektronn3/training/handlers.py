@@ -104,6 +104,28 @@ def _tb_log_preview(
     if trainer.apply_softmax_for_prediction:
         out_batch = F.softmax(out_batch, 1).numpy()
 
+    batch2img = _get_batch2img_function(out_batch, z_plane)
+
+    inp_sh = np.array(inp_batch.shape[2:])
+    out_sh = np.array(out_batch.shape[2:])
+    # TODO: This does not fire yet, because out_batch is always of the same
+    #       spatial shape as the input if it comes out of
+    #       elektronn3.inference.Predictor...
+    #       We probably need to move the padding code to the Predictor itself.
+    if out_batch.shape[2:] != inp_batch.shape[2:]:
+        # Zero-pad output and target to match input shape
+        # Create a central slice with the size of the output
+        lo = (inp_sh - out_sh) // 2
+        hi = inp_sh - lo
+        slc = tuple([slice(None)] * 2 + [slice(l, h) for l, h in zip(lo, hi)])
+
+        padded_out_batch = np.zeros(
+            (inp_batch.shape[0], out_batch.shape[1], *inp_batch.shape[2:]),
+            dtype=out_batch.dtype
+        )
+        padded_out_batch[slc] = out_batch
+        out_batch = padded_out_batch
+
     if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them
         # See comments in the 5D section in _tb_log_sample_images
         inp_video = squash01(inp_batch)
@@ -116,9 +138,6 @@ def _tb_log_preview(
                 squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
                 global_step=trainer.step
             )
-
-
-    batch2img = _get_batch2img_function(out_batch, z_plane)
 
     out_slice = batch2img(out_batch)
     pred_slice = out_slice.argmax(0)
@@ -186,6 +205,29 @@ def _tb_log_sample_images(
         #  outputs, so if we want to use the same batch2img function for
         #  targets, we have to add an empty channel axis to it after the N dimension
         target_batch = target_batch[:, None]
+
+    inp_sh = np.array(inp_batch.shape[2:])
+    out_sh = np.array(out_batch.shape[2:])
+    if out_batch.shape[2:] != inp_batch.shape[2:]:
+        # Zero-pad output and target to match input shape
+        # Create a central slice with the size of the output
+        lo = (inp_sh - out_sh) // 2
+        hi = inp_sh - lo
+        slc = tuple([slice(None)] * 2 + [slice(l, h) for l, h in zip(lo, hi)])
+
+        padded_out_batch = np.zeros(
+            (inp_batch.shape[0], out_batch.shape[1], *inp_batch.shape[2:]),
+            dtype=out_batch.dtype
+        )
+        padded_out_batch[slc] = out_batch
+        out_batch = padded_out_batch
+
+        # Assume that target has the same shape as the output and pad it, too
+        padded_target_batch = np.zeros(inp_batch.shape, dtype=target_batch.dtype)
+        padded_target_batch[slc] = target_batch
+        target_batch = padded_target_batch
+
+
 
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
