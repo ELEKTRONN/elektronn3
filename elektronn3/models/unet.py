@@ -215,6 +215,30 @@ class DownConv(nn.Module):
         return x, before_pool
 
 
+@torch.jit.script
+def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> torch.Tensor:
+    if from_down.shape[2:] != from_up.shape[2:]:
+        # If VALID convolutions are used (not SAME), we need to center-crop to
+        #  make features combinable.
+        ds = from_down.shape[2:]
+        us = from_up.shape[2:]
+        if from_down.dim() == 4:
+            from_down = from_down[
+                :,
+                :,
+                ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
+                ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2)
+            ]
+        elif from_down.dim() == 5:
+            from_down = from_down[
+                :,
+                :,
+                ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
+                ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2),
+                ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
+            ]
+    return from_down
+
 class UpConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 UpConvolution.
@@ -264,26 +288,7 @@ class UpConv(nn.Module):
             from_up: upconv'd tensor from the decoder pathway
         """
         from_up = self.upconv(from_up)
-        if from_down.shape[2:] != from_up.shape[2:]:
-            # If VALID convolutions are used (not SAME), we need to center-crop to
-            #  make features combinable.
-            ds = from_down.shape[2:]
-            us = from_up.shape[2:]
-            if from_down.dim() == 4:
-                from_down = from_down[
-                    :,
-                    :,
-                    ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
-                    ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2)
-                ]
-            elif from_down.dim() == 5:
-                from_down = from_down[
-                    :,
-                    :,
-                    ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
-                    ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2),
-                    ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
-                ]
+        from_down = autocrop(from_down, from_up)
         if self.up_mode == 'transpose':
             # Only for transposed convolution.
             # (In case of bilinear upsampling we omit activation)
