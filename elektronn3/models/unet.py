@@ -176,16 +176,21 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 batch_norm=False, dim=3):
+                 batch_norm=False, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
         self.batch_norm = batch_norm
+        padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = _conv3(self.in_channels, self.out_channels, planar=planar, dim=dim)
-        self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar, dim=dim)
+        self.conv1 = _conv3(
+            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+        )
+        self.conv2 = _conv3(
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+        )
 
         if self.pooling:
             kernel_size = 2
@@ -217,7 +222,7 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', batch_norm=False, dim=3):
+                 activation='relu', batch_norm=False, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
@@ -225,6 +230,7 @@ class UpConv(nn.Module):
         self.merge_mode = merge_mode
         self.up_mode = up_mode
         self.batch_norm = batch_norm
+        padding = 1 if 'same' in conv_mode else 0
 
         self.upconv = _upconv2(self.in_channels, self.out_channels,
             mode=self.up_mode, planar=planar, dim=dim
@@ -232,12 +238,16 @@ class UpConv(nn.Module):
 
         if self.merge_mode == 'concat':
             self.conv1 = _conv3(
-                2*self.out_channels, self.out_channels, planar=planar, dim=dim
+                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
             )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = _conv3(self.out_channels, self.out_channels, planar=planar, dim=dim)
-        self.conv2 = _conv3(self.out_channels, self.out_channels, planar=planar, dim=dim)
+            self.conv1 = _conv3(
+                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            )
+        self.conv2 = _conv3(
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+        )
 
         if self.up_mode == 'transpose':
             self.act0 = _get_activation(activation)
@@ -254,6 +264,26 @@ class UpConv(nn.Module):
             from_up: upconv'd tensor from the decoder pathway
         """
         from_up = self.upconv(from_up)
+        if from_down.shape[2:] != from_up.shape[2:]:
+            # If VALID convolutions are used (not SAME), we need to center-crop to
+            #  make features combinable.
+            ds = from_down.shape[2:]
+            us = from_up.shape[2:]
+            if from_down.dim() == 4:
+                from_down = from_down[
+                    :,
+                    :,
+                    ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
+                    ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2)
+                ]
+            elif from_down.dim() == 5:
+                from_down = from_down[
+                    :,
+                    :,
+                    ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
+                    ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2),
+                    ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
+                ]
         if self.up_mode == 'transpose':
             # Only for transposed convolution.
             # (In case of bilinear upsampling we omit activation)
@@ -270,6 +300,7 @@ class UpConv(nn.Module):
 
 
 # TODO: Suppress known TracerWarnings?
+# TODO: Pre-calculate output sizes when using valid convolutions
 class UNet(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
 
@@ -390,6 +421,46 @@ class UNet(nn.Module):
               (N, C, D, H, W).
             - 2: Every block and every operation works in 2D, expecting
               4D input tensors (N, C, H, W).
+        conv_mode: Padding mode of convolutions. Choices:
+            - 'same' (default): Use SAME-convolutions in every layer:
+              zero-padding inputs so that all convolutions preserve spatial
+              shapes and don't produce an offset at the boundaries.
+            - 'valid': Use VALID-convolutions in every layer: no padding is
+              used, so every convolution layer reduces spatial shape by 2 in
+              each dimension. Intermediate feature maps of the encoder pathway
+              are automatically cropped to compatible shapes so they can be
+              merged with decoder features.
+              Advantages:
+              - Less resource consumption than SAME because feature maps
+                have reduced sizes especially in deeper layers.
+              - No "fake" data (that is, the zeros from the SAME-padding)
+                is fed into the network. The output regions that are influenced
+                by zero-padding naturally have worse quality, so they should
+                be removed in post-processing if possible (see
+                ``overlap_shape`` in `py:mod:`elektronn3.inference`).
+                Using VALID convolutions prevents the unnecessary computation
+                of these regions that need to be cut away anyways for
+                high-quality tiled inference.
+              - Avoids the issues described in https://arxiv.org/abs/1811.11718.
+              - Since the network will not receive zero-padded inputs, it is
+                not required to learn a robustness against artificial zeros
+                being in the border regions of inputs. This should reduce the
+                complexity of the learning task and allow the network to
+                specialize better on understanding the actual, unaltered
+                inputs (effectively requiring less parameters to fit).
+              Disadvantages:
+              - Using this mode poses some additional constraints on input
+                sizes and requires you to center-crop your targets,
+                so it's harder to use in practice than the 'same' mode.
+              - In some cases it might be preferable to get low-quality
+                outputs at image borders as opposed to getting no outputs at
+                the borders. Most notably this is the case if you do training
+                and inference not on small patches, but on complete images in
+                a single step.
+            - 'valid_padback': Same as valid, but the final output of the
+              network is zero-padded to the same spatial shape as the input
+              tensor. This mode is only intended for testing purposes and
+              shouldn't be used normally.
     """
 
     def __init__(
@@ -404,6 +475,7 @@ class UNet(nn.Module):
             activation: Union[str, nn.Module] = 'relu',
             batch_norm: bool = True,
             dim: int = 3,
+            conv_mode: str = 'same',
     ):
         super().__init__()
 
@@ -455,6 +527,7 @@ class UNet(nn.Module):
         self.start_filts = start_filts
         self.n_blocks = n_blocks
         self.batch_norm = batch_norm
+        self.conv_mode = conv_mode
 
         self.down_convs = []
         self.up_convs = []
@@ -478,7 +551,8 @@ class UNet(nn.Module):
                 planar=planar,
                 activation=activation,
                 batch_norm=batch_norm,
-                dim=dim
+                dim=dim,
+                conv_mode=conv_mode
             )
             self.down_convs.append(down_conv)
 
@@ -498,7 +572,8 @@ class UNet(nn.Module):
                 planar=planar,
                 activation=activation,
                 batch_norm=batch_norm,
-                dim=dim
+                dim=dim,
+                conv_mode=conv_mode
             )
             self.up_convs.append(up_conv)
 
@@ -523,6 +598,7 @@ class UNet(nn.Module):
             self.weight_init(m)
 
     def forward(self, x):
+        sh = x.shape[2:]
         encoder_outs = []
 
         # Encoder pathway, save outputs for merging
@@ -530,8 +606,8 @@ class UNet(nn.Module):
             _print(f'D{i}: {module}')
             # Note that this check won't be picked up by PyTorch's tracing JIT compiler,
             #  so it won't impact execution speed if it's jit-compiled.
-            if torch.any(torch.tensor(x.shape[2:]) % 2 != 0):
-                raise RuntimeError(self.pool_error_str)
+            # if torch.any(torch.tensor(x.shape[2:]) % 2 != 0):
+            #     raise RuntimeError(self.pool_error_str)
             x, before_pool = module(x)
             _print(before_pool.shape)
             encoder_outs.append(before_pool)
@@ -550,6 +626,19 @@ class UNet(nn.Module):
         x = self.conv_final(x)
         # Temporarily store output for receptive field estimation using fornoxai/receptivefield
         self.feature_maps = [x]
+        if self.conv_mode == 'valid_padback':
+            # Workaround to recover spatial shape at the end
+            # TODO: Remove this once we support out_shape != in_shape fully in e3
+            pad = []
+            for a, b in zip(sh, x.shape[2:]):
+                diff = (a - b) // 2
+                pad.extend([diff, diff])
+            pad.reverse()  # Why do PyTorch padding layers suddenly expect (H, W, D) order???
+
+            if x.dim() == 4:
+                x = torch.nn.ConstantPad2d(pad, 0)(x)
+            elif x.dim() == 5:
+                x = torch.nn.ConstantPad3d(pad, 0)(x)
         return x
 
 
@@ -569,7 +658,7 @@ def test_model(
         n_blocks=n_blocks,
         planar_blocks=planar_blocks,
         merge_mode=merge_mode,
-        dim=dim
+        dim=dim,
     ).to(device)
 
     # Minimal test input
@@ -639,3 +728,4 @@ if __name__ == '__main__':
     print()
     test_planar_configs()
     print('All tests sucessful!')
+    # TODO: Also test valid convolution architecture.
