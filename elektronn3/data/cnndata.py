@@ -75,6 +75,14 @@ class PatchCreator(data.Dataset):
             depend on the neural network architecture to be used (If the
             effective receptive field of the network is small, larger patch
             sizes won't help much).
+        offsets: Shape of the offset by which each the targets are cropped
+            on each side. This needs to be set if the outputs of the network
+            you train with are smaller than its inputs.
+            For example, if the spatial shape of your inputs is
+            ``patch_shape=(48, 96, 96)`` the spatial shape of your outputs is
+            ``out_shape=(32, 56, 56)``, you should set ``offset=(8, 20, 20)``,
+            because ``offset = (patch_shape - out_shape) / 2`` should always
+            hold true.
         cube_prios: List of per-cube priorities, where a higher priority
             means that it is more likely that a sample comes from this cube.
         aniso_factor: Depth-anisotropy factor of the data set. E.g.
@@ -130,6 +138,7 @@ class PatchCreator(data.Dataset):
             input_h5data: List[Tuple[str, str]],
             target_h5data: List[Tuple[str, str]],
             patch_shape: Sequence[int],
+            offsets: Sequence[int] = (0, 0, 0),
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
@@ -186,7 +195,7 @@ class PatchCreator(data.Dataset):
         #   with some fancy downscaling operator? Naively strided reading
         #   could mess up targets in unfortunate cases:
         #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
-        self.offsets = np.array([0, 0, 0])
+        self.offsets = np.array(offsets)
         self.target_patch_size = self.patch_shape - self.offsets * 2
         self._target_dtype = target_dtype
         # The following will be inferred when reading data
