@@ -439,18 +439,22 @@ def warp_slice(
                 map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target[k])
 
                 if debug:
-                    unique_cut = np.unique(target_cut[k])
-                    unique_warp = np.unique(target[k])
-                    if len(unique_cut) != len(unique_warp) or np.any(unique_cut != unique_warp):
-                        raise RuntimeError(
+                    unique_cut = set(list(np.unique(target_cut[k])))
+                    unique_warp = set(list(np.unique(target[k])))
+                    # If new values appear in discrete targets, there is something wrong.
+                    # unique_warp can have less values than unique_cut though, for example
+                    #  if the warping transform coincidentally slices away all values of a class.
+                    if not unique_warp.issubset(unique_cut):
+                        print(
                             f'Invalid target encountered:\n\nunique_cut=\n{unique_cut}\n'
                             f'unique_warp=\n{unique_warp}\nM_inv=\n{M_inv}\n'
                             f'src_coords_target - lo_targ=\n{src_coords_target - lo_targ}\n'
                         )
+                        # Try dropping to an IPython shell (Won't work with num_workers > 0).
+                        import IPython; IPython.embed(); raise SystemExit
+
             else:
                 map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
-
-
 
     else:
         target = None
