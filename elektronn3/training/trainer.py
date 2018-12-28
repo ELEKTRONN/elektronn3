@@ -122,7 +122,9 @@ class Trainer:
             an error on the current batch.
             It's not recommended to use this. It's only helpful for certain
             debugging scenarios.
-        ipython_on_error: If ``True``, errors during training (except
+        ipython_shell: If ``True`` keyboard interrupts (Ctrl-C) won't exit
+            the process but only pause training and enter an IPython shell.
+            Additionally, errors during training (except
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
@@ -187,7 +189,7 @@ class Trainer:
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
             ignore_errors: bool = False,
-            ipython_on_error: bool = False,
+            ipython_shell: bool = True,
             num_classes: Optional[int] = None,
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
@@ -207,7 +209,7 @@ class Trainer:
                 'Please set num_workers to 1 or 0.\n'
             )
         self.ignore_errors = ignore_errors
-        self.ipython_on_error = ipython_on_error
+        self.ipython_shell = ipython_shell
         self.device = device
         try:
             model.to(device)
@@ -372,7 +374,10 @@ class Trainer:
                     self.best_val_loss = stats['val_loss']
                     self._save_model(suffix='_best')
             except KeyboardInterrupt:
-                IPython.embed(header=self._shell_info)
+                if self.ipython_shell:
+                    IPython.embed(header=self._shell_info)
+                else:
+                    return
                 if self.terminate:
                     return
             except Exception as e:
@@ -381,7 +386,7 @@ class Trainer:
                     # Just print the traceback and try to carry on with training.
                     # This can go wrong in unexpected ways, so don't leave the training unattended.
                     pass
-                elif self.ipython_on_error:
+                elif self.ipython_shell:
                     print("\nEntering Command line such that Exception can be "
                           "further inspected by user.\n\n")
                     IPython.embed(header=self._shell_info)
