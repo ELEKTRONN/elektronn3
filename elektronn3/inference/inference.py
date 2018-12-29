@@ -6,6 +6,7 @@
 import itertools
 import os
 import time
+import zipfile
 from collections import OrderedDict
 from typing import Optional, Tuple, Union, Callable, Sequence
 
@@ -261,10 +262,10 @@ class Predictor:
         self.verbose = verbose
         if isinstance(model, str):
             if os.path.isfile(model):
-                # TODO: Find a better way to find out beforehand if it's a TorchScript module.
-                #  We're just pretending to know .pts means TorchScript, although no-one except
-                #  us even uses this extension...
-                if model.endswith('.pts'):
+                # TorchScript serialization can be identified by checking if
+                #  it's a zip file. Pickled Python models are not zip files.
+                #  See https://github.com/pytorch/pytorch/pull/15578/files
+                if zipfile.is_zipfile(model):
                     model = torch.jit.load(model, map_location=device)
                 else:
                     model = torch.load(model, map_location=device)
