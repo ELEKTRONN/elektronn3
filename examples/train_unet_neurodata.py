@@ -65,7 +65,8 @@ model = UNet(
     start_filts=32,
     planar_blocks=(1,),
     activation='relu',
-    batch_norm=True
+    batch_norm=True,
+    # conv_mode='valid',
 ).to(device)
 if not args.disable_trace:
     x = torch.randn(1, 1, 32, 64, 64, device=device)
@@ -120,6 +121,7 @@ valid_transform = transforms.Compose(common_transforms + [])
 common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': 2,
     'patch_shape': (48, 96, 96),
+    # 'offset': (8, 20, 20),
     'num_classes': 2,
 }
 train_dataset = PatchCreator(
@@ -194,6 +196,7 @@ trainer = Trainer(
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
+    offset=train_dataset.offset,
     apply_softmax_for_prediction=True,
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),

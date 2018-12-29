@@ -180,6 +180,7 @@ class Trainer:
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
             preview_overlap_shape: Optional[Tuple[int, ...]] = None,
             preview_interval: int = 5,
+            offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -234,6 +235,7 @@ class Trainer:
         self.preview_tile_shape = preview_tile_shape
         self.preview_overlap_shape = preview_overlap_shape
         self.preview_interval = preview_interval
+        self.offset = offset
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
@@ -273,7 +275,6 @@ class Trainer:
 
         # Determine optional dataset properties
         self.num_classes = num_classes
-        self.num_classes = None
         if hasattr(self.train_dataset, 'num_classes'):
             self.num_classes = self.train_dataset.num_classes
 

@@ -28,8 +28,8 @@ def tiled_apply(
         inp: torch.Tensor,
         tile_shape: Sequence[int],
         overlap_shape: Sequence[int],
+        offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
-        final_crop_enabled: bool = True,
         verbose: bool = False
 ) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -44,8 +44,12 @@ def tiled_apply(
     processing algorithms in general) that appear near the boundaries of
     inner tiles when applying them on a tiled representation of the input.
 
-    This function assumes that ``inp.shape[2:] == func(inp).shape[2:]``,
+    By default this function assumes that ``inp.shape[2:] == func(inp).shape[2:]``,
     i.e. that the function keeps the spatial shape unchanged.
+    If ``func`` reduces the spatial shape (e.g. by performing valid convolutions)
+    and its output is centered w.r.t. the input, you should specify this shape
+    offset in the ``offset`` parameter. This is the same offset that
+    :py:class:`elektronn3.data.cnndata.PatchCreator` expects.
 
     It can run on GPU or CPU transparently, depending on the device that
     ``inp`` is allocated on.
@@ -53,7 +57,8 @@ def tiled_apply(
     Although this function is mainly intended for the purpose of neural network
     inference, ``func`` doesn't have to be a neural network but can be
     any ``Callable[[torch.Tensor], torch.Tensor]`` that operates on n-dimensional
-    image data of shape (N, C, ...) and preserves spatial shape.
+    image data of shape (N, C, ...) and preserves spatial shape or has a
+    constant ``offset``.
     ("..." is a placeholder for the spatial dimensions, so for example
     H(eight) and W(idth).)
 
@@ -66,6 +71,15 @@ def tiled_apply(
         tile_shape: Spatial shape of the output tiles to use for inference.
         overlap_shape: Spatial shape of the overlap by which input tiles are
             extended w.r.t. the output ``tile_shape``.
+        offset: Determines the offset by which the output contents are shifted
+            w.r.t. the inputs by ``func``.
+            This should generally be set to half the spatial shape difference
+            between inputs and outputs:
+
+            >>> in_sh = np.array(inp.shape[2:])
+            >>> out_sh = np.array(func(inp).shape[2:])
+            >>> offset = (in_sh - out_sh) // 2
+
         out_shape: Expected shape of the output tensor that would result from
             applying ``func`` to ``inp`` (``func(inp).shape``).
             It doesn't just refer to spatial shape, but to the actual tensor
@@ -97,22 +111,30 @@ Tensor
         def _tqdm(x, *_, **__):
             return x
 
+    if offset is None:
+        offset = np.zeros_like(tile_shape)
+    else:
+        offset = np.array(offset)
     inp_shape = np.array(inp.shape)
     out = torch.empty(out_shape, dtype=inp.dtype, device=inp.device)
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
-    overlap = np.array(overlap_shape)
+    overlap_shape = np.array(overlap_shape)
 
     # Create padded input with overlap
-    padded_shape = inp_shape + np.array((0, 0, *overlap * 2))
+    padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
     inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype, device=inp.device)
 
-    padslice = _extend_nc([slice(l, h) for l, h in zip(overlap, padded_shape[2:] - overlap)])
+    padslice = _extend_nc(
+        [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
+    )
     inp_padded[padslice] = inp
     del inp
 
-    crop_low_corner = overlap.copy()
-    crop_high_corner = tile_shape + overlap
+    # Offset is subtracted here because otherwise, the final output tensor's
+    #  content will be shifted w.r.t. the input content.
+    crop_low_corner = overlap_shape.copy() - offset
+    crop_high_corner = tile_shape + overlap_shape - offset
     # Used to crop the output tile to the relevant, unpadded region
     #  that will be written to the final output
     final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
@@ -137,7 +159,7 @@ Tensor
         #  the ``overlap_shape`` w.r.t. the output corner coordinate system
         #  due to the initial padding.
         inp_low_corner = out_low_corner.copy()
-        inp_high_corner = out_high_corner.copy() + 2 * overlap
+        inp_high_corner = out_high_corner.copy() + 2 * overlap_shape
 
         assert np.all(np.less_equal(inp_high_corner, inp_padded.shape[2:])), inp_high_corner
         # Slice only the current tile region in ([D,] H, W) dims
@@ -228,6 +250,8 @@ class Predictor:
         >>> out = model.predict_proba(inp)
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
+    # TODO: Maybe change signature to not require out_shape but num_classes
+    #       and then calculate out_shape internally from it?
     def __init__(
             self,
             model: Union[nn.Module, str],
@@ -237,6 +261,7 @@ class Predictor:
             tile_shape: Optional[Tuple[int, ...]] = None,
             overlap_shape: Optional[Tuple[int, ...]] = None,
             out_shape: Optional[Tuple[int, ...]] = None,
+            offset: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
             verbose: bool = False,
@@ -250,7 +275,10 @@ class Predictor:
         self.tile_shape = tile_shape
         if overlap_shape is not None:
             overlap_shape = np.array(overlap_shape)
+        if offset is not None:
+            offset = np.array(offset)
         self.overlap_shape = overlap_shape
+        self.offset = offset
         self.out_shape = out_shape
         self.float16 = float16
         if float16 and not isinstance(model, str):
@@ -302,8 +330,8 @@ class Predictor:
             inp=inp,
             tile_shape=self.tile_shape,
             overlap_shape=self.overlap_shape,
+            offset=self.offset,
             out_shape=self.out_shape,
-            final_crop_enabled=False,  # See crop in self._predict()
             verbose=self.verbose
         )
 
@@ -337,8 +365,6 @@ class Predictor:
         Returns:
             Model output
         """
-        # TODO: Maybe change signature to not require out_shape but num_classes
-        #       and then calculate out_shape internally from it?
         if self.verbose:
             start = time.time()
         inp = torch.as_tensor(inp, dtype=self.dtype)
@@ -346,10 +372,14 @@ class Predictor:
         inp = inp.to(self.device, non_blocking=True)
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
+        # Lazily figure out these Predictor options based on the input it
+        #  receives if they are not already set.
+        # Not sure if that's a good idea because these are object-changing
+        #  side-effects in the otherwise pure predict_proba() function.
         if self.tile_shape is None:
             self.tile_shape = spatial_shape
         if self.overlap_shape is None:
-            self.overlap_shape = np.zeros(len(spatial_shape), dtype=np.int)
+            self.overlap_shape = np.zeros_like(spatial_shape)
         if self.batch_size is None:
             self.batch_size = inp_batch_size
         num_batches = int(np.ceil(inp_batch_size / self.batch_size))

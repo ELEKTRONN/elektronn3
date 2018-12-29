@@ -30,7 +30,7 @@ class PatchCreator(data.Dataset):
 
     It implements the PyTorch ``Dataset`` interface and is meant to be used
     with a PyTorch ``DataLoader`` (or the modified
-    :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader``, if it is
+    :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader`, if it is
     used with :py:class:`elektronn3.training.trainer.Trainer``).
 
     The main idea of this class is to automate input and target patch creation
@@ -75,7 +75,7 @@ class PatchCreator(data.Dataset):
             depend on the neural network architecture to be used (If the
             effective receptive field of the network is small, larger patch
             sizes won't help much).
-        offsets: Shape of the offset by which each the targets are cropped
+        offset: Shape of the offset by which each the targets are cropped
             on each side. This needs to be set if the outputs of the network
             you train with are smaller than its inputs.
             For example, if the spatial shape of your inputs is
@@ -138,7 +138,7 @@ class PatchCreator(data.Dataset):
             input_h5data: List[Tuple[str, str]],
             target_h5data: List[Tuple[str, str]],
             patch_shape: Sequence[int],
-            offsets: Sequence[int] = (0, 0, 0),
+            offset: Sequence[int] = (0, 0, 0),
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
@@ -195,8 +195,8 @@ class PatchCreator(data.Dataset):
         #   with some fancy downscaling operator? Naively strided reading
         #   could mess up targets in unfortunate cases:
         #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
-        self.offsets = np.array(offsets)
-        self.target_patch_size = self.patch_shape - self.offsets * 2
+        self.offset = np.array(offset)
+        self.target_patch_size = self.patch_shape - self.offset * 2
         self._target_dtype = target_dtype
         # The following will be inferred when reading data
         self.n_labelled_pixels = 0
