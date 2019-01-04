@@ -12,6 +12,7 @@ ipython
 tqdm
 pillow
 colorlog
+torchvision
 
 # For tensorboard logger (not strictly required):
 tensorboard>=1.8.0

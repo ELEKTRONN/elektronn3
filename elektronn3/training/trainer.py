@@ -324,11 +324,13 @@ class Trainer:
                 misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
                 mean_target = running_mean_target / len(self.train_loader)
                 if self.valid_dataset is None:
-                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
+                    stats['val_loss'] = float('nan')
                 else:
                     valid_stats = self.validate()
                     stats.update(valid_stats)
 
+                if not 'val_accuracy' in stats:
+                    stats['val_accuracy'] = float('nan')
 
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.

@@ -89,10 +89,11 @@ class InferenceModel(object):
                     res = self.model(inp_stride)
                 if type(res) is tuple:
                     for ii in range(len(res)):
-                        out[ii][low:high] = res[ii]
+                        out[ii][low:high] = res[ii].cpu()
                 else:
-                    out[low:high] = self.model(inp_stride)
+                    out[low:high] = res.cpu()
                 del inp_stride
+                torch.cuda.empty_cache()
             assert high >=n_samples, "Prediction less samples then given" \
                                      " in input."
         if verbose:
