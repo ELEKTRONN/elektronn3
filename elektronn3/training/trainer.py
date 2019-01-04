@@ -153,8 +153,7 @@ class Trainer:
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
     # TODO: Log useful info, like ELEKTRONN2 does
-    # TODO: Maybe there should be an option to completely disable exception
-    #       hooks and IPython integration, so Ctrl-C directly terminates.
+    # TODO: Support logging non-binary metrics
 
     tb: tensorboardX.SummaryWriter
     terminate: bool
@@ -240,7 +239,6 @@ class Trainer:
         self.save_root = os.path.expanduser(save_root)
         self.batchsize = batchsize
         self.num_workers = num_workers
-        # TODO: This could be automatically determined by parsing the model
         self.apply_softmax_for_prediction = apply_softmax_for_prediction
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler

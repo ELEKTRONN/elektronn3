@@ -162,8 +162,11 @@ optimizer = optim.Adam(
     amsgrad=True
 )
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
-# lr_sched = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
+# lr_sched = optim.lr_scheduler.ReduceLROnPlateau(
+#     optimizer, patience=1000, factor=0.5, verbose=True, cooldown=500)
 
+# All these metrics assume a binary classification problem. If you have
+#  non-binary targets, remember to adapt the metrics!
 valid_metrics = {
     'val_accuracy': metrics.bin_accuracy,
     'val_precision': metrics.bin_precision,

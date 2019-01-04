@@ -222,6 +222,8 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> torch.Tensor:
         #  make features combinable.
         ds = from_down.shape[2:]
         us = from_up.shape[2:]
+        assert ds[0] >= us[0]
+        assert ds[1] >= us[1]
         if from_down.dim() == 4:
             from_down = from_down[
                 :,
@@ -230,6 +232,7 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> torch.Tensor:
                 ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2)
             ]
         elif from_down.dim() == 5:
+            assert ds[2] >= us[2]
             from_down = from_down[
                 :,
                 :,
@@ -238,6 +241,7 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> torch.Tensor:
                 ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
             ]
     return from_down
+
 
 class UpConv(nn.Module):
     """
@@ -533,6 +537,8 @@ class UNet(nn.Module):
         self.n_blocks = n_blocks
         self.batch_norm = batch_norm
         self.conv_mode = conv_mode
+        self.activation = activation
+        self.dim = dim
 
         self.down_convs = []
         self.up_convs = []
@@ -647,6 +653,39 @@ class UNet(nn.Module):
         return x
 
 
+class UNet3dLite(UNet):
+    """(WIP) Re-implementation of the unet3d_lite model from ELEKTRONN2
+
+    See https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/unet3d_lite.py
+    (Not yet working due to the AutoCrop node in ELEKTRONN2 working differently)
+    """
+    def __init__(self):
+        super().__init__(
+            in_channels=1,
+            out_channels=2,
+            n_blocks=4,
+            start_filts=32,
+            up_mode='transpose',
+            merge_mode='concat',
+            planar_blocks=(0, 1, 2),  # U1 and U2 will later be replaced by non-planar blocks
+            activation='relu',
+            batch_norm=False,
+            dim=3,
+            conv_mode='valid',
+        )
+        # TODO: mrg0 in the original unet3d_lite has upconv_n_f=512, which doesn't appear here
+        for i in [1, 2]:
+            # Replace planar U1 and U2 blocks with non-planar 3x3x3 versions
+            ins = self.up_convs[i].upconv.in_channels
+            outs = self.up_convs[i].conv2.out_channels
+            self.up_convs[i] = UpConv(
+                ins, outs, merge_mode=self.merge_mode, up_mode=self.up_mode,
+                planar=False,
+                activation=self.activation, batch_norm=self.batch_norm,
+                dim=self.dim, conv_mode=self.conv_mode
+            )
+
+
 def test_model(
     batch_size=1,
     in_channels=1,
@@ -729,8 +768,11 @@ def test_planar_configs(max_n_blocks=4):
 
 
 if __name__ == '__main__':
+    # m = UNet3dLite()
+    # x = torch.randn(1, 1, 22, 140, 140)
+    # m(x)
     test_2d_config()
     print()
     test_planar_configs()
     print('All tests sucessful!')
-    # TODO: Also test valid convolution architecture.
+    # # TODO: Also test valid convolution architecture.
