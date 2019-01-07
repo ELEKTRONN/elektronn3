@@ -276,7 +276,12 @@ class PatchCreator(data.Dataset):
                 )
                 continue
             self.n_successful_warp += 1
-            inp, target = self.transform(inp, target)
+            try:
+                inp, target = self.transform(inp, target)
+            except transforms._DropSample:
+                # A filter transform has chosen to drop this sample, so skip it
+                logger.debug('Sample dropped.')
+                continue
             break
 
         # inp, target are still numpy arrays here. Relying on auto-conversion to

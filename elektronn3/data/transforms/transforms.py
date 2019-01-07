@@ -26,6 +26,11 @@ from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
 
 
+class _DropSample(Exception):
+    """Sample will be dropped and won't be fed into a DataLoader"""
+    pass
+
+
 class Identity:
     def __call__(self, inp, target):
         return inp, target
@@ -88,6 +93,23 @@ class Lambda:
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         return self.func(inp, target)
+
+
+class DropIfTooMuchBG:
+    """Filter transform that skips a sample if the background class is too
+    dominant in the target."""
+    def __init__(self, bg_id=0, threshold=0.9):
+        self.bg_id = bg_id
+        self.threshold = threshold
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if np.sum(target == self.bg_id) / target.size > self.threshold:
+            raise _DropSample
+        return inp, target  # Return inp, target unmodified
 
 
 class Normalize:

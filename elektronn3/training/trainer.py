@@ -292,7 +292,7 @@ class Trainer:
         self.train_loader = DelayedDataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=30
+            timeout=60
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
@@ -302,8 +302,8 @@ class Trainer:
         # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DelayedDataLoader(
-                self.valid_dataset, self.batchsize, num_workers=0, pin_memory=False,
-                timeout=30
+                self.valid_dataset, self.batchsize, num_workers=0, pin_memory=True,
+                timeout=60
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
 
