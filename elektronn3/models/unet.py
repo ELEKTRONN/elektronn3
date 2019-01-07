@@ -134,8 +134,9 @@ def _upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
     else:
         # out_channels is always going to be the same
         # as in_channels
+        mode = 'trilinear' if dim == 3 else 'bilinear'
         return nn.Sequential(
-            nn.Upsample(mode='bilinear', scale_factor=scale_factor),
+            nn.Upsample(mode=mode, scale_factor=scale_factor),
             _conv1(in_channels, out_channels, dim=dim)
         )
 
@@ -277,8 +278,7 @@ class UpConv(nn.Module):
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
 
-        if self.up_mode == 'transpose':
-            self.act0 = _get_activation(activation)
+        self.act0 = _get_activation(activation)
         self.act1 = _get_activation(activation)
         self.act2 = _get_activation(activation)
 
