@@ -271,10 +271,7 @@ class Trainer:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
 
-        # Determine optional dataset properties
         self.num_classes = num_classes
-        if hasattr(self.train_dataset, 'num_classes'):
-            self.num_classes = self.train_dataset.num_classes
 
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
@@ -295,7 +292,7 @@ class Trainer:
         self.train_loader = DelayedDataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=30  # timeout arg requires https://github.com/pytorch/pytorch/commit/1661370ac5f88ef11fedbeac8d0398e8369fc1f3
+            timeout=30
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
@@ -580,6 +577,8 @@ class Trainer:
             overlap_shape: Optional[Tuple[int, ...]] = None,
             verbose: bool = True,
     ) -> torch.Tensor:
+        if self.num_classes is None:
+            raise RuntimeError('Can\'t do preview prediction if Trainer.num_classes is not set.')
         out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
         predictor = Predictor(
             model=self.model,

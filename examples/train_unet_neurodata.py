@@ -201,6 +201,7 @@ trainer = Trainer(
     preview_interval=5,
     offset=train_dataset.offset,
     apply_softmax_for_prediction=True,
+    num_classes=train_dataset.num_classes,
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),
     preview_overlap_shape=(32, 64, 64)
