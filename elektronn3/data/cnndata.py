@@ -144,7 +144,6 @@ class PatchCreator(data.Dataset):
             target_discrete_ix: Optional[List[int]] = None,
             target_dtype: np.dtype = np.int64,
             train: bool = True,
-            preview_shape: Optional[Sequence[int]] = None,
             warp_prob: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
@@ -160,9 +159,6 @@ class PatchCreator(data.Dataset):
                 logger.warning(
                     'Augmentations should not be used on validation data.'
                 )
-        else:
-            if preview_shape is not None:
-                raise ValueError()
 
         # batch properties
         self.train = train
@@ -179,50 +175,34 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
-        # TODO: This is currently only used for determining num_classes. It
-        #       could be used for adding support for targets that are not
-        #       labelled in the expected order [0, 1, ..., num_classes - 1] or
-        #       as a whitelist that excludes classes that should be ignored.
         self.num_classes = num_classes
         self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
-        # TODO: Make strides and offsets for targets configurable
-        # self.strides = ...
-        #  strides will need to be applied *during* dataset iteration now
-        #  (-> strided reading in slice_h5()... or should strides be applied
-        #   with some fancy downscaling operator? Naively strided reading
-        #   could mess up targets in unfortunate cases:
-        #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
         self.offset = np.array(offset)
         self.target_patch_size = self.patch_shape - self.offset * 2
         self._target_dtype = target_dtype
-        # The following will be inferred when reading data
-        self.n_labelled_pixels = 0
-
-        # Actual data fields
-        self.inputs = []
-        self.targets = []
+        self.transform = transform
 
         # Setup internal stuff
+        # TODO: Support custom rng for better reproducibility
         self.rng = np.random.RandomState(
             np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
         )
         self.pid = os.getpid()
 
+        # The following fields will be filled when reading data
+        self.n_labelled_pixels = 0
+        self.inputs = []
+        self.targets = []
         self._sampling_weight = None
-        self._training_count = None
-        self._count = None
-        self.n_successful_warp = 0
-        self.n_failed_warp = 0
-        self.n_read_failures = 0
 
         self.load_data()  # Open dataset files
 
-        if transform is None:
-            transform = lambda x: x
-        self.transform = transform
+        self.n_successful_warp = 0
+        self.n_failed_warp = 0
+        self.n_read_failures = 0
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
         # Note that the index is ignored. Samples are always random
@@ -426,7 +406,6 @@ class PatchCreator(data.Dataset):
 
         # sample example i if: batch_prob[i] < p
         self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
-        self._count = len(self.inputs)
 
     def check_files(self) -> None:  # TODO: Update for cdhw version
         """
