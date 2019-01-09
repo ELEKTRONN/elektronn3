@@ -206,14 +206,16 @@ class DownConv(nn.Module):
             self.bn = get_batchnorm(dim)(self.out_channels)
 
     def forward(self, x):
-        x = self.act1(self.conv1(x))
-        x = self.act2(self.conv2(x))
+        y = self.conv1(x)
+        y = self.act1(y)
+        y = self.conv2(y)
         if self.batch_norm:
-            x = self.bn(x)
-        before_pool = x
+            y = self.bn(y)
+        y = self.act2(y)
+        before_pool = y
         if self.pooling:
-            x = self.pool(x)
-        return x, before_pool
+            y = self.pool(y)
+        return y, before_pool
 
 
 @torch.jit.script
@@ -285,27 +287,29 @@ class UpConv(nn.Module):
         if self.batch_norm:
             self.bn = get_batchnorm(dim)(self.out_channels)
 
-    def forward(self, from_down, from_up):
+    def forward(self, enc, dec):
         """ Forward pass
         Arguments:
-            from_down: tensor from the encoder pathway
-            from_up: upconv'd tensor from the decoder pathway
+            enc: Tensor from the encoder pathway
+            dec: Tensor from the decoder pathway (to be upconv'd)
         """
-        from_up = self.upconv(from_up)
-        from_down = autocrop(from_down, from_up)
+        updec = self.upconv(dec)
+        crenc = autocrop(enc, updec)
         if self.up_mode == 'transpose':
             # Only for transposed convolution.
             # (In case of bilinear upsampling we omit activation)
-            from_up = self.act0(from_up)
+            updec = self.act0(updec)
         if self.merge_mode == 'concat':
-            x = torch.cat((from_up, from_down), 1)
+            mrg = torch.cat((updec, crenc), 1)
         else:
-            x = from_up + from_down
-        x = self.act1(self.conv1(x))
-        x = self.act2(self.conv2(x))
+            mrg = updec + crenc
+        y = self.conv1(mrg)
+        y = self.act1(y)
+        y = self.conv2(y)
         if self.batch_norm:
-            x = self.bn(x)
-        return x
+            y = self.bn(y)
+        y = self.act2(y)
+        return y
 
 
 # TODO: Suppress known TracerWarnings?
