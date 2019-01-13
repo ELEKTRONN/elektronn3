@@ -55,8 +55,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
-from elektronn3.training import Trainer, Backup, DiceLoss
-from elektronn3.training import metrics
+from elektronn3.training import Trainer, Backup, DiceLoss, metrics, Padam
 from elektronn3.models.unet import UNet
 
 
@@ -88,10 +87,6 @@ target_h5data = [
 
 max_steps = args.max_steps
 max_runtime = args.max_runtime
-lr = 0.0004
-lr_stepsize = 1000
-lr_dec = 0.995
-batch_size = 1
 
 if args.resume is not None:  # Load pretrained network
     try:  # Assume it's a state_dict for the model
@@ -155,13 +150,19 @@ preview_batch = get_preview_batch(
 )
 
 # Set up optimization
-optimizer = optim.Adam(
+# optimizer = optim.Adam(
+#     model.parameters(),
+#     weight_decay=0.5e-4,
+#     lr=0.0004,
+#     amsgrad=True
+# )
+optimizer = Padam(
     model.parameters(),
+    lr=0.1,
     weight_decay=0.5e-4,
-    lr=lr,
-    amsgrad=True
+    partial=1/4,
 )
-lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
+lr_sched = optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)
 # lr_sched = optim.lr_scheduler.ReduceLROnPlateau(
 #     optimizer, patience=1000, factor=0.5, verbose=True, cooldown=500)
 
@@ -191,7 +192,7 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batchsize=batch_size,
+    batchsize=1,
     num_workers=1,
     save_root=save_root,
     exp_name=args.exp_name,
