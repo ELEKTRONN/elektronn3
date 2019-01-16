@@ -62,7 +62,7 @@ from elektronn3.models.unet import UNet
 model = UNet(
     n_blocks=3,
     start_filts=32,
-    planar_blocks=(1,),
+    planar_blocks=(0,),
     activation='relu',
     batch_norm=True,
     # conv_mode='valid',
