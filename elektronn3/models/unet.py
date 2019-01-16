@@ -50,9 +50,87 @@ else:
         pass
 
 
+class AdaptiveConv3d(nn.Module):
+    """Equivalent to ``torch.nn.Conv3d`` except that if
+    ``kernel_size[0] == 1``, ``torch.nn.Conv2d`` is used internally in
+    order to improve computation speed.
+
+    This is a workaround for https://github.com/pytorch/pytorch/issues/7740.
+
+    Current limitations:
+    - Only works with batch size N=1
+    - Expects ``kernel_size`` to be passed as a keyword arg, not positional."""
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        ks = kwargs['kernel_size']
+        if isinstance(ks, tuple) and ks[0] == 1:
+            kwargs['kernel_size'] = ks[1:]
+            kwargs['stride'] = kwargs.get('stride', (0, 1, 1))[1:]
+            kwargs['padding'] = kwargs.get('padding', (0, 0, 0))[1:]
+            kwargs['dilation'] = kwargs.get('dilation', (1, 1, 1))[1:]
+            self.conv = nn.Conv2d(*args, **kwargs)
+            self.forward = self.forward2d
+        else:
+            self.conv = nn.Conv3d(*args, **kwargs)
+            self.forward = self.forward3d
+
+    def forward2d(self, x):
+        assert x.shape[0] == 1, 'Only batch size N=1 is supported!'  # TODO: Support N>1
+        sq = x.squeeze(0)  # (N, C, D, H, W) -> (C, D, H, W)
+        view2d = sq.transpose(0, 1)  # -> (D, C, H, W)
+        out2d = self.conv(view2d)
+        sout3d = out2d.transpose(0, 1)  # -> (C, D, H, W)
+        out3d = sout3d.unsqueeze(0)  # -> (N, C, D, H, W)
+        return out3d
+
+    def forward3d(self, x):
+        return self.conv(x)
+
+    def forward(self, x): raise NotImplementedError()  # Chosen by __init__()
+
+
+class AdaptiveConvTranspose3d(nn.Module):
+    """Equivalent to ``torch.nn.ConvTranspose3d`` except that if
+    ``kernel_size[0] == 1``, ``torch.nn.ConvTranspose2d`` is used internally in
+    order to improve computation speed.
+
+    This is a workaround for https://github.com/pytorch/pytorch/issues/7740.
+
+    Current limitations:
+    - Only works with batch size N=1
+    - Expects ``kernel_size`` to be passed as a keyword arg, not positional."""
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        ks = kwargs['kernel_size']
+        if isinstance(ks, tuple) and ks[0] == 1:
+            kwargs['kernel_size'] = ks[1:]
+            kwargs['stride'] = kwargs.get('stride', (0, 1, 1))[1:]
+            kwargs['padding'] = kwargs.get('padding', (0, 0, 0))[1:]
+            kwargs['dilation'] = kwargs.get('dilation', (1, 1, 1))[1:]
+            self.conv = nn.ConvTranspose2d(*args, **kwargs)
+            self.forward = self.forward2d
+        else:
+            self.conv = nn.ConvTranspose3d(*args, **kwargs)
+            self.forward = self.forward3d
+
+    def forward2d(self, x):
+        # assert x.shape[0] == 1, 'Only batch size N=1 is supported!'  # TODO: Support N>1
+        sq = x.squeeze(0)  # (N, C, D, H, W) -> (C, D, H, W)
+        view2d = sq.transpose(0, 1)  # -> (D, C, H, W)
+        out2d = self.conv(view2d)
+        sout3d = out2d.transpose(0, 1)  # -> (C, D, H, W)
+        out3d = sout3d.unsqueeze(0)  # -> (N, C, D, H, W)
+        return out3d
+
+    def forward3d(self, x):
+        return self.conv(x)
+
+    def forward(self, x): raise NotImplementedError()  # Chosen by __init__()
+
+
 def get_conv(dim=3):
     if dim == 3:
-        return nn.Conv3d
+        return AdaptiveConv3d
     elif dim == 2:
         return nn.Conv2d
     else:
@@ -61,7 +139,7 @@ def get_conv(dim=3):
 
 def get_convtranspose(dim=3):
     if dim == 3:
-        return nn.ConvTranspose3d
+        return AdaptiveConvTranspose3d
     elif dim == 2:
         return nn.ConvTranspose2d
     else:
