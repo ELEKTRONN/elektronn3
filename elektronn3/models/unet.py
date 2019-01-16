@@ -35,7 +35,7 @@ __all__ = ['UNet']
 import copy
 import itertools
 
-from typing import Sequence, Union
+from typing import Sequence, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -297,7 +297,7 @@ class DownConv(nn.Module):
 
 
 @torch.jit.script
-def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> torch.Tensor:
+def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     if from_down.shape[2:] != from_up.shape[2:]:
         # If VALID convolutions are used (not SAME), we need to center-crop to
         #  make features combinable.
@@ -321,7 +321,7 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> torch.Tensor:
                 ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2),
                 ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
             ]
-    return from_down
+    return from_down, from_up
 
 
 class UpConv(nn.Module):
@@ -372,7 +372,7 @@ class UpConv(nn.Module):
             dec: Tensor from the decoder pathway (to be upconv'd)
         """
         updec = self.upconv(dec)
-        crenc = autocrop(enc, updec)
+        crenc, upcdec = autocrop(enc, updec)
         if self.up_mode == 'transpose':
             # Only for transposed convolution.
             # (In case of bilinear upsampling we omit activation)
