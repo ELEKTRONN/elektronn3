@@ -341,19 +341,15 @@ def warp_slice(
 
     patch_shape = tuple(patch_shape)
     if len(inp_src.shape) == 3:
-        print(f'inp_src.shape: {inp_src.shape}')
-        raise NotImplementedError(
-            'elektronn3 has dropped support for data stored in raw 3D form without a channel axis. '
-            'Please always supply it with a prepended channel, so it\n'
-            'has the form (C, D, H, W) (or in ELEKTRONN2 terms: (f, z, x, y)).'
-        )
+        n_f = 1
     elif len(inp_src.shape) == 4:
         n_f = inp_src.shape[0]
-        # Spatial shapes of input and target data sources
-        inp_src_shape = np.array(inp_src.shape[-3:])
-        target_src_shape = np.array(target_src.shape[-3:])
     else:
-        raise ValueError('inp_src wrong dim/shape')
+        raise ValueError(f'Can\'t handle inp_src shape {inp_src.shape}')
+
+    # Spatial shapes of input and target data sources
+    inp_src_shape = np.array(inp_src.shape[-3:])
+    target_src_shape = np.array(target_src.shape[-3:])
 
     M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
     dest_corners = make_dest_corners(patch_shape)
@@ -373,7 +369,7 @@ def warp_slice(
 
     if target_src is not None:
         target_patch_shape = tuple(target_patch_shape)
-        n_f_t = target_src.shape[0]
+        n_f_t = target_src.shape[0] if target_src.ndim == 4 else 1
 
         target_src_offset = np.subtract(inp_src_shape, target_src.shape[-3:])
         if np.any(np.mod(target_src_offset, 2)):
@@ -404,6 +400,8 @@ def warp_slice(
     # Slice and interpolate input
     # Slice to hi + 1 because interpolation potentially needs this value.
     img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
+    if img_cut.ndim == 3:
+        img_cut = img_cut[None]
     inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
     lo = lo.astype(floatX)
 
@@ -421,6 +419,8 @@ def warp_slice(
         # numba-compiled map_coordinates functions
         # Slice to hi + 1 because interpolation potentially needs this value.
         target_cut = slice_h5(target_src, lo_targ, hi_targ + 1, dtype=floatX)
+        if target_cut.ndim == 3:
+            target_cut = target_cut[None]
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
         target = np.zeros((n_f_t,) + target_patch_shape, dtype=floatX)
         lo_targ = (lo_targ + target_src_offset).astype(floatX)
