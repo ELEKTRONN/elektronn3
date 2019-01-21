@@ -177,9 +177,6 @@ optimizer = Padam(
     weight_decay=0.5e-4,
     partial=1/4,
 )
-lr_sched = optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)
-# lr_sched = optim.lr_scheduler.ReduceLROnPlateau(
-#     optimizer, patience=1000, factor=0.5, verbose=True, cooldown=500)
 
 # All these metrics assume a binary classification problem. If you have
 #  non-binary targets, remember to adapt the metrics!
@@ -209,7 +206,7 @@ trainer = Trainer(
     num_workers=1,
     save_root=save_root,
     exp_name=args.exp_name,
-    schedulers={"lr": lr_sched},
+    # schedulers={"lr": optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
