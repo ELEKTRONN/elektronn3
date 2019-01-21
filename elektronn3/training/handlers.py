@@ -94,7 +94,6 @@ def _tb_log_preview(
 ) -> None:
     """Preview from constant region of preview batch data."""
     inp_batch = trainer.preview_batch
-    # TODO: Replace this with elektronn3.inference.Predictor usage
     out_batch = trainer._preview_inference(
         inp=inp_batch,
         tile_shape=trainer.preview_tile_shape,

@@ -464,7 +464,8 @@ def get_preview_batch(
     inp_h5 = h5py.File(fname, 'r')[key]
     if in_memory:
         inp_h5 = inp_h5.value
-    inp_shape = np.array(inp_h5.shape[1:])
+    dim = len(preview_shape)  # 2D or 3D
+    inp_shape = np.array(inp_h5.shape[-dim:])
     if preview_shape is None:  # Slice everything
         inp_lo = np.zeros_like(inp_shape)
         inp_hi = inp_shape
@@ -482,6 +483,8 @@ def get_preview_batch(
     logger.info(f'\nPreview data{memstr}:')
     logger.info(f'  input:       {fname}[{key}]: {inp_h5.shape} ({inp_h5.dtype})\n')
     inp_np = slice_h5(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
+    if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
+        inp_np = inp_np[:, None]  # Add missing C dim
     inp_np, _ = transform(inp_np, None)
     inp = torch.from_numpy(inp_np)
     return inp
