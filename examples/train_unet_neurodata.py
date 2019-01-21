@@ -75,15 +75,34 @@ if not args.disable_trace:
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
-data_root = os.path.expanduser('~/neuro_data_cdhw/')
-input_h5data = [
-    (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
-    for i in range(3)
-]
-target_h5data = [
-    (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
-    for i in range(3)
-]
+if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
+    data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
+    fnames = [f for f in os.listdir(data_root) if f.endswith('.h5')]
+    input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
+    target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
+    valid_indices = [1, 3, 5, 7]
+
+    # These statistics are computed from the training dataset.
+    # Remember to re-compute and change them when switching the dataset.
+    dataset_mean = (0.6170815,)
+    dataset_std = (0.15687169,)
+    # Class weights for imbalanced dataset
+    class_weights = torch.tensor([0.2808, 0.7192])
+else:  # Use publicly available neuro_data_cdhw dataset
+    data_root = os.path.expanduser('~/neuro_data_cdhw/')
+    input_h5data = [
+        (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+        for i in range(3)
+    ]
+    target_h5data = [
+        (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+        for i in range(3)
+    ]
+    valid_indices = [2]
+
+    dataset_mean = (155.291411,)
+    dataset_std = (42.599973,)
+    class_weights = torch.tensor([0.2653, 0.7347])
 
 max_steps = args.max_steps
 max_runtime = args.max_runtime
@@ -95,11 +114,6 @@ if args.resume is not None:  # Load pretrained network
         # Assume it's a complete saved ScriptModule
         model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
 
-# These statistics are computed from the training dataset.
-# Remember to re-compute and change them when switching the dataset.
-dataset_mean = (155.291411,)
-dataset_std = (42.599973,)
-
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
@@ -107,6 +121,7 @@ common_transforms = [
 ]
 train_transform = transforms.Compose(common_transforms + [
     # transforms.RandomGrayAugment(channels=[0], prob=0.3),
+    # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
     # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
     # transforms.RandomBlurring({'probability': 0.5})
 ])
@@ -120,8 +135,8 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'num_classes': 2,
 }
 train_dataset = PatchCreator(
-    input_h5data=input_h5data[:2],
-    target_h5data=target_h5data[:2],
+    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
     train=True,
     epoch_size=args.epoch_size,
     warp_prob=0.2,
@@ -133,8 +148,8 @@ train_dataset = PatchCreator(
     transform=train_transform,**common_data_kwargs
 )
 valid_dataset = PatchCreator(
-    input_h5data=[input_h5data[2]],
-    target_h5data=[target_h5data[2]],
+    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
     epoch_size=10,  # How many samples to use for each validation run
     warp_prob=0,
@@ -142,9 +157,9 @@ valid_dataset = PatchCreator(
     **common_data_kwargs
 )
 
+# Use first validation cube for previews. Can be set to any other data source.
 preview_batch = get_preview_batch(
-    fname=os.path.join(data_root, 'raw_2.h5'),
-    key='raw',
+    h5data=input_h5data[valid_indices[0]],
     preview_shape=(32, 320, 320),
     transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
@@ -178,8 +193,6 @@ valid_metrics = {
     # 'val_AUROC': metrics.bin_auroc,  # expensive
 }
 
-# Class weights for imbalanced dataset
-class_weights = torch.tensor([0.2653,  0.7347])
 
 # criterion = nn.CrossEntropyLoss(weight=class_weights)
 criterion = DiceLoss(apply_softmax=True)

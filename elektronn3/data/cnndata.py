@@ -455,12 +455,12 @@ class PatchCreator(data.Dataset):
 
 
 def get_preview_batch(
-        fname: str,
-        key: str,
+        h5data: Tuple[str, str],
         preview_shape: Optional[Tuple[int, ...]] = None,
         transform: Callable = transforms.Identity(),
         in_memory: bool = False
 ) -> torch.Tensor:
+    fname, key = h5data
     inp_h5 = h5py.File(fname, 'r')[key]
     if in_memory:
         inp_h5 = inp_h5.value
