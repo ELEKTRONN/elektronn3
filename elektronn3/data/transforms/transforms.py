@@ -159,9 +159,9 @@ class RandomGammaCorrection:
 
     Args:
         gamma_std: standard deviation of the gamma value.
-        channels: If ``channels`` is ``None``, the noise is applied to
+        channels: If ``channels`` is ``None``, the change is applied to
             all channels of the input tensor.
-            If ``channels`` is a ``Sequence[int]``, noise is only applied
+            If ``channels`` is a ``Sequence[int]``, change is only applied
             to the specified channels.
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
@@ -449,8 +449,6 @@ class RandomFlip:
                     target = np.ascontiguousarray(target)
         return inp, target
 
-
-# TODO: Handle target striding and offsets via transforms?
 
 # TODO: Functional API (transforms.functional).
 #       The current object-oriented interface should be rewritten as a wrapper
