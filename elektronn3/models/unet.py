@@ -114,7 +114,7 @@ class AdaptiveConvTranspose3d(nn.Module):
             self.forward = self.forward3d
 
     def forward2d(self, x):
-        # assert x.shape[0] == 1, 'Only batch size N=1 is supported!'  # TODO: Support N>1
+        assert x.shape[0] == 1, 'Only batch size N=1 is supported!'  # TODO: Support N>1
         sq = x.squeeze(0)  # (N, C, D, H, W) -> (C, D, H, W)
         view2d = sq.transpose(0, 1)  # -> (D, C, H, W)
         out2d = self.conv(view2d)
@@ -128,18 +128,18 @@ class AdaptiveConvTranspose3d(nn.Module):
     def forward(self, x): raise NotImplementedError()  # Chosen by __init__()
 
 
-def get_conv(dim=3):
+def get_conv(dim=3, adaptive=False):
     if dim == 3:
-        return AdaptiveConv3d
+        return AdaptiveConv3d if adaptive else nn.Conv3d
     elif dim == 2:
         return nn.Conv2d
     else:
         raise ValueError('dim has to be 2 or 3')
 
 
-def get_convtranspose(dim=3):
+def get_convtranspose(dim=3, adaptive=False):
     if dim == 3:
-        return AdaptiveConvTranspose3d
+        return AdaptiveConvTranspose3d if adaptive else nn.ConvTranspose3d
     elif dim == 2:
         return nn.ConvTranspose2d
     else:
@@ -179,12 +179,12 @@ def planar_pad(x):
 
 
 def _conv3(in_channels, out_channels, kernel_size=3, stride=1,
-           padding=1, bias=True, planar=False, dim=3):
+           padding=1, bias=True, planar=False, dim=3, adaptive=False):
     if planar:
         stride = planar_kernel(stride)
         padding = planar_pad(padding)
         kernel_size = planar_kernel(kernel_size)
-    return get_conv(dim)(
+    return get_conv(dim, adaptive)(
         in_channels,
         out_channels,
         kernel_size=kernel_size,
@@ -194,7 +194,7 @@ def _conv3(in_channels, out_channels, kernel_size=3, stride=1,
     )
 
 
-def _upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
+def _upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, adaptive=False):
     kernel_size = 2
     stride = 2
     scale_factor = 2
@@ -203,7 +203,7 @@ def _upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
         stride = planar_kernel(stride)
         scale_factor = planar_kernel(scale_factor)
     if mode == 'transpose':
-        return get_convtranspose(dim)(
+        return get_convtranspose(dim, adaptive)(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
@@ -255,7 +255,7 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 batch_norm=False, dim=3, conv_mode='same'):
+                 batch_norm=False, dim=3, conv_mode='same', adaptive=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -265,10 +265,12 @@ class DownConv(nn.Module):
         padding = 1 if 'same' in conv_mode else 0
 
         self.conv1 = _conv3(
-            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
+            adaptive=adaptive
         )
         self.conv2 = _conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
+            adaptive=adaptive
         )
 
         if self.pooling:
@@ -331,7 +333,7 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', batch_norm=False, dim=3, conv_mode='same'):
+                 activation='relu', batch_norm=False, dim=3, conv_mode='same', adaptive=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -342,20 +344,23 @@ class UpConv(nn.Module):
         padding = 1 if 'same' in conv_mode else 0
 
         self.upconv = _upconv2(self.in_channels, self.out_channels,
-            mode=self.up_mode, planar=planar, dim=dim
+            mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
         )
 
         if self.merge_mode == 'concat':
             self.conv1 = _conv3(
-                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
+                adaptive=adaptive
             )
         else:
             # num of input channels to conv2 is same
             self.conv1 = _conv3(
-                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
+                adaptive=adaptive
             )
         self.conv2 = _conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
+            adaptive=adaptive
         )
 
         self.act0 = _get_activation(activation)
@@ -552,6 +557,11 @@ class UNet(nn.Module):
               network is zero-padded to the same spatial shape as the input
               tensor. This mode is only intended for testing purposes and
               shouldn't be used normally.
+        adaptive: If ``True``, use custom convolution/transposed
+            convolution layers for improved performance in planar blocks.
+            This is an experimental feature and it is not guaranteed to give
+            the same results as the native PyTorch convolution/transposed
+            convolution implementations.
     """
 
     def __init__(
@@ -567,6 +577,7 @@ class UNet(nn.Module):
             batch_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
+            adaptive=False,
     ):
         super().__init__()
 
@@ -621,6 +632,7 @@ class UNet(nn.Module):
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
+        self.adaptive = adaptive
 
         self.down_convs = []
         self.up_convs = []
@@ -645,7 +657,8 @@ class UNet(nn.Module):
                 activation=activation,
                 batch_norm=batch_norm,
                 dim=dim,
-                conv_mode=conv_mode
+                conv_mode=conv_mode,
+                adaptive=adaptive
             )
             self.down_convs.append(down_conv)
 
@@ -666,7 +679,8 @@ class UNet(nn.Module):
                 activation=activation,
                 batch_norm=batch_norm,
                 dim=dim,
-                conv_mode=conv_mode
+                conv_mode=conv_mode,
+                adaptive=adaptive
             )
             self.up_convs.append(up_conv)
 
@@ -691,6 +705,11 @@ class UNet(nn.Module):
             self.weight_init(m)
 
     def forward(self, x):
+        if self.adaptive and x.shape[0] > 1:
+            raise NotImplementedError(
+                'Adaptive convolutions are not (yet) supported for batch sizes'
+                ' higher than 1. Please either set the batch size to 1 or set'
+                ' adaptive=False.')
         sh = x.shape[2:]
         encoder_outs = []
 
