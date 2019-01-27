@@ -45,7 +45,7 @@ class DiceLoss(torch.nn.Module):
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
         self.register_buffer('weight', weight)
-        self.exp_ch_axis = onehot_target
+        self.onehot_target = onehot_target
 
     def forward(self, output, target):
         probs = self.softmax(output)
