@@ -59,9 +59,6 @@ from elektronn3.training import Trainer, Backup, DiceLoss, metrics, Padam
 from elektronn3.models.unet import UNet
 
 
-batch_size = 1
-
-adaptive = True if batch_size == 1 else False
 model = UNet(
     n_blocks=3,
     start_filts=32,
@@ -69,7 +66,7 @@ model = UNet(
     activation='relu',
     batch_norm=True,
     # conv_mode='valid',
-    adaptive=adaptive
+    adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
 if not args.disable_trace:
     x = torch.randn(1, 1, 32, 64, 64, device=device)
@@ -206,7 +203,7 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batchsize=batch_size,
+    batchsize=1,
     num_workers=1,
     save_root=save_root,
     exp_name=args.exp_name,

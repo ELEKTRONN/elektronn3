@@ -58,7 +58,6 @@ class AdaptiveConv3d(nn.Module):
     This is a workaround for https://github.com/pytorch/pytorch/issues/7740.
 
     Current limitations:
-    - Only works with batch size N=1
     - Expects ``kernel_size`` to be passed as a keyword arg, not positional."""
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -75,12 +74,15 @@ class AdaptiveConv3d(nn.Module):
             self.forward = self.forward3d
 
     def forward2d(self, x):
-        assert x.shape[0] == 1, 'Only batch size N=1 is supported!'  # TODO: Support N>1
-        sq = x.squeeze(0)  # (N, C, D, H, W) -> (C, D, H, W)
-        view2d = sq.transpose(0, 1)  # -> (D, C, H, W)
-        out2d = self.conv(view2d)
-        sout3d = out2d.transpose(0, 1)  # -> (C, D, H, W)
-        out3d = sout3d.unsqueeze(0)  # -> (N, C, D, H, W)
+        n, c, d, h, w = x.shape
+        transp = x.transpose(1, 2)  # -> (N, D, C, H, W)
+        view2d = transp.reshape(n * d, c, h, w)  # -> (N * D, C, H, W)
+        out2dtransp = self.conv(view2d)
+        h, w = out2dtransp.shape[-2:]  # H and W can be changed due to convolution
+        c = self.conv.out_channels
+        out3dtransp = out2dtransp.reshape(n, d, c, h, w)  # -> (N, D, C, H, W)
+        out3d = out3dtransp.transpose(1, 2)  # -> (N, C, D, H, W)
+
         return out3d
 
     def forward3d(self, x):
@@ -97,7 +99,6 @@ class AdaptiveConvTranspose3d(nn.Module):
     This is a workaround for https://github.com/pytorch/pytorch/issues/7740.
 
     Current limitations:
-    - Only works with batch size N=1
     - Expects ``kernel_size`` to be passed as a keyword arg, not positional."""
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -114,12 +115,15 @@ class AdaptiveConvTranspose3d(nn.Module):
             self.forward = self.forward3d
 
     def forward2d(self, x):
-        assert x.shape[0] == 1, 'Only batch size N=1 is supported!'  # TODO: Support N>1
-        sq = x.squeeze(0)  # (N, C, D, H, W) -> (C, D, H, W)
-        view2d = sq.transpose(0, 1)  # -> (D, C, H, W)
-        out2d = self.conv(view2d)
-        sout3d = out2d.transpose(0, 1)  # -> (C, D, H, W)
-        out3d = sout3d.unsqueeze(0)  # -> (N, C, D, H, W)
+        n, c, d, h, w = x.shape
+        transp = x.transpose(1, 2)  # -> (N, D, C, H, W)
+        view2d = transp.reshape(n * d, c, h, w)  # -> (N * D, C, H, W)
+        out2dtransp = self.conv(view2d)
+        h, w = out2dtransp.shape[-2:]  # H and W can be changed due to convolution
+        c = self.conv.out_channels
+        out3dtransp = out2dtransp.reshape(n, d, c, h, w)  # -> (N, D, C, H, W)
+        out3d = out3dtransp.transpose(1, 2)  # -> (N, C, D, H, W)
+
         return out3d
 
     def forward3d(self, x):
@@ -577,7 +581,7 @@ class UNet(nn.Module):
             batch_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
-            adaptive=False,
+            adaptive: bool = False
     ):
         super().__init__()
 
