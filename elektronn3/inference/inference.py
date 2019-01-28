@@ -342,7 +342,7 @@ class Predictor:
     ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
-        out = torch.empty(tuple(self.out_shape), dtype=np.float32)
+        out = torch.empty(tuple(self.out_shape), dtype=torch.float32)
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
