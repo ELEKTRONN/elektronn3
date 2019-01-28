@@ -180,10 +180,10 @@ def _tb_log_sample_images(
     Note: Training images are possibly augmented, so the plots may look
         distorted/weirdly colored.
     """
-
-    inp_batch = images['inp']
-    target_batch = images['target']
-    out_batch = images['out']
+    # Always only use the first element of the batch dimension
+    inp_batch = images['inp'][:1]
+    target_batch = images['target'][:1]
+    out_batch = images['out'][:1]
 
     if trainer.apply_softmax_for_prediction:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
