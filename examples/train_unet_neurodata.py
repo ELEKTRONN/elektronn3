@@ -196,7 +196,7 @@ valid_metrics = {
 
 
 # criterion = nn.CrossEntropyLoss(weight=class_weights)
-criterion = DiceLoss(apply_softmax=True)
+criterion = DiceLoss(apply_softmax=True, weight=class_weights)
 
 # Create trainer
 trainer = Trainer(
