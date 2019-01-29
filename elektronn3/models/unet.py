@@ -709,11 +709,6 @@ class UNet(nn.Module):
             self.weight_init(m)
 
     def forward(self, x):
-        if self.adaptive and x.shape[0] > 1:
-            raise NotImplementedError(
-                'Adaptive convolutions are not (yet) supported for batch sizes'
-                ' higher than 1. Please either set the batch size to 1 or set'
-                ' adaptive=False.')
         sh = x.shape[2:]
         encoder_outs = []
 
