@@ -207,7 +207,7 @@ def flatten_probas(probas, labels, ignore=None):
     if probas.dim() == 4:
         probas = probas.permute(0, 2, 3, 1).contiguous().view(-1, C)  # B * H * W, C = P, C
     elif probas.dim() == 5:  # 3D images
-        probas = probas.permute(0, 2, 3, 4, 1).contiguous().view(-1, C)  # B * C * H * W, C = P, C
+        probas = probas.permute(0, 2, 3, 4, 1).contiguous().view(-1, C)  # B * D * H * W, C = P, C
     labels = labels.view(-1)
     if ignore is None:
         return probas, labels
