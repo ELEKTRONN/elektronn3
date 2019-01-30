@@ -216,7 +216,8 @@ trainer = Trainer(
     num_classes=train_dataset.num_classes,
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),
-    preview_overlap_shape=(32, 64, 64)
+    preview_overlap_shape=(32, 64, 64),
+    # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
 # Archiving training script, src folder, env info

@@ -149,6 +149,10 @@ class Trainer:
             It is called once each ``preview_interval`` epochs.
             If ``None``, a tensorboard-based default handler is used that
             works for most classification scenarios.
+        mixed_precision: If ``True``, enable Automated Mixed Precision training
+            powered by https://github.com/NVIDIA/apex to reduce memory usage
+            and (if a GPU with Tensor Cores is used) make training much faster.
+            This is currently experimental and might cause instabilities.
     """
     # TODO: Write logs of the text logger to a file in save_root. The file
     #       handler should be replaced (see elektronn3.logger module).
@@ -193,6 +197,7 @@ class Trainer:
             num_classes: Optional[int] = None,
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
+            mixed_precision: bool = False,
     ):
         if preview_batch is not None and\
                 (preview_tile_shape is None or preview_overlap_shape is None):
@@ -242,6 +247,7 @@ class Trainer:
         self.apply_softmax_for_prediction = apply_softmax_for_prediction
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
+        self.mixed_precision = mixed_precision
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -250,6 +256,10 @@ class Trainer:
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
+
+        if self.mixed_precision:
+            from apex import amp
+            self.amp_handle = amp.init()
 
         if exp_name is None:  # Auto-generate a name based on model name and ISO timestamp
             timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
@@ -419,7 +429,11 @@ class Trainer:
 
             # update step
             self.optimizer.zero_grad()
-            loss.backward()
+            if self.mixed_precision:
+                with self.amp_handle.scale_loss(loss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
             self.optimizer.step()
 
             with torch.no_grad():
