@@ -69,6 +69,11 @@ model = UNet(
     adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
 if not args.disable_trace:
+    if getattr(model, 'checkpointing', False):
+        raise NotImplementedError(
+            'Traced models with checkpointing currently don\'t '
+            'work, so either run with --disable-trace or disable '
+            'checkpointing.')
     x = torch.randn(1, 1, 32, 64, 64, device=device)
     model = torch.jit.trace(model, x)
 

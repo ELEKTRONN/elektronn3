@@ -40,6 +40,7 @@ from typing import Sequence, Union, Tuple
 import torch
 import torch.nn as nn
 from torch.nn import init
+from torch.utils.checkpoint import checkpoint
 
 
 DEBUG = False
@@ -566,6 +567,13 @@ class UNet(nn.Module):
             This is an experimental feature and it is not guaranteed to give
             the same results as the native PyTorch convolution/transposed
             convolution implementations.
+        checkpointing: If ``True``, use gradient checkpointing to reduce memory
+            consumption while training. This makes the backward pass a bit
+            slower, but the memory savings can be huge (usually around
+            20% - 50%, depending on hyperparameters).
+            Checkpoints are made after each network *block*.
+            See https://pytorch.org/docs/master/checkpoint.html and
+            https://arxiv.org/abs/1604.06174 for more details.
     """
 
     def __init__(
@@ -581,7 +589,8 @@ class UNet(nn.Module):
             batch_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
-            adaptive: bool = False
+            adaptive: bool = False,
+            checkpointing: bool = False
     ):
         super().__init__()
 
@@ -637,6 +646,7 @@ class UNet(nn.Module):
         self.activation = activation
         self.dim = dim
         self.adaptive = adaptive
+        self.checkpointing = checkpointing
 
         self.down_convs = []
         self.up_convs = []
@@ -708,6 +718,18 @@ class UNet(nn.Module):
         for i, m in enumerate(self.modules()):
             self.weight_init(m)
 
+    def _cpfwd_up(self, module):
+        """Custom forward helper for use in gradient checkpointing"""
+        def custom_forward(*inputs):
+            return module(inputs[0], inputs[1])
+        return custom_forward
+
+    def _cpfwd_down(self, module):
+        """Custom forward helper for use in gradient checkpointing"""
+        def custom_forward(*inputs):
+            return module(inputs[0])
+        return custom_forward
+
     def forward(self, x):
         sh = x.shape[2:]
         encoder_outs = []
@@ -719,7 +741,10 @@ class UNet(nn.Module):
             #  so it won't impact execution speed if it's jit-compiled.
             # if torch.any(torch.tensor(x.shape[2:]) % 2 != 0):
             #     raise RuntimeError(self.pool_error_str)
-            x, before_pool = module(x)
+            if self.checkpointing:
+                x, before_pool = checkpoint(self._cpfwd_down(module), x)
+            else:
+                x, before_pool = module(x)
             _print(before_pool.shape)
             encoder_outs.append(before_pool)
 
@@ -728,7 +753,10 @@ class UNet(nn.Module):
             _print(f'U{i}: {module}')
             before_pool = encoder_outs[-(i+2)]
             _print(f'In: {before_pool.shape}')
-            x = module(before_pool, x)
+            if self.checkpointing:
+                x = checkpoint(self._cpfwd_up(module), before_pool, x)
+            else:
+                x = module(before_pool, x)
             _print(f'Out: {x.shape}')
 
         # No softmax is used. This means you need to use
