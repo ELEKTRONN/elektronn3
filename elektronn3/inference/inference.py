@@ -105,12 +105,6 @@ Tensor
             f'by tile_shape {tile_shape}.'
         )
 
-    if verbose:
-        _tqdm = tqdm
-    else:  # Make _tqdm a no-op (disabling progress indicator)
-        def _tqdm(x, *_, **__):
-            return x
-
     if offset is None:
         offset = np.zeros_like(tile_shape)
     else:
@@ -144,7 +138,11 @@ Tensor
 
     tile_ranges = [range(t) for t in tiles]
     # TODO: Handle fractional inputshape-to-tile ratio
-    for tile_pos in _tqdm(itertools.product(*tile_ranges), total=num_tiles):
+    pbar = tqdm(
+        itertools.product(*tile_ranges), 'Predicting',
+        total=num_tiles, disable=not verbose
+    )
+    for tile_pos in pbar:
         tile_pos = np.array(tile_pos)
         # Calculate corner coordinates of the current output tile
         out_low_corner = tile_shape * tile_pos
