@@ -718,18 +718,6 @@ class UNet(nn.Module):
         for i, m in enumerate(self.modules()):
             self.weight_init(m)
 
-    def _cpfwd_up(self, module):
-        """Custom forward helper for use in gradient checkpointing"""
-        def custom_forward(*inputs):
-            return module(inputs[0], inputs[1])
-        return custom_forward
-
-    def _cpfwd_down(self, module):
-        """Custom forward helper for use in gradient checkpointing"""
-        def custom_forward(*inputs):
-            return module(inputs[0])
-        return custom_forward
-
     def forward(self, x):
         sh = x.shape[2:]
         encoder_outs = []
@@ -742,7 +730,7 @@ class UNet(nn.Module):
             # if torch.any(torch.tensor(x.shape[2:]) % 2 != 0):
             #     raise RuntimeError(self.pool_error_str)
             if self.checkpointing:
-                x, before_pool = checkpoint(self._cpfwd_down(module), x)
+                x, before_pool = checkpoint(module, x)
             else:
                 x, before_pool = module(x)
             _print(before_pool.shape)
@@ -754,7 +742,7 @@ class UNet(nn.Module):
             before_pool = encoder_outs[-(i+2)]
             _print(f'In: {before_pool.shape}')
             if self.checkpointing:
-                x = checkpoint(self._cpfwd_up(module), before_pool, x)
+                x = checkpoint(module, before_pool, x)
             else:
                 x = module(before_pool, x)
             _print(f'Out: {x.shape}')
