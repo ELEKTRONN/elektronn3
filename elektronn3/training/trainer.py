@@ -19,6 +19,7 @@ import tensorboardX
 import torch
 import torch.utils.data
 from torch.optim.lr_scheduler import StepLR
+from tqdm import tqdm
 
 from elektronn3.training import handlers
 from elektronn3.training.train_utils import Timer, pretty_string_time
@@ -416,7 +417,8 @@ class Trainer:
         running_mean_target = 0
         running_vx_size = 0
         timer = Timer()
-        for i, (inp, target) in enumerate(self.train_loader):
+        pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
+        for i, (inp, target) in pbar:
             inp = inp.to(self.device, non_blocking=True)
             target = target.to(self.device, non_blocking=True)
 
@@ -441,7 +443,7 @@ class Trainer:
                 stats['tr_loss'] += loss
                 acc = float(metrics.bin_accuracy(target, out))  # TODO
                 mean_target = float(target.to(torch.float32).mean())
-                print(f'{self.step:6d}, loss: {loss:.4f}', end='\r')
+                pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             # this was changed to support ReduceLROnPlateau which does not implement get_lr
@@ -489,7 +491,7 @@ class Trainer:
 
         val_loss = 0
         stats = {name: 0 for name in self.valid_metrics.keys()}
-        for inp, target in self.valid_loader:
+        for inp, target in tqdm(self.valid_loader, 'Validating'):
             inp = inp.to(self.device, non_blocking=True)
             target = target.to(self.device, non_blocking=True)
             with torch.no_grad():
