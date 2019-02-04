@@ -59,6 +59,8 @@ from elektronn3.training import Trainer, Backup, DiceLoss, metrics, Padam
 from elektronn3.models.unet import UNet
 
 
+torch.backends.cudnn.benchmark = True  # Improves overall performance
+
 model = UNet(
     n_blocks=3,
     start_filts=32,
