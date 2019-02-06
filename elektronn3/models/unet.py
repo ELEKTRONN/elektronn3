@@ -43,14 +43,6 @@ from torch.nn import init
 from torch.utils.checkpoint import checkpoint
 
 
-DEBUG = False
-if DEBUG:
-    _print = print
-else:
-    def _print(*args, **kwargs):
-        pass
-
-
 class AdaptiveConv3d(nn.Module):
     """Equivalent to ``torch.nn.Conv3d`` except that if
     ``kernel_size[0] == 1``, ``torch.nn.Conv2d`` is used internally in
@@ -657,7 +649,6 @@ class UNet(nn.Module):
             outs = self.start_filts * (2**i)
             pooling = True if i < n_blocks - 1 else False
             planar = i in self.planar_blocks
-            _print(f'D{i}: planar = {planar}')
 
             down_conv = DownConv(
                 ins,
@@ -678,7 +669,6 @@ class UNet(nn.Module):
             ins = outs
             outs = ins // 2
             planar = n_blocks - 2 - i in self.planar_blocks
-            _print(f'U{i}: planar = {planar}')
 
             up_conv = UpConv(
                 ins,
@@ -702,8 +692,6 @@ class UNet(nn.Module):
 
         self.reset_params()
 
-        self.pool_error_str = f'Spatial input shape has to be divisible by {2 ** n_blocks}!'
-
     @staticmethod
     def weight_init(m):
         if isinstance(m, (nn.Conv3d, nn.Conv2d, nn.ConvTranspose3d, nn.ConvTranspose2d)):
@@ -720,35 +708,25 @@ class UNet(nn.Module):
 
         # Encoder pathway, save outputs for merging
         for i, module in enumerate(self.down_convs):
-            _print(f'D{i}: {module}')
-            # Note that this check won't be picked up by PyTorch's tracing JIT compiler,
-            #  so it won't impact execution speed if it's jit-compiled.
-            # if torch.any(torch.tensor(x.shape[2:]) % 2 != 0):
-            #     raise RuntimeError(self.pool_error_str)
             if self.checkpointing:
                 x, before_pool = checkpoint(module, x)
             else:
                 x, before_pool = module(x)
-            _print(before_pool.shape)
             encoder_outs.append(before_pool)
 
         # Decoding by UpConv and merging with saved outputs of encoder
         for i, module in enumerate(self.up_convs):
-            _print(f'U{i}: {module}')
             before_pool = encoder_outs[-(i+2)]
-            _print(f'In: {before_pool.shape}')
             if self.checkpointing:
                 x = checkpoint(module, before_pool, x)
             else:
                 x = module(before_pool, x)
-            _print(f'Out: {x.shape}')
 
-        # No softmax is used. This means you need to use
-        # nn.CrossEntropyLoss is your training script,
-        # as this module includes a softmax already.
+        # No softmax is used, so you need to apply it in the loss.
         x = self.conv_final(x)
-        # Temporarily store output for receptive field estimation using fornoxai/receptivefield
-        self.feature_maps = [x]
+        # Uncomment the following line to temporarily store output for
+        #  receptive field estimation using fornoxai/receptivefield:
+        # self.feature_maps = [x]  # Currently disabled to save memory
         return x
 
 
