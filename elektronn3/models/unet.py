@@ -558,10 +558,6 @@ class UNet(nn.Module):
                 the borders. Most notably this is the case if you do training
                 and inference not on small patches, but on complete images in
                 a single step.
-            - 'valid_padback': Same as valid, but the final output of the
-              network is zero-padded to the same spatial shape as the input
-              tensor. This mode is only intended for testing purposes and
-              shouldn't be used normally.
         adaptive: If ``True``, use custom convolution/transposed
             convolution layers for improved performance in planar blocks.
             This is an experimental feature and it is not guaranteed to give
@@ -753,19 +749,6 @@ class UNet(nn.Module):
         x = self.conv_final(x)
         # Temporarily store output for receptive field estimation using fornoxai/receptivefield
         self.feature_maps = [x]
-        if self.conv_mode == 'valid_padback':
-            # Workaround to recover spatial shape at the end
-            # TODO: Remove this once we support out_shape != in_shape fully in e3
-            pad = []
-            for a, b in zip(sh, x.shape[2:]):
-                diff = (a - b) // 2
-                pad.extend([diff, diff])
-            pad.reverse()  # Why do PyTorch padding layers suddenly expect (H, W, D) order???
-
-            if x.dim() == 4:
-                x = torch.nn.ConstantPad2d(pad, 0)(x)
-            elif x.dim() == 5:
-                x = torch.nn.ConstantPad3d(pad, 0)(x)
         return x
 
 
