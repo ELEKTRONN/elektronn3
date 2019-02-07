@@ -8,10 +8,10 @@
 Transformations (data augmentation, normalization etc.) for semantic segmantation.
 
 Important note: The transformations here have a similar interface to
-torchvsion.transforms, but there are two key differences:
+torchvision.transforms, but there are two key differences:
 
 1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
-  pairs instead of just inp to inp. Most transforms don't change the target, though.
+  pairs instead of just inp to transformed_inp. Most transforms don't change the target, though.
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
