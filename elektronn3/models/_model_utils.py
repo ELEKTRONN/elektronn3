@@ -107,3 +107,8 @@ def change_conv1_input_channels(
         new_in_channels, conv1.out_channels, conv1.kernel_size,
         conv1.stride, conv1.padding, conv1.dilation, conv1.groups, conv1.bias
     )
+
+
+def num_params(model: torch.nn.Module) -> int:
+    """Total number of trainable parameters."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)

@@ -4,13 +4,14 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
+import gc
 import logging
 import os
 import traceback
 import shutil
 
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any, Sequence
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List
 
 import inspect
 import IPython
@@ -419,29 +420,34 @@ class Trainer:
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target) in pbar:
-            inp = inp.to(self.device, non_blocking=True)
-            target = target.to(self.device, non_blocking=True)
+            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+            dinp = inp.to(self.device, non_blocking=True)
+            dtarget = target.to(self.device, non_blocking=True)
 
             # forward pass
-            out = self.model(inp)
-            loss = self.criterion(out, target)
-            if torch.isnan(loss):
+            dout = self.model(dinp)
+            dloss = self.criterion(dout, dtarget)
+            if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
 
             # update step
             self.optimizer.zero_grad()
             if self.mixed_precision:
-                with self.amp_handle.scale_loss(loss, self.optimizer) as scaled_loss:
+                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
-                loss.backward()
+                dloss.backward()
             self.optimizer.step()
+            # End of core training loop on self.device
+
+            # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
+            out = dout.detach().cpu()  # Copy model output to host memory for metrics, visualization
 
             with torch.no_grad():
-                loss = float(loss)
+                loss = float(dloss)
                 stats['tr_loss'] += loss
-                acc = float(metrics.bin_accuracy(target, out))  # TODO
+                acc = float(metrics.bin_accuracy(target, out))
                 mean_target = float(target.to(torch.float32).mean())
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
@@ -464,9 +470,9 @@ class Trainer:
             if i == len(self.train_loader) - 1:  # Last step in this epoch
                 # Preserve last training batch and network output for later
                 # visualization
-                images['inp'] = inp.detach().cpu().numpy()
-                images['target'] = target.detach().cpu().numpy()
-                images['out'] = out.detach().cpu().numpy()
+                images['inp'] = inp.numpy()
+                images['target'] = target.numpy()
+                images['out'] = out.numpy()
 
             self.step += 1
             if self.step >= max_steps:
@@ -491,12 +497,15 @@ class Trainer:
 
         val_loss = 0
         stats = {name: 0 for name in self.valid_metrics.keys()}
+        # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
         for inp, target in tqdm(self.valid_loader, 'Validating'):
-            inp = inp.to(self.device, non_blocking=True)
-            target = target.to(self.device, non_blocking=True)
+            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+            dinp = inp.to(self.device, non_blocking=True)
+            dtarget = target.to(self.device, non_blocking=True)
             with torch.no_grad():
-                out = self.model(inp)
-                val_loss += self.criterion(out, target).item() / len(self.valid_loader)
+                dout = self.model(dinp)
+                val_loss += self.criterion(dout, dtarget).item() / len(self.valid_loader)
+                out = dout.detach().cpu()
                 for name, evaluator in self.valid_metrics.items():
                     stats[name] += evaluator(target, out) / len(self.valid_loader)
 
@@ -504,9 +513,9 @@ class Trainer:
             self.sample_plotting_handler(
                 self,
                 {
-                    'inp': inp.detach().cpu().numpy(),
-                    'out': out.detach().cpu().numpy(),
-                    'target': target.detach().cpu().numpy()
+                    'inp': inp.numpy(),
+                    'out': out.numpy(),
+                    'target': target.numpy()
                 },
                 group='val_samples'
             )
@@ -670,3 +679,28 @@ class Backup:
         env_info = collect_env.get_pretty_env_info()
         with open(self.save_path + '/env_info.txt', 'w') as f:
             f.write(env_info)
+
+
+def findcudatensors() -> Tuple[int, List[torch.Tensor]]:
+    """Find currently living tensors that are allocated on cuda device memory.
+    This can be used for debugging memory leaks:
+    If ``findcudatensors()[0]`` grows unexpectedly between GPU computations,
+    you can look at the returned ``tensors`` list to find out what tensors
+    are currently allocated, for example
+    ``print([x.shape for x in findcudatensors()[1])``.
+
+    Returns a tuple of
+    - total memory usage of found tensors in MiB
+    - a list of all of those tensors, ordered by size."""
+    tensors = []
+    for obj in gc.get_objects():
+        try:
+            if torch.is_tensor(obj) \
+                    and obj.device.type == 'cuda' \
+                    and not isinstance(obj, torch.nn.Parameter):  # Exclude model params
+                tensors.append(obj)
+        except:
+            pass
+    tensors.sort(key=lambda x: x.numel())
+    total_mib = sum(x.numel() * 32 for x in tensors) / 1024**2  # Assuming float32
+    return total_mib, tensors
