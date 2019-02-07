@@ -60,7 +60,6 @@ from elektronn3.models.unet import UNet
 
 
 torch.backends.cudnn.benchmark = True  # Improves overall performance
-
 model = UNet(
     n_blocks=3,
     start_filts=32,
@@ -95,7 +94,7 @@ if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     dataset_mean = (0.6170815,)
     dataset_std = (0.15687169,)
     # Class weights for imbalanced dataset
-    class_weights = torch.tensor([0.2808, 0.7192])
+    class_weights = torch.tensor([0.2808, 0.7192]).to(device)
 else:  # Use publicly available neuro_data_cdhw dataset
     data_root = os.path.expanduser('~/neuro_data_cdhw/')
     input_h5data = [
@@ -110,7 +109,7 @@ else:  # Use publicly available neuro_data_cdhw dataset
 
     dataset_mean = (155.291411,)
     dataset_std = (42.599973,)
-    class_weights = torch.tensor([0.2653, 0.7347])
+    class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
 max_steps = args.max_steps
 max_runtime = args.max_runtime
