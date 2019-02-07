@@ -10,6 +10,7 @@ import os
 import traceback
 import shutil
 
+from pickle import PickleError
 from textwrap import dedent
 from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List
 
@@ -81,6 +82,10 @@ class Trainer:
             training experiment.
             If ``exp_name`` is not set, it is auto-generated from the model
             name and a time stamp in the format ``'%y-%m-%d_%H-%M-%S'``.
+        example_input: An example input tensor that can be fed to the
+            ``model``. This is used for JIT tracing during model serialization.
+        enable_save_trace: If ``True``, the model is JIT-traced with
+            ``example_input`` every time it is serialized to disk.
         batchsize: Desired batch size of training samples.
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
@@ -187,6 +192,8 @@ class Trainer:
             preview_interval: int = 5,
             offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
+            example_input: Optional[torch.Tensor] = None,
+            enable_save_trace: bool = False,
             batchsize: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
@@ -244,6 +251,8 @@ class Trainer:
         self.offset = offset
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
+        self.example_input = example_input
+        self.enable_save_trace = enable_save_trace
         self.batchsize = batchsize
         self.num_workers = num_workers
         self.apply_softmax_for_prediction = apply_softmax_for_prediction
@@ -551,6 +560,7 @@ class Trainer:
 
         If ``suffix`` is defined, it will be added before the file extension.
         """
+        # TODO: Document ScriptModule saving special cases
         # TODO: Logging
         model = self.model
         # We do this awkard check because there are too many different
@@ -575,8 +585,19 @@ class Trainer:
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
-        except TypeError as exc:
-            # If model is a ScriptModule, it can't be saved with torch.save()
+            if self.example_input is not None and self.enable_save_trace:
+                # Additionally trace and serialize the model in eval + train mode
+                model_path += 's'
+                traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+                traced.save(model_path)
+                # Uncomment these lines if separate traces for train/eval are required:
+                # traced_eval = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+                # traced_eval.save('eval_' + model_path)
+                # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
+                # traced_train.save('train_' + model_path)
+
+        except (TypeError, PickleError) as exc:
+            # If model is already a ScriptModule, it can't be saved with torch.save()
             # Use ScriptModule.save() instead in this case.
             # Using the file extension '.pts' to show it's a ScriptModule.
             if isinstance(model, torch.jit.ScriptModule):

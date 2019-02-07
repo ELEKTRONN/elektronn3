@@ -38,8 +38,12 @@ parser.add_argument(
          'ScriptModule from which to resume training.'
 )
 parser.add_argument(
-    '-d', '--disable-trace', action='store_true',
-    help='Disable tracing JIT compilation of the model.'
+    '-j', '--jit', metavar='MODE', default='onsave',
+    choices=['disabled', 'train', 'onsave'],
+    help="""Options:
+"disabled": Completely disable JIT tracing;
+"onsave": Use regular Python model for training, but trace it on-demand for saving training state;
+"train": Use traced model for training and serialize it on disk"""
 )
 args = parser.parse_args()
 
@@ -70,14 +74,21 @@ model = UNet(
     # conv_mode='valid',
     adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
-if not args.disable_trace:
+# Example for a model-compatible input.
+example_input = torch.randn(1, 1, 32, 64, 64)
+
+enable_save_trace = False if args.jit == 'disabled' else True
+if args.jit == 'onsave':
+    # Make sure that tracing works
+    tracedmodel = torch.jit.trace(model, example_input.to(device))
+elif args.jit == 'train':
     if getattr(model, 'checkpointing', False):
         raise NotImplementedError(
             'Traced models with checkpointing currently don\'t '
             'work, so either run with --disable-trace or disable '
             'checkpointing.')
-    x = torch.randn(1, 1, 32, 64, 64, device=device)
-    model = torch.jit.trace(model, x)
+    tracedmodel = torch.jit.trace(model, example_input.to(device))
+    model = tracedmodel
 
 
 # USER PATHS
@@ -172,13 +183,6 @@ preview_batch = get_preview_batch(
     transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
 
-# Set up optimization
-# optimizer = optim.Adam(
-#     model.parameters(),
-#     weight_decay=0.5e-4,
-#     lr=0.0004,
-#     amsgrad=True
-# )
 optimizer = Padam(
     model.parameters(),
     lr=0.1,
@@ -214,6 +218,8 @@ trainer = Trainer(
     num_workers=1,
     save_root=save_root,
     exp_name=args.exp_name,
+    example_input=example_input,
+    enable_save_trace=enable_save_trace,
     # schedulers={"lr": optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
