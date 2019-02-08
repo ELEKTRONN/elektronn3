@@ -247,12 +247,14 @@ class Trainer:
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
     # TODO: Modularize, make some general parts reusable for other trainers.
-    def train(self, max_steps: int = 1) -> None:
+    def train(self, max_steps: int = 1, max_runtime=np.inf) -> None:
         """Train the network for ``max_steps`` steps.
 
         After each training epoch, validation performance is measured and
         visualizations are computed and logged to tensorboard."""
-        while self.step < max_steps:
+        self.start_time = datetime.datetime.now()
+        self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
+        while not self.terminate:
             try:
                 # --> self.train()
                 self.model.train()
@@ -317,6 +319,12 @@ class Trainer:
 
                     self.step += 1
                     if self.step >= max_steps:
+                        logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
+                        self.terminate = True
+                        break
+                    if datetime.datetime.now() >= self.end_time:
+                        logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
+                        self.terminate = True
                         break
                 stats['tr_accuracy'] = running_acc / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
