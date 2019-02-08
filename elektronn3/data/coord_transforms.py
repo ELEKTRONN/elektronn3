@@ -20,19 +20,62 @@ from elektronn3.data.utils import slice_h5
 #  support for user-defined transforms, similar to the image transforms pipeline).
 #  Code for HDF5 slicing and voxel value interpolation should be in separate modules.
 
+numba.config.THREADING_LAYER = 'tbb'
+
 
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)#target='parallel',
 def map_coordinates_nearest(src, coords, lo, dest):
+    """Generalized ufunc that performs nearest-neighbor interpolation,
+    given a floating point coordinate array expressed by ``coords - lo``.
+
+    We don't pass ``coords - lo`` directly as an argument because we want to
+    compute it inside the gufunc for performance reasons (the simple subtraction
+    ``coords - lo`` in normal numpy code actually takes longer than executing
+    the gufunc for the whole array!)
+
+    **IMPORTANT NOTE**: This function does not do any bounds checking and will
+    read from unallocated memory if you pass out-of-bounds coordinates!
+    Always make sure that every coodinate in ``coords - lo`` actually *has* a
+    nearest neighbor inside the bounds of ``src``.
+    Otherwise, ``dest`` will be filled with garbage values from uninitialized
+    memory or will cause a segmentation fault."""
     u = np.int32(np.round(coords[0] - lo[0]))
     v = np.int32(np.round(coords[1] - lo[1]))
     w = np.int32(np.round(coords[2] - lo[2]))
     dest[0] = src[u,v,w]
 
 
+@numba.jit(nopython=True)
+def _loop_map_coordinates_nearest(src, coords, lo, dest):
+    """Loop-based alternative implementation of map_coordinates_nearest()
+    for easier debugging."""
+    for z in range(coords.shape[0]):
+        for y in range(coords.shape[1]):
+            for x in range(coords.shape[2]):
+                u = np.int32(np.round(coords[z, y, x, 0] - lo[0]))
+                v = np.int32(np.round(coords[z, y, x, 1] - lo[1]))
+                w = np.int32(np.round(coords[z, y, x, 2] - lo[2]))
+                dest[z, y, x] = src[u,v,w]
+
+
 @numba.guvectorize(['void(float32[:,:,:], float32[:], float32[:], float32[:,],)'],
               '(x,y,z),(i),(i)->()', nopython=True)# target='parallel'
 def map_coordinates_linear(src, coords, lo, dest):
+    """Generalized ufunc that performs trilinear interpolation,
+    given a floating point coordinate array expressed by ``coords - lo``.
+
+    We don't pass ``coords - lo`` directly as an argument because we want to
+    compute it inside the gufunc for performance reasons (the simple subtraction
+    ``coords - lo`` in normal numpy code actually takes longer than executing
+    the gufunc for the whole array!)
+
+    **IMPORTANT NOTE**: This function does not do any bounds checking and will
+    read from unallocated memory if you pass out-of-bounds coordinates!
+    Always make sure that every coodinate in ``coords - lo + 1`` is within the
+    bounds of ``src``.
+    Otherwise, ``dest`` will be filled with garbage values from uninitialized
+    memory or will cause a segmentation fault."""
     u = coords[0] - lo[0]
     v = coords[1] - lo[1]
     w = coords[2] - lo[2]
@@ -54,6 +97,36 @@ def map_coordinates_linear(src, coords, lo, dest):
           src[u1, v1, w0] * du * dv * (1-dw) +\
           src[u1, v1, w1] * du * dv * dw
     dest[0] = val
+
+
+@numba.jit(nopython=True)
+def _loop_map_coordinates_linear(src, coords, lo, dest):
+    """Loop-based alternative implementation of map_coordinates_linear()
+    for easier debugging."""
+    for z in range(coords.shape[0]):
+        for y in range(coords.shape[1]):
+            for x in range(coords.shape[2]):
+                u = coords[z, y, x, 0] - lo[0]
+                v = coords[z, y, x, 1] - lo[1]
+                w = coords[z, y, x, 2] - lo[2]
+                u0 = np.int32(u)
+                u1 = u0 + 1
+                du = u - u0
+                v0 = np.int32(v)
+                v1 = v0 + 1
+                dv = v - v0
+                w0 = np.int32(w)
+                w1 = w0 + 1
+                dw = w - w0
+                val = src[u0, v0, w0] * (1-du) * (1-dv) * (1-dw) +\
+                      src[u1, v0, w0] * du * (1-dv) * (1-dw) +\
+                      src[u0, v1, w0] * (1-du) * dv * (1-dw) +\
+                      src[u0, v0, w1] * (1-du) * (1-dv) * dw +\
+                      src[u1, v0, w1] * du * (1-dv) * dw +\
+                      src[u0, v1, w1] * (1-du) * dv * dw +\
+                      src[u1, v1, w0] * du * dv * (1-dw) +\
+                      src[u1, v1, w1] * du * dv * dw
+                dest[z, y, x] = val
 
 
 @lru_cache(maxsize=1)
@@ -215,7 +288,8 @@ class WarpingOOBError(ValueError):
 
 
 def warp_slice(
-        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None
+        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None,
+        debug=True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
@@ -267,17 +341,15 @@ def warp_slice(
 
     patch_shape = tuple(patch_shape)
     if len(inp_src.shape) == 3:
-        print(f'inp_src.shape: {inp_src.shape}')
-        raise NotImplementedError(
-            'elektronn3 has dropped support for data stored in raw 3D form without a channel axis. '
-            'Please always supply it with a prepended channel, so it\n'
-            'has the form (C, D, H, W) (or in ELEKTRONN2 terms: (f, z, x, y)).'
-        )
+        n_f = 1
     elif len(inp_src.shape) == 4:
         n_f = inp_src.shape[0]
-        sh = inp_src.shape[1:]
     else:
-        raise ValueError('inp_src wrong dim/shape')
+        raise ValueError(f'Can\'t handle inp_src shape {inp_src.shape}')
+
+    # Spatial shapes of input and target data sources
+    inp_src_shape = np.array(inp_src.shape[-3:])
+    target_src_shape = np.array(target_src.shape[-3:])
 
     M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
     dest_corners = make_dest_corners(patch_shape)
@@ -287,75 +359,111 @@ def warp_slice(
 
     # check corners
     src_corners = src_corners[:,:3]
-    lo = np.min(np.floor(src_corners), 0).astype(np.int)
-    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int) # add 1 because linear interp
-    if np.any(lo < 0) or np.any(hi >= sh):
-        raise WarpingOOBError("Out of bounds")
     # compute/transform dense coords
     dest_coords = make_dest_coords(patch_shape)
-    src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1],[1]])
-    if np.any(M[3,:3] != 0): # homogeneous divide
-        src_coords /= src_coords[...,3][...,None]
+    src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1], [1]])
+    if np.any(M[3, :3] != 0):  # homogeneous divide
+        src_coords /= src_coords[..., 3][..., None]
     # cut patch
-    src_coords = src_coords[...,:3]
-    # Add 1 to hi to include this coordinate!
-    img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
+    src_coords = src_coords[..., :3]
 
-    inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
-    lo = lo.astype(floatX)
-    for k in range(n_f):
-        map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
     if target_src is not None:
         target_patch_shape = tuple(target_patch_shape)
-        n_f_t = target_src.shape[0]
+        n_f_t = target_src.shape[0] if target_src.ndim == 4 else 1
 
-        off = np.subtract(sh, target_src.shape[-3:])
-        if np.any(np.mod(off, 2)):
+        target_src_offset = np.subtract(inp_src_shape, target_src.shape[-3:])
+        if np.any(np.mod(target_src_offset, 2)):
             raise ValueError("targets must be centered w.r.t. images")
-        off //= 2
+        target_src_offset //= 2
 
-        off_ps = np.subtract(patch_shape, target_patch_shape)
-        if np.any(np.mod(off_ps, 2)):
+        target_offset = np.subtract(patch_shape, target_patch_shape)
+        if np.any(np.mod(target_offset, 2)):
             raise ValueError("targets must be centered w.r.t. images")
-        off_ps //= 2
+        target_offset //= 2
 
         src_coords_target = src_coords[
-            off_ps[0]:off_ps[0] + target_patch_shape[0],
-            off_ps[1]:off_ps[1] + target_patch_shape[1],
-            off_ps[2]:off_ps[2] + target_patch_shape[2]
+            target_offset[0]:(target_offset[0] + target_patch_shape[0]),
+            target_offset[1]:(target_offset[1] + target_patch_shape[1]),
+            target_offset[2]:(target_offset[2] + target_patch_shape[2])
         ]
         # shift coords to be w.r.t. to origin of target_src array
-        lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - off).astype(np.int)
-        # add 1 because linear interp
-        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) - off + 1).astype(np.int)
-        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src.shape[-3:]):
-             raise WarpingOOBError("Out of bounds for target_src")
+        lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - target_src_offset).astype(np.int)
+        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) + 1 - target_src_offset).astype(np.int)
+        if np.any(lo_targ < 0) or np.any(hi_targ >= target_src_shape - 1):
+            raise WarpingOOBError("Out of bounds for target_src")
+
+    lo = np.min(np.floor(src_corners), 0).astype(np.int)
+    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int)
+    if np.any(lo < 0) or np.any(hi >= inp_src_shape - 1):
+        raise WarpingOOBError("Out of bounds for inp_src")
+
+    # Slice and interpolate input
+    # Slice to hi + 1 because interpolation potentially needs this value.
+    img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
+    if img_cut.ndim == 3:
+        img_cut = img_cut[None]
+    inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
+    lo = lo.astype(floatX)
+
+    if debug and np.any((src_coords - lo).max(2).max(1).max(0) >= img_cut.shape[-3:]):
+        raise RuntimeError(f'Warping is broken: src_coords check failed (too high).\n{(src_coords - lo).max(2).max(1).max(0), img_cut.shape[-3:]}')
+    if debug and np.any((src_coords - lo).min(2).min(1).min(0) < 0):
+        raise RuntimeError(f'Warping is broken: src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
+
+    for k in range(n_f):
+        map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
+
+    # Slice and interpolate target
+    if target_src is not None:
         # dtype is float as well here because of the static typing of the
         # numba-compiled map_coordinates functions
+        # Slice to hi + 1 because interpolation potentially needs this value.
         target_cut = slice_h5(target_src, lo_targ, hi_targ + 1, dtype=floatX)
-
-        # TODO: This and the checks below only make sense for discrete targets. Continuous targets are currently BROKEN.
-        n_target_classes = target_cut.max()
+        if target_cut.ndim == 3:
+            target_cut = target_cut[None]
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)
         target = np.zeros((n_f_t,) + target_patch_shape, dtype=floatX)
-        lo_targ = (lo_targ + off).astype(floatX)
+        lo_targ = (lo_targ + target_src_offset).astype(floatX)
         if target_discrete_ix is None:
             target_discrete_ix = [True for i in range(n_f_t)]
         else:
             target_discrete_ix = [i in target_discrete_ix for i in range(n_f_t)]
 
+        if debug and np.any((src_coords_target - lo_targ).max(2).max(1).max(0) >= target_cut.shape[-3:]):
+            raise RuntimeError(f'Warping is broken: src_coords_target check failed (too high).\n{(src_coords_target - lo_targ).max(2).max(1).max(0)}\n{target_cut.shape[-3:]}')
+        if debug and np.any((src_coords_target - lo_targ).min(2).min(1).min(0) < 0):
+            raise RuntimeError(f'Warping is broken: src_coords_target check failed (negative indices).\n{(src_coords_target - lo_targ).min(2).min(1).min(0)}')
+
         for k, discr in enumerate(target_discrete_ix):
             if discr:
                 map_coordinates_nearest(target_cut[k], src_coords_target, lo_targ, target[k])
+
+                if debug:
+                    unique_cut = set(list(np.unique(target_cut[k])))
+                    unique_warp = set(list(np.unique(target[k])))
+                    # If new values appear in discrete targets, there is something wrong.
+                    # unique_warp can have less values than unique_cut though, for example
+                    #  if the warping transform coincidentally slices away all values of a class.
+                    if not unique_warp.issubset(unique_cut):
+                        print(
+                            f'Invalid target encountered:\n\nunique_cut=\n{unique_cut}\n'
+                            f'unique_warp=\n{unique_warp}\nM_inv=\n{M_inv}\n'
+                            f'src_coords_target - lo_targ=\n{src_coords_target - lo_targ}\n'
+                        )
+                        # Try dropping to an IPython shell (Won't work with num_workers > 0).
+                        import IPython; IPython.embed(); raise SystemExit
+
             else:
                 map_coordinates_linear(target_cut[k], src_coords_target, lo_targ, target[k])
 
-        if np.any(target > n_target_classes):
-            print(f'warp_slice: Invalid target: max = {target.max()}. Clipping target...')
-            target = target.clip(0, n_target_classes)
-            # TODO: Or should we just throw an error? (~ WarpingOOB)
     else:
         target = None
+
+    if debug and np.any(np.isnan(inp)):
+        raise RuntimeError('Warping is broken: inp contains NaN.')
+    if debug and np.any(np.isnan(target)):
+        raise RuntimeError('Warping is broken: target contains NaN.')
+
     return inp, target
 
 
@@ -417,7 +525,8 @@ def get_warped_coord_transform(
 
     rng = np.random.RandomState() if rng is None else rng
     patch_shape = np.array(patch_shape)
-    target_patch_shape = np.array(target_patch_shape)
+    if target_patch_shape is not None:
+        target_patch_shape = np.array(target_patch_shape)
 
     # The last three dimensions of the data source shapes are interpreted as
     #  spatial dimensions (D, H, W). All preciding dimensions are ignored.
@@ -442,7 +551,14 @@ def get_warped_coord_transform(
     else:
         lo_pos = dest_center
         hi_pos = spatial_inp_src_shape - dest_center
-    assert np.all([lo_pos[i] < hi_pos[i] for i in range(3)])
+    if not np.all([lo_pos[i] < hi_pos[i] for i in range(3)]):
+        raise RuntimeError(
+            f'lo_pos: {lo_pos}, hi_pos: {hi_pos}\n'
+            'lo_pos has to be smaller than hi_pos in all dimensions, but this '
+            'is not the case here.\n Please make sure that your patch_shape '
+            'is significantly smaller than the shape of the smallest labelled '
+            'region of your data set.'
+        )
     z = rng.randint(lo_pos[0], hi_pos[0]) + src_remainder[0]
     y = rng.randint(lo_pos[1], hi_pos[1]) + src_remainder[1]
     x = rng.randint(lo_pos[2], hi_pos[2]) + src_remainder[2]

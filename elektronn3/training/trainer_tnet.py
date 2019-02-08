@@ -1,9 +1,11 @@
-# -*- coding: utf-8 -*-
 # ELEKTRONN3 - Neural Network Toolkit
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
+
+# NOTE: This module is currently not maintained. We should probably put this somewhere else.
+
 import os
 import traceback
 from typing import Tuple, Dict, Optional
@@ -50,7 +52,7 @@ class TripletNetTrainer(Trainer):
         self.latent_distr = latent_distr
 
     # overwrite train and validate method
-    def train(self, max_steps: int = 1) -> None:
+    def run(self, max_steps: int = 1) -> None:
         """Train the network for ``max_steps`` steps.
 
         After each training epoch, validation performance is measured and
@@ -212,7 +214,7 @@ class TripletNetTrainer(Trainer):
                 if (self.valid_dataset is None) or (1 != np.random.randint(0, 10)): # only validate 10% of the times
                     stats['val_loss_G'], stats['val_err_G'] = float('nan'), float('nan')
                 else:
-                    stats['val_loss_G'], stats['val_err_G'] = self.validate()
+                    stats['val_loss_G'], stats['val_err_G'] = self._validate()
                 # TODO: Report more metrics, e.g. dice error
 
                 # Update history tracker (kind of made obsolete by tensorboard)
@@ -308,7 +310,7 @@ class TripletNetTrainer(Trainer):
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
 
-    def validate(self) -> Tuple[float, float]:
+    def _validate(self) -> Tuple[float, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
         start = time.time()
         val_loss = 0.

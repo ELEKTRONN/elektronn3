@@ -21,19 +21,20 @@ dependencies:
   - h5py >=2.8.0
   - ipython >=6.4.0
   - matplotlib >=2.2.2
-  - numba >=0.38.0
+  - numba >=0.41.0
+  - tbb
   - python >=3.6.5
   - scikit-image >=0.13.1
   - seaborn >=0.8.1
   - tqdm >=4.23.3
   - numpy >=1.14.2
   - scikit-learn >=0.19.1
+  - scikit-image >=0.14.1
   - scipy >=1.1.0
-  - pytorch >=0.4.1  # pytorch-cpu also works, but it's not recommended.
+  - tensorboardx >=1.4
+  - pytorch >=1.0.0  # pytorch-cpu also works, but it's not recommended.
 #  - cudatoolkit =8.*  # Uncomment/modify for a specific CUDA version
 #  - cuda80
-  - tensorboard >=1.8.0
-  - tensorflow >=1.8.0
 
   # For docs:
   - sphinx >=1.7.5

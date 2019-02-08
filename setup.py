@@ -13,23 +13,26 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
     ],
 
     packages=find_packages(exclude=['scripts']),
 
     install_requires=[
-        'torch>=0.4.1',
+        'torch>=1.0.0',
         'numpy',
         'scipy',
         'h5py',
         'matplotlib',
         'numba',
+        'tbb',
         'ipython',
         'pillow',
         'colorlog',
         'tqdm',
-        #'tensorboard>=1.8.0',
-        #'tensorflow>=1.8.0',
+        'scikit-learn',
+        'scikit-image',
+        'tensorboardX',
     ],
 
 )

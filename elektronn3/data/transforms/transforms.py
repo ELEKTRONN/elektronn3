@@ -15,15 +15,20 @@ torchvsion.transforms, but there are two key differences:
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
 """
 
-from typing import Sequence, Tuple, Optional, Dict, Any, Callable
+from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
 
 import numpy as np
 import skimage.exposure
 
 from elektronn3.data.transforms import random_blurring
-from elektronn3.data.transforms.random import Normal, HalfNormal
+from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 
 Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+
+
+class _DropSample(Exception):
+    """Sample will be dropped and won't be fed into a DataLoader"""
+    pass
 
 
 class Identity:
@@ -90,11 +95,46 @@ class Lambda:
         return self.func(inp, target)
 
 
+class DropIfTooMuchBG:
+    """Filter transform that skips a sample if the background class is too
+    dominant in the target."""
+    def __init__(self, bg_id=0, threshold=0.9):
+        self.bg_id = bg_id
+        self.threshold = threshold
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if np.sum(target == self.bg_id) / target.size > self.threshold:
+            raise _DropSample
+        return inp, target  # Return inp, target unmodified
+
+
 class Normalize:
-    """Normalizes inputs with supplied per-channel means and stds."""
-    def __init__(self, mean: Sequence[float], std: Sequence[float]):
+    """Normalizes inputs with supplied per-channel means and stds.
+
+    Args:
+        mean: Global mean value(s) of the inputs. Can either be a sequence
+            of float values where each value corresponds to a channel
+            or a single float value (only for single-channel data).
+        std: Global standard deviation value(s) of the inputs. Can either
+            be a sequence of float values where each value corresponds to a
+            channel or a single float value (only for single-channel data).
+    """
+    def __init__(
+            self,
+            mean: Union[Sequence[float], float],
+            std: Union[Sequence[float], float]
+    ):
         self.mean = np.array(mean)
         self.std = np.array(std)
+        # Unsqueeze first dimensions if mean and scalar are passed as scalars
+        if self.mean.ndim == 0:
+            self.mean = self.mean[None]
+        if self.std.ndim == 0:
+            self.std = self.std[None]
 
     def __call__(
             self,
@@ -119,9 +159,9 @@ class RandomGammaCorrection:
 
     Args:
         gamma_std: standard deviation of the gamma value.
-        channels: If ``channels`` is ``None``, the noise is applied to
+        channels: If ``channels`` is ``None``, the change is applied to
             all channels of the input tensor.
-            If ``channels`` is a ``Sequence[int]``, noise is only applied
+            If ``channels`` is a ``Sequence[int]``, change is only applied
             to the specified channels.
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
@@ -348,7 +388,7 @@ class RandomCrop:
         spatial_slice = [  # Slice only the content within the coordinate bounds
             slice(coords_lo[i], coords_hi[i]) for i in range(ndim_spatial)
         ]
-        full_slice = nonspatial_slice + spatial_slice
+        full_slice = tuple(nonspatial_slice + spatial_slice)
         inp_cropped = inp[full_slice]
         if target is None:
             return inp_cropped, target
@@ -364,14 +404,14 @@ class SqueezeTarget:
 
     (This is just needed as a workaround for the example neuro_data_cdhw data
     set, because its targets have a superfluous first dimension.)"""
-    def __init__(self, dim, inplace=True):
+    def __init__(self, dim: int):
         self.dim = dim
 
     def __call__(
             self,
             inp: np.ndarray,  # Returned without modifications
             target: np.ndarray,
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray]:
         return inp, target.squeeze(axis=self.dim)
 
 
@@ -381,34 +421,34 @@ class RandomFlip:
     flipped with probability p=0.5 (iid).
 
     Args:
-        ndim_spatial: Number of spatial dimension in input, e.g. ndim_spatial=2
-        for input shape (N, C, H, W)
+        ndim_spatial: Number of spatial dimension in input, e.g.
+            ``ndim_spatial=2`` for input shape (N, C, H, W)
     """
-    def __init__(self, ndim_spatial: int = 2):
+    def __init__(
+            self,
+            ndim_spatial: int = 2,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.noise_generator = RandInt(rng=rng)
         self.ndim_spatial = ndim_spatial
+
     def __call__(
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
-        flip_dims = np.random.randint(0, 2, self.ndim_spatial)
-        # flip all images at once
-        slices_inp = tuple([slice(None, None, 1) for _ in range(len(inp.shape) - self.ndim_spatial)] + \
-                 [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
-        inp_flipped = inp[slices_inp].copy()
-        if target is not None:
-            slices_target = tuple([slice(None, None, 1) for _ in range(len(target.shape) - self.ndim_spatial)] + \
-                     [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
-            target_flipped = target[slices_target].copy()
-        else:
-            target_flipped = None
-        return inp_flipped, target_flipped
+        flip_dims = self.noise_generator(self.ndim_spatial)
+        for dim in range(self.ndim_spatial):
+            if flip_dims[dim]:
+                inp = np.flip(inp, dim)
+                # PyTorch DataLoader doesn't support negative strides, so we
+                #  have to remove them by forcing contiguous memory layout.
+                inp = np.ascontiguousarray(inp)
+                if target is not None:
+                    target = np.flip(target, dim)
+                    target = np.ascontiguousarray(target)
+        return inp, target
 
-
-# TODO: Handle target striding and offsets via transforms?
-
-# TODO: Meta-transform that performs a wrapped transform with a certain
-#       probability, replacing prob params?
 
 # TODO: Functional API (transforms.functional).
 #       The current object-oriented interface should be rewritten as a wrapper

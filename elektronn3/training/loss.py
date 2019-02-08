@@ -14,19 +14,21 @@ from scipy import misc
 from sklearn.preprocessing import LabelBinarizer
 # TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
 
-def _channelwise_sum(x):
+
+def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
-    s = x.sum(0)  # Sum over batch dimension N
-    while s.dim() != 1:  # Repeatedly reduce until only the C dim remains
-        s = s.sum(1)
-    return s
+    reduce_dims = tuple([0] + list(range(x.dim()))[2:])  # = (0, 2, 3, ...)
+    return x.sum(dim=reduce_dims)
 
 
 # Simple n-dimensional dice loss. Minimalistic version for easier verification
-def dice_loss(probs, target, weight=1., eps=0.0001):
+def dice_loss(probs, target, weight=1., eps=0.0001, onehot_target=False):
     # Probs need to be softmax probabilities, not raw network outputs
-    onehot_target = torch.zeros_like(probs)
-    onehot_target.scatter_(1, target.unsqueeze(1), 1)
+    if not onehot_target:
+        onehot_target = torch.zeros_like(probs)
+        onehot_target.scatter_(1, target.unsqueeze(1), 1)
+    else:
+        onehot_target = target.to(torch.float32)
 
     intersection = probs * onehot_target
     numerator = 2 * _channelwise_sum(intersection)
@@ -38,25 +40,28 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
 
 
 class DiceLoss(torch.nn.Module):
-    def __init__(self, softmax=True, weight=torch.tensor(1.)):
+    def __init__(self, apply_softmax=True, weight=torch.tensor(1.),
+                 onehot_target=False):
         super().__init__()
-        if softmax:
+        if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
         self.register_buffer('weight', weight)
+        self.onehot_target = onehot_target
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.dice(probs, target, weight=self.weight)
+        return self.dice(probs, target, weight=self.weight,
+                         onehot_target=self.onehot_target)
 
 
 class LovaszLoss(torch.nn.Module):
     """https://arxiv.org/abs/1705.08790"""
-    def __init__(self, softmax=True):
+    def __init__(self, apply_softmax=True):
         super().__init__()
-        if softmax:
+        if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
             self.softmax = lambda x: x  # Identity (no softmax)
