@@ -192,6 +192,7 @@ def _tb_log_sample_images(
 
     inp_slice = batch2img(images['inp'])[0]
 
+    # TODO: Support one-hot targets
     # Check if the network is being trained for classification
     is_classification = target_batch.ndim == out_batch.ndim - 1
     # If it's not classification, we assume a regression scenario
@@ -238,7 +239,7 @@ def _tb_log_sample_images(
         out_slice = np.moveaxis(out_slice, 0, -1)
     else:
         raise RuntimeError(
-            f'Can\t prepare targets of shape {target_batch.shape} for plotting.'
+            f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
         )
 
     if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them

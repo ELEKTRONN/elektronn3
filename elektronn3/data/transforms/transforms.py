@@ -112,6 +112,37 @@ class DropIfTooMuchBG:
         return inp, target  # Return inp, target unmodified
 
 
+class SmoothOneHotTarget:
+    """Converts target tensors to one-hot encoding, with optional label smoothing.
+
+    Args:
+        num_classes: Number of classes (C) in the data set.
+        smooth_eps: Label smoothing strength. If ``smooth_eps=0`` (default), no
+            smoothing is applied and regular one-hot tensors are returned.
+            See section 7 of https://arxiv.org/abs/1512.00567
+    """
+    # TODO: Add example to docstring
+    def __init__(self, num_classes: int, smooth_eps: float = 0.):
+        assert 0 <= smooth_eps < 0.5
+        self.num_classes = num_classes
+        self.smooth_eps = smooth_eps
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # returned without modifications
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.smooth_eps == 0.:
+            eye = np.eye(self.num_classes)
+        else:
+            # Create a "soft" eye where  0 is replaced by smooth_eps and 1 by (1 - smooth_eps)
+            eye = np.full((self.num_classes, self.num_classes), self.smooth_eps)
+            np.fill_diagonal(eye, 1. - self.smooth_eps)
+        onehot = np.moveaxis(eye[target], -1, 0)
+        assert np.all(onehot.argmax(0) == target)
+        return inp, onehot
+
+
 class Normalize:
     """Normalizes inputs with supplied per-channel means and stds.
 
