@@ -8,8 +8,6 @@ import torch
 
 from elektronn3.training.lovasz_losses import lovasz_softmax
 
-# TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
-
 
 def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
@@ -18,13 +16,19 @@ def _channelwise_sum(x: torch.Tensor):
 
 
 # Simple n-dimensional dice loss. Minimalistic version for easier verification
-def dice_loss(probs, target, weight=1., eps=0.0001, onehot_target=False):
+def dice_loss(probs, target, weight=1., eps=0.0001):
     # Probs need to be softmax probabilities, not raw network outputs
-    if not onehot_target:
+    tsh, psh = target.shape, probs.shape
+
+    if tsh == psh:  # Already one-hot
+        onehot_target = target.to(torch.float32)
+    elif tsh[0] == psh[0] and tsh[1:] == psh[2:]:  # Assume dense target storage, convert to one-hot
         onehot_target = torch.zeros_like(probs)
         onehot_target.scatter_(1, target.unsqueeze(1), 1)
     else:
-        onehot_target = target.to(torch.float32)
+        raise ValueError(
+            f'Target shape {target.shape} is not compatible with output shape {probs.shape}.'
+        )
 
     intersection = probs * onehot_target
     numerator = 2 * _channelwise_sum(intersection)
@@ -36,8 +40,26 @@ def dice_loss(probs, target, weight=1., eps=0.0001, onehot_target=False):
 
 
 class DiceLoss(torch.nn.Module):
-    def __init__(self, apply_softmax=True, weight=torch.tensor(1.),
-                 onehot_target=False):
+    """Generalized Dice Loss, as described in https://arxiv.org/abs/1707.03237.
+
+    Works for n-dimensional data. Assuming that the ``output`` tensor to be
+    compared to the ``target`` has the shape (N, C, D, H, W), the ``target``
+    can either have the same shape (N, C, D, H, W) (one-hot encoded) or
+    (N, D, H, W) (with dense class indices, as in
+    ``torch.nn.CrossEntropyLoss``). If the latter shape is detected, the
+    ``target`` is automatically internally converted to a one-hot tensor
+    for loss calculation.
+
+    Args:
+        apply_softmax: If ``True``, a softmax operation is applied to the
+            ``output`` tensor before loss calculation. This is necessary if
+            your model does not already apply softmax as the last layer.
+            If ``False``, ``output`` is assumed to already contain softmax
+            probabilities.
+        weight: Weight tensor for class-wise loss rescaling.
+            Has to be of shape (C,).
+    """
+    def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
         super().__init__()
         if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
@@ -45,12 +67,10 @@ class DiceLoss(torch.nn.Module):
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
         self.register_buffer('weight', weight)
-        self.onehot_target = onehot_target
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.dice(probs, target, weight=self.weight,
-                         onehot_target=self.onehot_target)
+        return self.dice(probs, target, weight=self.weight)
 
 
 class LovaszLoss(torch.nn.Module):
