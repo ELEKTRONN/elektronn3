@@ -7,7 +7,6 @@ import datetime
 import gc
 import logging
 import os
-import traceback
 import shutil
 
 from pickle import PickleError
@@ -374,15 +373,16 @@ class Trainer:
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self._tb_log_scalars(stats, 'stats')
-                    self._tb_log_scalars(misc, 'misc')
-                    if self.preview_batch is not None:
-                        if self.epoch % self.preview_interval == 0 or self.epoch == 1:
-                            # TODO: Free as much GPU memory as possible to make more
-                            #       room for preview inference
-                            # TODO: Also save preview inference results in a (3D) HDF5 file
-                            self.preview_plotting_handler(self)
-                    self.sample_plotting_handler(self, images, group='tr_samples')
+                    try:
+                        self._tb_log_scalars(stats, 'stats')
+                        self._tb_log_scalars(misc, 'misc')
+                        if self.preview_batch is not None:
+                            if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                                # TODO: Also save preview inference results in a (3D) HDF5 file
+                                self.preview_plotting_handler(self)
+                        self.sample_plotting_handler(self, images, group='tr_samples')
+                    except Exception:
+                        logger.exception('Error occured while logging to tensorboard:')
 
                 # Save trained model state
                 self._save_model()
@@ -398,7 +398,7 @@ class Trainer:
                 if self.terminate:
                     return
             except Exception as e:
-                traceback.print_exc()
+                logger.exception('Unhandled exception during training:')
                 if self.ignore_errors:
                     # Just print the traceback and try to carry on with training.
                     # This can go wrong in unexpected ways, so don't leave the training unattended.
