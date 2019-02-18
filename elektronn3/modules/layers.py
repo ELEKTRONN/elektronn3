@@ -1,3 +1,11 @@
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch
+
+"""Neural network layers"""
+
 import copy
 from typing import Optional, Tuple
 

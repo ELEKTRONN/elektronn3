@@ -4,9 +4,11 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch
 
+"""Loss functions"""
+
 import torch
 
-from elektronn3.training.lovasz_losses import lovasz_softmax
+from elektronn3.modules.lovasz_losses import lovasz_softmax
 
 
 def _channelwise_sum(x: torch.Tensor):

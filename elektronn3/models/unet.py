@@ -40,7 +40,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from elektronn3.models import modules as em
+import elektronn3.modules as em
 
 
 class DownConv(nn.Module):
