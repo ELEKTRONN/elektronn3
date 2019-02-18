@@ -40,10 +40,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from elektronn3.models.modules import (
-    get_maxpool, get_batchnorm, get_activation,
-    planar_kernel, conv3, upconv2, conv1,
-)
+from elektronn3.models import modules as em
 
 
 class DownConv(nn.Module):
@@ -61,11 +58,11 @@ class DownConv(nn.Module):
         self.batch_norm = batch_norm
         padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = conv3(
+        self.conv1 = em.conv3(
             self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
-        self.conv2 = conv3(
+        self.conv2 = em.conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
@@ -73,14 +70,14 @@ class DownConv(nn.Module):
         if self.pooling:
             kernel_size = 2
             if planar:
-                kernel_size = planar_kernel(kernel_size)
-            self.pool = get_maxpool(dim)(kernel_size=kernel_size)
+                kernel_size = em.planar_kernel(kernel_size)
+            self.pool = em.get_maxpool(dim)(kernel_size=kernel_size)
 
-        self.act1 = get_activation(activation)
-        self.act2 = get_activation(activation)
+        self.act1 = em.get_activation(activation)
+        self.act2 = em.get_activation(activation)
 
         if self.batch_norm:
-            self.bn = get_batchnorm(dim)(self.out_channels)
+            self.bn = em.get_batchnorm(dim)(self.out_channels)
 
     def forward(self, x):
         y = self.conv1(x)
@@ -140,32 +137,32 @@ class UpConv(nn.Module):
         self.batch_norm = batch_norm
         padding = 1 if 'same' in conv_mode else 0
 
-        self.upconv = upconv2(self.in_channels, self.out_channels,
+        self.upconv = em.upconv2(self.in_channels, self.out_channels,
             mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
         )
 
         if self.merge_mode == 'concat':
-            self.conv1 = conv3(
+            self.conv1 = em.conv3(
                 2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
                 adaptive=adaptive
             )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = conv3(
+            self.conv1 = em.conv3(
                 self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
                 adaptive=adaptive
             )
-        self.conv2 = conv3(
+        self.conv2 = em.conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
 
-        self.act0 = get_activation(activation)
-        self.act1 = get_activation(activation)
-        self.act2 = get_activation(activation)
+        self.act0 = em.get_activation(activation)
+        self.act1 = em.get_activation(activation)
+        self.act2 = em.get_activation(activation)
 
         if self.batch_norm:
-            self.bn = get_batchnorm(dim)(self.out_channels)
+            self.bn = em.get_batchnorm(dim)(self.out_channels)
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -484,7 +481,7 @@ class UNet(nn.Module):
             )
             self.up_convs.append(up_conv)
 
-        self.conv_final = conv1(outs, self.out_channels, dim=dim)
+        self.conv_final = em.conv1(outs, self.out_channels, dim=dim)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
