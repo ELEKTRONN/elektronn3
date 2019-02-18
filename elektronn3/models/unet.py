@@ -189,7 +189,6 @@ class UpConv(nn.Module):
         return y
 
 
-# TODO: Suppress known TracerWarnings?
 # TODO: Pre-calculate output sizes when using valid convolutions
 class UNet(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
