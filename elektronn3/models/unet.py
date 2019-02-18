@@ -42,7 +42,7 @@ from torch.utils.checkpoint import checkpoint
 
 from elektronn3.models.modules import (
     get_maxpool, get_batchnorm, get_activation,
-    planar_kernel, _conv3, _upconv2, _conv1,
+    planar_kernel, conv3, upconv2, conv1,
 )
 
 
@@ -61,11 +61,11 @@ class DownConv(nn.Module):
         self.batch_norm = batch_norm
         padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = _conv3(
+        self.conv1 = conv3(
             self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
-        self.conv2 = _conv3(
+        self.conv2 = conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
@@ -140,22 +140,22 @@ class UpConv(nn.Module):
         self.batch_norm = batch_norm
         padding = 1 if 'same' in conv_mode else 0
 
-        self.upconv = _upconv2(self.in_channels, self.out_channels,
+        self.upconv = upconv2(self.in_channels, self.out_channels,
             mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
         )
 
         if self.merge_mode == 'concat':
-            self.conv1 = _conv3(
+            self.conv1 = conv3(
                 2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
                 adaptive=adaptive
             )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = _conv3(
+            self.conv1 = conv3(
                 self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
                 adaptive=adaptive
             )
-        self.conv2 = _conv3(
+        self.conv2 = conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
@@ -484,7 +484,7 @@ class UNet(nn.Module):
             )
             self.up_convs.append(up_conv)
 
-        self.conv_final = _conv1(outs, self.out_channels, dim=dim)
+        self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
