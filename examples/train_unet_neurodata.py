@@ -164,7 +164,8 @@ train_dataset = PatchCreator(
         'perspective': True,
         'warp_amount': 0.1,
     },
-    transform=train_transform,**common_data_kwargs
+    transform=train_transform,
+    **common_data_kwargs
 )
 valid_dataset = PatchCreator(
     input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
