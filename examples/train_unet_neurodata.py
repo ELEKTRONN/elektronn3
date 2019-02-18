@@ -59,7 +59,8 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
-from elektronn3.training import Trainer, Backup, DiceLoss, metrics, Padam
+from elektronn3.training import Trainer, Backup, metrics, Padam
+from elektronn3.modules import DiceLoss
 from elektronn3.models.unet import UNet
 
 
