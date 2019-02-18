@@ -186,7 +186,7 @@ def _conv1(in_channels, out_channels, dim=3):
     )
 
 
-class LinearActivation(nn.Module):
+class Identity(nn.Module):
     def forward(self, x):
         return x
 
@@ -202,7 +202,7 @@ def get_activation(activation):
         elif activation == 'rrelu':
             return nn.RReLU()
         elif activation == 'lin':
-            return LinearActivation()
+            return Identity()
     else:
         # Deep copy is necessary in case of paremtrized activations
         return copy.deepcopy(activation)
@@ -278,10 +278,10 @@ class GatherExcite(nn.Module):
                 nn.Conv3d(channels // reduction, channels, 1)
             )
         else:
-            self.excite = LinearActivation()
+            self.excite = Identity()
 
         if extent == 0:
-            self.interpolate = LinearActivation()  # Use broadcasting instead of interpolation
+            self.interpolate = Identity()  # Use broadcasting instead of interpolation
         else:
             self.interpolate = torch.nn.functional.interpolate
 
