@@ -10,7 +10,7 @@ import copy
 
 from torch import nn
 
-from elektronn3.modules import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity
+from elektronn3.modules.layers import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv
 
 
 def get_conv(dim=3, adaptive=False):
@@ -96,11 +96,9 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
     """Returns a learned upsampling operator depending on args."""
     kernel_size = 2
     stride = 2
-    scale_factor = 2
     if planar:
         kernel_size = planar_kernel(kernel_size)
         stride = planar_kernel(stride)
-        scale_factor = planar_kernel(scale_factor)
     if mode == 'transpose':
         return get_convtranspose(dim, adaptive)(
             in_channels,
@@ -108,23 +106,16 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
             kernel_size=kernel_size,
             stride=stride
         )
-    elif mode == 'resize':
-        """
-        # TODO: needs refinement to work with arbitrary kernel size, stride and padding etc.
-        https://distill.pub/2016/deconv-checkerboard/
-        https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
-        """
-        assert dim == 2
-        return nn.Sequential(nn.UpsamplingNearest2d(scale_factor=2),
-           nn.ReflectionPad2d(1),
-           nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1))
-    else:
-        # out_channels is always going to be the same
-        # as in_channels
-        mode = 'trilinear' if dim == 3 else 'bilinear'
-        return nn.Sequential(
-            nn.Upsample(mode=mode, scale_factor=scale_factor),
-            conv1(in_channels, out_channels, dim=dim)
+    elif 'resizeconv' in mode:
+        if 'linear' in mode:
+            upsampling_mode = 'trilinear' if dim == 3 else 'bilinear'
+        else:
+            upsampling_mode = 'nearest'
+        # TODO: Investigate if it makes sense to disable spatial conv and use 1x1 conv instead here
+        #       like in the old 'upsample' mode
+        return ResizeConv(
+            in_channels, out_channels, planar=planar, dim=dim, adaptive=adaptive,
+            upsampling_mode=upsampling_mode
         )
 
 

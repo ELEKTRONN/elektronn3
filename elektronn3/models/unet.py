@@ -259,10 +259,11 @@ class UNet(nn.Module):
             Choices:
             - 'transpose' (default): Use transposed convolution
               ("Upconvolution")
-            - 'upsample': Use nearest neighbour upsampling.
-            - 'resize': TODO
-            For a detailed empirical evaluation of this option (in 2D U-Net),
-            see https://ai.intel.com/biomedical-image-segmentation-u-net/
+            - 'resizeconv_nearest': Use resize-convolution with nearest-
+              neighbor interpolation, as proposed in
+              https://distill.pub/2016/deconv-checkerboard/
+            - 'resizeconv_linear: Same as above, but with (bi-/tri-)linear
+              interpolation
         merge_mode: How the features from the encoder pathway should
             be combined with the decoder features.
             Choices:
@@ -391,12 +392,10 @@ class UNet(nn.Module):
                 'Either set dim=3 or set planar_blocks=().'
             )
 
-        if up_mode in ('transpose', 'upsample', 'resize'):
+        if up_mode in ('transpose', 'upsample', 'resizeconv_nearest', 'resizeconv_linear'):
             self.up_mode = up_mode
         else:
-            raise ValueError("\"{}\" is not a valid mode for "
-                             "upsampling. Only \"transpose\" and "
-                             "\"upsample\" are allowed.".format(up_mode))
+            raise ValueError("\"{}\" is not a valid mode for upsampling".format(up_mode))
 
         if merge_mode in ('concat', 'add'):
             self.merge_mode = merge_mode
@@ -407,8 +406,9 @@ class UNet(nn.Module):
                              "\"add\" are allowed.".format(up_mode))
 
         # NOTE: up_mode 'upsample' is incompatible with merge_mode 'add'
-        if self.up_mode == 'upsample' and self.merge_mode == 'add':
-            raise ValueError("up_mode \"upsample\" is incompatible "
+        # TODO: Remove merge_mode=add. It's just worse than concat
+        if 'resizeconv' in self.up_mode and self.merge_mode == 'add':
+            raise ValueError("up_mode \"resizeconv\" is incompatible "
                              "with merge_mode \"add\" at the moment "
                              "because it doesn't make sense to use "
                              "nearest neighbour to reduce "
