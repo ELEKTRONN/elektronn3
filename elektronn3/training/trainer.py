@@ -519,15 +519,18 @@ class Trainer:
                     stats[name] += evaluator(target, out) / len(self.valid_loader)
 
         if self.tb:
-            self.sample_plotting_handler(
-                self,
-                {
-                    'inp': inp.numpy(),
-                    'out': out.numpy(),
-                    'target': target.numpy()
-                },
-                group='val_samples'
-            )
+            try:
+                self.sample_plotting_handler(
+                    self,
+                    {
+                        'inp': inp.numpy(),
+                        'out': out.numpy(),
+                        'target': target.numpy()
+                    },
+                    group='val_samples'
+                )
+            except Exception:
+                logger.exception('Error occured while logging to tensorboard:')
 
         stats['val_loss'] = val_loss
 
