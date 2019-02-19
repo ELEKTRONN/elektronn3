@@ -94,6 +94,16 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
             kernel_size=kernel_size,
             stride=stride
         )
+    elif mode == 'resize':
+        """
+        # TODO: needs refinement to work with arbitrary kernel size, stride and padding etc.
+        https://distill.pub/2016/deconv-checkerboard/
+        https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
+        """
+        assert dim == 2
+        return nn.Sequential(nn.UpsamplingNearest2d(scale_factor=2),
+           nn.ReflectionPad2d(1),
+           nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1))
     else:
         # out_channels is always going to be the same
         # as in_channels

@@ -260,6 +260,7 @@ class UNet(nn.Module):
             - 'transpose' (default): Use transposed convolution
               ("Upconvolution")
             - 'upsample': Use nearest neighbour upsampling.
+            - 'resize': TODO
             For a detailed empirical evaluation of this option (in 2D U-Net),
             see https://ai.intel.com/biomedical-image-segmentation-u-net/
         merge_mode: How the features from the encoder pathway should
@@ -390,7 +391,7 @@ class UNet(nn.Module):
                 'Either set dim=3 or set planar_blocks=().'
             )
 
-        if up_mode in ('transpose', 'upsample'):
+        if up_mode in ('transpose', 'upsample', 'resize'):
             self.up_mode = up_mode
         else:
             raise ValueError("\"{}\" is not a valid mode for "
