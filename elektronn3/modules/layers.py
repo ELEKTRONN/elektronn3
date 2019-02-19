@@ -181,3 +181,32 @@ class AdaptiveConvTranspose3d(nn.Module):
         return self.conv(x)
 
     def forward(self, x): raise NotImplementedError()  # Chosen by __init__()
+
+
+class ResizeConv(nn.Module):
+    """Upsamples by 2x and applies a spatial convolution with kernel size 3.
+
+    This is meant as a replacement for transposed convolution to avoid
+    checkerboard artifacts. See
+
+    - https://distill.pub/2016/deconv-checkerboard/
+    - https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
+    """
+    def __init__(self, in_channels, out_channels, planar=False, dim=3, adaptive=False,
+                 upsampling_mode='nearest'):
+        super().__init__()
+        # Avoiding cyclical import hell by importing here
+        from elektronn3.modules import layer_helpers
+        self.upsampling_mode = upsampling_mode
+        self.scale_factor = 2
+        if dim == 3 and planar:  # Only interpolate (H, W) dims, leave D as is
+            self.scale_factor = layer_helpers.planar_kernel(self.scale_factor)
+        self.dim = dim
+        self.upsample = nn.Upsample(scale_factor=self.scale_factor, mode=self.upsampling_mode)
+        self.conv = layer_helpers.conv3(
+            in_channels, out_channels, kernel_size=3, padding=1,
+            planar=planar, dim=dim, adaptive=adaptive
+        )
+
+    def forward(self, x):
+        return self.conv(self.upsample(x))
