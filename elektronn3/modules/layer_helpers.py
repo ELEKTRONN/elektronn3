@@ -111,11 +111,10 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
             upsampling_mode = 'trilinear' if dim == 3 else 'bilinear'
         else:
             upsampling_mode = 'nearest'
-        # TODO: Investigate if it makes sense to disable spatial conv and use 1x1 conv instead here
-        #       like in the old 'upsample' mode
+        rc_kernel_size = 1 if mode.endswith('1') else 3
         return ResizeConv(
             in_channels, out_channels, planar=planar, dim=dim, adaptive=adaptive,
-            upsampling_mode=upsampling_mode
+            upsampling_mode=upsampling_mode, kernel_size=rc_kernel_size
         )
 
 

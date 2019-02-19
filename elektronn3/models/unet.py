@@ -264,6 +264,10 @@ class UNet(nn.Module):
               https://distill.pub/2016/deconv-checkerboard/
             - 'resizeconv_linear: Same as above, but with (bi-/tri-)linear
               interpolation
+            - 'resizeconv_nearest1': Like 'resizeconv_nearest', but using a
+              light-weight 1x1 convolution layer instead of a spatial convolution
+            - 'resizeconv_linear1': Like 'resizeconv_nearest', but using a
+              light-weight 1x1-convolution layer instead of a spatial convolution
         merge_mode: How the features from the encoder pathway should
             be combined with the decoder features.
             Choices:
