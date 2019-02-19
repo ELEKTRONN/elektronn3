@@ -206,6 +206,16 @@ def _upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, a
             kernel_size=kernel_size,
             stride=stride
         )
+    elif mode == 'resize':
+        """
+        # TODO: needs refinement to work with arbitrary kernel size, stride and padding etc.
+        https://distill.pub/2016/deconv-checkerboard/
+        https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
+        """
+        assert dim == 2
+        return nn.Sequential(nn.UpsamplingNearest2d(scale_factor=2),
+           nn.ReflectionPad2d(1),
+           nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1))
     else:
         # out_channels is always going to be the same
         # as in_channels
@@ -464,6 +474,7 @@ class UNet(nn.Module):
             - 'transpose' (default): Use transposed convolution
               ("Upconvolution")
             - 'upsample': Use nearest neighbour upsampling.
+            - 'resize': TODO
             For a detailed empirical evaluation of this option (in 2D U-Net),
             see https://ai.intel.com/biomedical-image-segmentation-u-net/
         merge_mode: How the features from the encoder pathway should
@@ -594,7 +605,7 @@ class UNet(nn.Module):
                 'Either set dim=3 or set planar_blocks=().'
             )
 
-        if up_mode in ('transpose', 'upsample'):
+        if up_mode in ('transpose', 'upsample', 'resize'):
             self.up_mode = up_mode
         else:
             raise ValueError("\"{}\" is not a valid mode for "
