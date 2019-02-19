@@ -14,6 +14,7 @@ from elektronn3.modules import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity
 
 
 def get_conv(dim=3, adaptive=False):
+    """Chooses an implementation for a convolution layer."""
     if dim == 3:
         return AdaptiveConv3d if adaptive else nn.Conv3d
     elif dim == 2:
@@ -23,6 +24,7 @@ def get_conv(dim=3, adaptive=False):
 
 
 def get_convtranspose(dim=3, adaptive=False):
+    """Chooses an implementation for a transposed convolution layer."""
     if dim == 3:
         return AdaptiveConvTranspose3d if adaptive else nn.ConvTranspose3d
     elif dim == 2:
@@ -32,6 +34,7 @@ def get_convtranspose(dim=3, adaptive=False):
 
 
 def get_maxpool(dim=3):
+    """Chooses an implementation for a max-pooling layer."""
     if dim == 3:
         return nn.MaxPool3d
     elif dim == 2:
@@ -41,6 +44,7 @@ def get_maxpool(dim=3):
 
 
 def get_batchnorm(dim=3):
+    """Chooses an implementation for a batch normalization layer."""
     if dim == 3:
         return nn.BatchNorm3d
     elif dim == 2:
@@ -50,6 +54,8 @@ def get_batchnorm(dim=3):
 
 
 def planar_kernel(x):
+    """Returns a "planar" kernel shape (e.g. for 2D convolution in 3D space)
+    that doesn't consider the first spatial dim (D)."""
     if isinstance(x, int):
         return (1, x, x)
     else:
@@ -57,6 +63,7 @@ def planar_kernel(x):
 
 
 def planar_pad(x):
+    """Returns a "planar" padding shape that doesn't pad along the first spatial dim (D)."""
     if isinstance(x, int):
         return (0, x, x)
     else:
@@ -65,6 +72,12 @@ def planar_pad(x):
 
 def conv3(in_channels, out_channels, kernel_size=3, stride=1,
           padding=1, bias=True, planar=False, dim=3, adaptive=False):
+    """Returns an appropriate spatial convolution layer, depending on args.
+    - dim=2: Conv2d with 3x3 kernel
+    - dim=3 and planar=False: Conv3d with 3x3x3 kernel
+    - dim=3 and planar=True: Conv3d with 1x3x3 kernel
+      (if also adaptive=True, internally uses a Conv2d layer with 3x3 kernel)
+    """
     if planar:
         stride = planar_kernel(stride)
         padding = planar_pad(padding)
@@ -80,6 +93,7 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
 
 
 def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, adaptive=False):
+    """Returns a learned upsampling operator depending on args."""
     kernel_size = 2
     stride = 2
     scale_factor = 2
@@ -115,6 +129,7 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
 
 
 def conv1(in_channels, out_channels, dim=3):
+    """Returns a 1x1 or 1x1x1 convolution, depending on dim"""
     return get_conv(dim)(
         in_channels,
         out_channels,
