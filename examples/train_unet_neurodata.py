@@ -98,7 +98,7 @@ save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-    fnames = [f for f in os.listdir(data_root) if f.endswith('.h5')]
+    fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
     input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
     target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
     valid_indices = [1, 3, 5, 7]
