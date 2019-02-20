@@ -34,10 +34,9 @@ def _to_full_numpy(seq) -> np.ndarray:
 
 def calculate_means(inputs: Sequence) -> Tuple[float]:
     inputs = [
-        _to_full_numpy(inp)
-        .reshape(inp.shape[0], -1)  # Flatten every dim except C
+        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
         for inp in inputs
-    ]
+    ]  # Necessary if shapes don't match
     # Preserve C, but concatenate everything else into one flat dimension
     inputs = np.concatenate(inputs, axis=1)
     means = np.mean(inputs, axis=1)
@@ -46,10 +45,9 @@ def calculate_means(inputs: Sequence) -> Tuple[float]:
 
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
     inputs = [
-        _to_full_numpy(inp)
-            .reshape(inp.shape[0], -1)  # Flatten every dim except C
+        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
         for inp in inputs
-    ]
+    ]  # Necessary if shapes don't match
     # Preserve C, but concatenate everything else into one flat dimension
     inputs = np.concatenate(inputs, axis=1)
     stds = np.std(inputs, axis=1)
@@ -65,6 +63,11 @@ def calculate_class_weights(
     The weights can then be used for loss function rebalancing (e.g. for
     CrossEntropyLoss it's very important to do this when training on
     datasets with high class imbalance."""
+
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
 
     def __inverse(targets):
         """The weight of each class c1, c2, c3, ... with labeled-element
