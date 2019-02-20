@@ -169,7 +169,7 @@ train_dataset = PatchCreator(
     transform=train_transform,
     **common_data_kwargs
 )
-valid_dataset = PatchCreator(
+valid_dataset = None if not valid_indices else PatchCreator(
     input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
