@@ -36,6 +36,8 @@ import sklearn.metrics
 import torch
 
 
+eps = 0.0001  # To avoid divisions by zero
+
 # TODO: Tests would make a lot of sense here.
 
 # TODO: Support ignoring certain classes (labels).
@@ -104,7 +106,7 @@ def precision(target, pred, num_classes=2, mean=False):
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     # Compute metrics for each class simulataneously
-    prec = tp / (tp + fp)  # Per-class precision
+    prec = tp / (tp + fp + eps)  # Per-class precision
     if mean:
         prec = prec.mean().item()
     return prec * 100
@@ -114,7 +116,7 @@ def recall(target, pred, num_classes=2, mean=False):
     """Recall metric a.k.a. sensitivity a.k.a. hit rate (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    rec = tp / (tp + fn)  # Per-class recall
+    rec = tp / (tp + fn + eps)  # Per-class recall
     if mean:
         rec = rec.mean().item()
     return rec * 100
@@ -124,7 +126,7 @@ def accuracy(target, pred, num_classes=2, mean=False):
     """Accuracy metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    acc = (tp + tn) / (tp + tn + fp + fn)  # Per-class accuracy
+    acc = (tp + tn) / (tp + tn + fp + fn + eps)  # Per-class accuracy
     if mean:
         acc = acc.mean().item()
     return acc * 100
@@ -134,7 +136,7 @@ def dice_coefficient(target, pred, num_classes=2, mean=False):
     """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    dsc = 2 * tp / (2 * tp + fp + fn)  # Per-class (Sørensen-)Dice similarity coefficient
+    dsc = 2 * tp / (2 * tp + fp + fn + eps)  # Per-class (Sørensen-)Dice similarity coefficient
     if mean:
         dsc = dsc.mean().item()
     return dsc * 100
@@ -144,7 +146,7 @@ def iou(target, pred, num_classes=2, mean=False):
     """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    iu = tp / (tp + fp + fn)  # Per-class Intersection over Union
+    iu = tp / (tp + fp + fn + eps)  # Per-class Intersection over Union
     if mean:
         iu = iu.mean().item()
     return iu * 100
