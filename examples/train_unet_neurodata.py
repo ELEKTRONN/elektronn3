@@ -149,8 +149,9 @@ train_transform = transforms.Compose(common_transforms + [
 valid_transform = transforms.Compose(common_transforms + [])
 
 # Specify data set
+aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
 common_data_kwargs = {  # Common options for training and valid sets.
-    'aniso_factor': 2,
+    'aniso_factor': aniso_factor,
     'patch_shape': (48, 96, 96),
     # 'offset': (8, 20, 20),
     'num_classes': 2,
@@ -162,7 +163,7 @@ train_dataset = PatchCreator(
     epoch_size=args.epoch_size,
     warp_prob=0.2,
     warp_kwargs={
-        'sample_aniso': True,
+        'sample_aniso': aniso_factor != 1,
         'perspective': True,
         'warp_amount': 0.1,
     },
@@ -175,6 +176,7 @@ valid_dataset = None if not valid_indices else PatchCreator(
     train=False,
     epoch_size=10,  # How many samples to use for each validation run
     warp_prob=0,
+    warp_kwargs={'sample_aniso': aniso_factor != 1},
     transform=valid_transform,
     **common_data_kwargs
 )
