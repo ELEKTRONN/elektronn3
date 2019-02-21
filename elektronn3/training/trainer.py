@@ -109,6 +109,8 @@ class Trainer:
             `py:mod:`torch.optim.lr_scheduler`.
         overlay_alpha: Alpha (transparency) value for alpha-blending of
             overlay image plots.
+        enable_videos: Enables video visualizations for 3D image data
+            in tensorboard. Requires the moviepy package.
         enable_tensorboard: If ``True``, tensorboard logging/plotting is
             enabled during training.
         tensorboard_root_path: Path to the root directory under which
@@ -197,6 +199,7 @@ class Trainer:
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.2,
+            enable_videos: bool = True,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
@@ -292,7 +295,13 @@ class Trainer:
         self.schedulers = schedulers
 
         self.num_classes = num_classes
-
+        if enable_videos:
+            try:
+                import moviepy
+            except:
+                logger.warning('moviepy is not installed. Disabling video logs.')
+                enable_videos = False
+        self.enable_videos = enable_videos
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
             if self.sample_plotting_handler is None:

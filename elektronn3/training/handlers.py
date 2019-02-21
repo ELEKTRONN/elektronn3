@@ -125,7 +125,8 @@ def _tb_log_preview(
         padded_out_batch[slc] = out_batch
         out_batch = padded_out_batch
 
-    if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them
+    if inp_batch.ndim == 5 and trainer.enable_videos:
+        # 5D tensors -> 3D images -> We can make 2D videos out of them
         # See comments in the 5D section in _tb_log_sample_images
         inp_video = squash01(inp_batch)
         trainer.tb.add_video(
@@ -242,7 +243,8 @@ def _tb_log_sample_images(
             f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
         )
 
-    if inp_batch.ndim == 5:  # 5D tensors -> 3D images -> We can make 2D videos out of them
+    if inp_batch.ndim == 5 and trainer.enable_videos:
+        # 5D tensors -> 3D images -> We can make 2D videos out of them
         # We re-interpret the D dimension as the temporal dimension T of the video
         #  -> (N, C, T, H, W)
         # Inputs and outputs need to be squashed to the (0, 1) intensity range

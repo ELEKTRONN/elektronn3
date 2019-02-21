@@ -227,6 +227,7 @@ trainer = Trainer(
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
+    # enable_videos=False,  # Uncomment to get rid of videos in tensorboard
     offset=train_dataset.offset,
     apply_softmax_for_prediction=True,
     num_classes=train_dataset.num_classes,
