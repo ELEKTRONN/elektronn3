@@ -443,6 +443,10 @@ class UNet(nn.Module):
         # Indices of blocks that should operate in 2D instead of 3D mode,
         # to save resources
         self.planar_blocks = planar_blocks
+        if not planar_blocks:
+            # Adaptive Convolutions only make sense if a part of the network
+            #  operates in 2D (planar mode)
+            self.adaptive = False
 
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
