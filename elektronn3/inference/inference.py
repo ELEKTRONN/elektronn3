@@ -365,7 +365,7 @@ class Predictor:
         """
         if self.verbose:
             start = time.time()
-        inp = torch.as_tensor(inp, dtype=self.dtype)
+        inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         inp.pin_memory()
         inp = inp.to(self.device, non_blocking=True)
         inp_batch_size = inp.shape[0]
