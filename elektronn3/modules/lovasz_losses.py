@@ -7,14 +7,13 @@
 # This file is mostly copied from https://github.com/bermanmaxim/LovaszSoftmax.
 # Modifications for elektronn3:
 # - Support 5D images
+# - Avoid zero division in low-precision training by adding a small constant eps in divisions
 
 """
 Lovasz-Softmax and Jaccard hinge loss in PyTorch
 Maxim Berman 2018 ESAT-PSI KU Leuven (MIT License)
 
 """
-
-# TODO: Introduce epsilon to avoid zero division in fp16
 
 from __future__ import print_function, division
 
@@ -28,6 +27,9 @@ except ImportError: # py3k
     from itertools import  filterfalse
 
 
+eps = 0.0001  # To avoid divisions by zero, esp. in low-precision training
+
+
 def lovasz_grad(gt_sorted):
     """
     Computes gradient of the Lovasz extension w.r.t sorted errors
@@ -37,7 +39,7 @@ def lovasz_grad(gt_sorted):
     gts = gt_sorted.sum()
     intersection = gts - gt_sorted.float().cumsum(0)
     union = gts + (1 - gt_sorted).float().cumsum(0)
-    jaccard = 1. - intersection / union
+    jaccard = 1. - intersection / (union + eps)
     if p > 1: # cover 1-pixel case
         jaccard[1:p] = jaccard[1:p] - jaccard[0:-1]
     return jaccard
@@ -57,7 +59,7 @@ def iou_binary(preds, labels, EMPTY=1., ignore=None, per_image=True):
         if not union:
             iou = EMPTY
         else:
-            iou = float(intersection) / union
+            iou = float(intersection) / (union + eps)
         ious.append(iou)
     iou = mean(ious)    # mean accross images if per_image
     return 100 * iou
@@ -79,7 +81,7 @@ def iou(preds, labels, C, EMPTY=1., ignore=None, per_image=False):
                 if not union:
                     iou.append(EMPTY)
                 else:
-                    iou.append(float(intersection) / union)
+                    iou.append(float(intersection) / (union + eps))
         ious.append(iou)
     ious = map(mean, zip(*ious)) # mean accross images if per_image
     return 100 * np.array(ious)
