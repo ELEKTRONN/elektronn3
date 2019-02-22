@@ -67,7 +67,7 @@ from elektronn3.models.unet import UNet
 torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 model = UNet(
-    n_blocks=3,
+    n_blocks=4,
     start_filts=32,
     planar_blocks=(0,),
     activation='relu',
