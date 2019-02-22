@@ -207,6 +207,8 @@ class RandomGammaCorrection:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
@@ -269,6 +271,8 @@ class RandomGrayAugment:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
@@ -333,6 +337,8 @@ class AdditiveGaussianNoise:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng

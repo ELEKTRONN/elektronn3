@@ -14,6 +14,8 @@ Maxim Berman 2018 ESAT-PSI KU Leuven (MIT License)
 
 """
 
+# TODO: Introduce epsilon to avoid zero division in fp16
+
 from __future__ import print_function, division
 
 import torch

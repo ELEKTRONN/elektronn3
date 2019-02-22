@@ -54,6 +54,7 @@ def calculate_stds(inputs: Sequence) -> Tuple[float]:
     return tuple(stds)
 
 
+# TODO: inverse and inversesquared weights can get really small (~1e-16) -> potential numerical issues?
 def calculate_class_weights(
         targets: Sequence[np.ndarray],
         mode='binmean'
