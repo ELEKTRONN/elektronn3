@@ -172,10 +172,7 @@ class UpConv(nn.Module):
         """
         updec = self.upconv(dec)
         crenc, upcdec = autocrop(enc, updec)
-        if self.up_mode == 'transpose':
-            # Only for transposed convolution.
-            # (In case of bilinear upsampling we omit activation)
-            updec = self.act0(updec)
+        updec = self.act0(updec)
         if self.merge_mode == 'concat':
             mrg = torch.cat((updec, crenc), 1)
         else:
@@ -395,8 +392,8 @@ class UNet(nn.Module):
                 'be planar (2-dimensional) anyways.\n'
                 'Either set dim=3 or set planar_blocks=().'
             )
-
-        if up_mode in ('transpose', 'upsample', 'resizeconv_nearest', 'resizeconv_linear'):
+        if up_mode in ('transpose', 'upsample', 'resizeconv_nearest', 'resizeconv_linear',
+                       'resizeconv_nearest1', 'resizeconv_linear1'):
             self.up_mode = up_mode
         else:
             raise ValueError("\"{}\" is not a valid mode for upsampling".format(up_mode))
