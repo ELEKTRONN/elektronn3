@@ -225,8 +225,9 @@ class DelayedDataLoaderIter(DataLoaderIter):
         except KeyboardInterrupt:
             self.shutdown = True
             self._shutdown_workers()
-            for w in self.workers:
-                w.terminate()
+            if hasattr(self, 'workers'):
+                for w in self.workers:
+                    w.terminate()
             raise KeyboardInterrupt
 
     def __next__(self):
@@ -237,8 +238,9 @@ class DelayedDataLoaderIter(DataLoaderIter):
         except KeyboardInterrupt:
             self.shutdown = True
             self._shutdown_workers()
-            for w in self.workers:
-                w.terminate()
+            if hasattr(self, 'workers'):
+                for w in self.workers:
+                    w.terminate()
             raise KeyboardInterrupt
 
 

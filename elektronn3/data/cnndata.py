@@ -30,7 +30,7 @@ class PatchCreator(data.Dataset):
 
     It implements the PyTorch ``Dataset`` interface and is meant to be used
     with a PyTorch ``DataLoader`` (or the modified
-    :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader``, if it is
+    :py:class:`elektronn3.training.trainer.train_utils.DelayedDataLoader`, if it is
     used with :py:class:`elektronn3.training.trainer.Trainer``).
 
     The main idea of this class is to automate input and target patch creation
@@ -40,7 +40,7 @@ class PatchCreator(data.Dataset):
     Optionally, the source coordinates from which patches
     are sliced are obtained by random warping with affine or perspective
     transformations for efficient augmentation and avoiding border artifacts
-    (see ``warp``, ``warp_kwargs``).
+    (see ``warp_prob``, ``warp_kwargs``).
     Note that whereas other warping-based image augmentation systems usually
     warp images themselves, elektronn3 performs warping transformations on
     the **coordinates** from which image patches are sliced and obtains voxel
@@ -75,6 +75,14 @@ class PatchCreator(data.Dataset):
             depend on the neural network architecture to be used (If the
             effective receptive field of the network is small, larger patch
             sizes won't help much).
+        offset: Shape of the offset by which each the targets are cropped
+            on each side. This needs to be set if the outputs of the network
+            you train with are smaller than its inputs.
+            For example, if the spatial shape of your inputs is
+            ``patch_shape=(48, 96, 96)`` the spatial shape of your outputs is
+            ``out_shape=(32, 56, 56)``, you should set ``offset=(8, 20, 20)``,
+            because ``offset = (patch_shape - out_shape) / 2`` should always
+            hold true.
         cube_prios: List of per-cube priorities, where a higher priority
             means that it is more likely that a sample comes from this cube.
         aniso_factor: Depth-anisotropy factor of the data set. E.g.
@@ -88,16 +96,12 @@ class PatchCreator(data.Dataset):
             be used for reading target data:
             - discrete targets are obtained by nearest-neighbor interpolation
             - non-discrete (continuous) targets are linearly interpolated.
+        target_dtype: dtype that target tensors should be cast to.
         train: Determines if samples come from training or validation
             data.
             If ``True``, training data is returned.
             If ``False``, validation data is returned.
-        preview_shape: Desired spatial shape of the dedicated preview batch.
-            The preview batch is obtained by slicing a patch of this
-            shape out of the center of the preview cube.
-            If it is ``None`` (default), preview batch functionality will be
-            disabled.
-        warp: ratio of training samples that should be obtained using
+        warp_prob: ratio of training samples that should be obtained using
             geometric warping augmentations.
         warp_kwargs: kwargs that are passed through to
             :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`.
@@ -118,42 +122,48 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-        classes: The different target classes that exist
+        num_classes: The total number of different target classes that exist
             in the data set. Setting this is optional, but some features might
             only work if this is specified.
+        in_memory: If ``True``, all data set files are immediately loaded
+            into host memory and are permanently kept there as numpy arrays.
+            If this is disabled (default), file contents are always read from
+            the HDF5 files to produce samples. (Note: This does not mean it's
+            slower, because file contents are transparently cached by h5py,
+            see http://docs.h5py.org/en/latest/high/file.html#chunk-cache).
+
     """
     def __init__(
             self,
             input_h5data: List[Tuple[str, str]],
             target_h5data: List[Tuple[str, str]],
             patch_shape: Sequence[int],
+            offset: Sequence[int] = (0, 0, 0),
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
+            target_dtype: np.dtype = np.int64,
             train: bool = True,
-            preview_shape: Optional[Sequence[int]] = None,
-            warp: Union[bool, float] = False,
+            warp_prob: Union[bool, float] = False,
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
-            classes: Optional[Sequence[int]] = None
+            num_classes: Optional[int] = None,
+            in_memory: bool = False,
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         if not train:
-            if warp:
+            if warp_prob > 0:
                 logger.warning(
                     'Augmentations should not be used on validation data.'
                 )
-        else:
-            if preview_shape is not None:
-                raise ValueError()
 
         # batch properties
         self.train = train
-        self.warp = warp
-        self.warp_kwargs = warp_kwargs
+        self.warp_prob = warp_prob
+        self.warp_kwargs = warp_kwargs if warp_kwargs is not None else {}
 
         # general properties
         input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
@@ -165,58 +175,34 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
-        # TODO: This is currently only used for determining num_classes. It
-        #       could be used for adding support for targets that are not
-        #       labelled in the expected order [0, 1, ..., num_classes - 1] or
-        #       as a whitelist that excludes classes that should be ignored.
-        self.classes = classes
-        self.num_classes = None if classes is None else len(classes)
+        self.num_classes = num_classes
+        self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
-        # TODO: Make strides and offsets for targets configurable
-        # self.strides = ...
-        #  strides will need to be applied *during* dataset iteration now
-        #  (-> strided reading in slice_h5()... or should strides be applied
-        #   with some fancy downscaling operator? Naively strided reading
-        #   could mess up targets in unfortunate cases:
-        #   e.g. ``[0, 1, 0, 1, 0, 1][::2] == [0, 0, 0]``, discarding all 1s).
-        self.offsets = np.array([0, 0, 0])
-        self.target_patch_size = self.patch_shape - self.offsets * 2
-        self._target_dtype = np.int64
-        # The following will be inferred when reading data
-        self.n_labelled_pixels = 0
-
-        # Actual data fields
-        self.inputs = []
-        self.targets = []
-
-        self.preview_shape = preview_shape
-        self._preview_batch = None
-
+        self.offset = np.array(offset)
+        self.target_patch_size = self.patch_shape - self.offset * 2
+        self._target_dtype = target_dtype
+        self.transform = transform
 
         # Setup internal stuff
+        # TODO: Support custom rng for better reproducibility
         self.rng = np.random.RandomState(
             np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
         )
         self.pid = os.getpid()
 
+        # The following fields will be filled when reading data
+        self.n_labelled_pixels = 0
+        self.inputs = []
+        self.targets = []
         self._sampling_weight = None
-        self._training_count = None
-        self._count = None
-        self.n_successful_warp = 0
-        self.n_failed_warp = 0
-        self.n_read_failures = 0
 
         self.load_data()  # Open dataset files
 
-        if transform is None:
-            transform = lambda x: x
-        self.transform = transform
-
-        # Load preview data on initialization so read errors won't occur late
-        # and reading doesn't have to be done by each background worker process separately.
-        _ = self.preview_batch
+        self.n_successful_warp = 0
+        self.n_failed_warp = 0
+        self.n_read_failures = 0
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
         # Note that the index is ignored. Samples are always random
@@ -228,21 +214,18 @@ class PatchCreator(data.Dataset):
 
         self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
+        warp_prob = self.warp_prob
         while True:
             try:
-                # TODO: Limit validation data warping
-                inp, target = self.warp_cut(input_src, target_src, self.warp, self.warp_kwargs)
+                inp, target = self.warp_cut(input_src, target_src, warp_prob, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
-
-                # TODO: Remove this stupid check ASAP once https://github.com/ELEKTRONN/elektronn3/issues/10 is fixed.
-                # Assuming classes are [0, 1, ..., num_classes - 1]
-                if target.max() > self.num_classes - 1:
-                    # TODO: Find out where to catch this early / prevent this issue from happening
-                    logger.warning(f'invalid target: max = {target.max()}. Skipping batch...')
-                    continue
             except coord_transforms.WarpingOOBError:
+                # Temporarily set warp_prob to 1 to make sure that the next attempt
+                #  will also try to use warping. Otherwise, self.warp_prob would not
+                #  reflect the actual probability of a sample being obtained by warping.
+                warp_prob = 1
                 self.n_failed_warp += 1
-                if self.n_failed_warp > 20 and self.n_failed_warp > 2 * self.n_successful_warp:
+                if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
                     fail_percentage = int(round(100 * fail_ratio))
                     # Note that this warning will be spammed once the conditions are met.
@@ -273,7 +256,12 @@ class PatchCreator(data.Dataset):
                 )
                 continue
             self.n_successful_warp += 1
-            inp, target = self.transform(inp, target)
+            try:
+                inp, target = self.transform(inp, target)
+            except transforms._DropSample:
+                # A filter transform has chosen to drop this sample, so skip it
+                logger.debug('Sample dropped.')
+                continue
             break
 
         # inp, target are still numpy arrays here. Relying on auto-conversion to
@@ -291,59 +279,6 @@ class PatchCreator(data.Dataset):
     #     s = s.format(self.c_target, self.c_input, self._training_count,
     #                  self._valid_count, self.n_labelled_pixels)
     #     return s
-
-    def _create_preview_batch(
-            self,
-            inp_source: h5py.Dataset,
-            target_source: h5py.Dataset,
-    ) -> Tuple[torch.Tensor, torch.LongTensor]:
-        # Central slicing
-        halfshape = np.array(self.preview_shape) // 2
-        if inp_source.ndim == 4:
-            inp_shape = np.array(inp_source.shape[1:])
-            target_shape = np.array(target_source.shape[1:])
-        elif inp_source.ndim == 3:
-            inp_shape = np.array(inp_source.shape)
-            target_shape = np.array(target_source.shape)
-        inp_center = inp_shape // 2
-        inp_lo = inp_center - halfshape
-        inp_hi = inp_center + halfshape
-        target_center = target_shape // 2
-        target_lo = target_center - halfshape
-        target_hi = target_center + halfshape
-        if np.any(inp_center < halfshape):
-            raise ValueError(
-                'preview_shape is too big for shape of input source.'
-                f'Requested {self.preview_shape}, but can only deliver {tuple(inp_shape)}.'
-            )
-        elif np.any(target_center < halfshape):
-            raise ValueError(
-                'preview_shape is too big for shape of target source.'
-                f'Requested {self.preview_shape}, but can only deliver {tuple(target_shape)}.'
-            )
-        inp_np = slice_h5(inp_source, inp_lo, inp_hi, prepend_empty_axis=True)
-        target_np = slice_h5(
-            target_source, target_lo, target_hi,
-            dtype=self._target_dtype, prepend_empty_axis=True
-        )
-        inp_np, target_np = self.transform(inp_np, target_np)
-
-        inp = torch.from_numpy(inp_np)
-        target = torch.from_numpy(target_np)
-
-        return inp, target
-
-    # TODO: Make targets optional so we can have larger previews without ground truth targets?
-
-    @property
-    def preview_batch(self) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
-        if self._preview_batch is None and self.preview_shape is not None:
-            inp, target = self._create_preview_batch(
-                self.inputs[0], self.targets[0]
-            )  # TODO: Don't hardcode [0]
-
-            self._preview_batch = (inp, target)
-        return self._preview_batch
 
     @property
     def warp_stats(self) -> str:
@@ -365,7 +300,7 @@ class PatchCreator(data.Dataset):
             self,
             inp_src: h5py.Dataset,
             target_src: h5py.Dataset,
-            warp: Union[float, bool],
+            warp_prob: Union[float, bool],
             warp_kwargs: Dict[str, Any]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -375,7 +310,7 @@ class PatchCreator(data.Dataset):
         The same random warping transformation is each applied to both input
         and target.
 
-        Warping is randomly applied with the probability defined by the ``warp``
+        Warping is randomly applied with the probability defined by the ``warp_prob``
         parameter (see below).
 
         Parameters
@@ -384,9 +319,9 @@ class PatchCreator(data.Dataset):
             Input image source (in HDF5)
         target_src: h5py.Dataset
             Target image source (in HDF5)
-        warp: float or bool
+        warp_prob: float or bool
             False/True disable/enable warping completely.
-            If ``warp`` is a float, it is used as the ratio of inputs that
+            If ``warp_prob`` is a float, it is used as the ratio of inputs that
             should be warped.
             E.g. 0.5 means approx. every second call to this function actually
             applies warping to the image-target pair.
@@ -402,10 +337,10 @@ class PatchCreator(data.Dataset):
         target_src: np.ndarray
             (Warped) target slice
         """
-        if (warp is True) or (warp == 1):  # always warp
+        if (warp_prob is True) or (warp_prob == 1):  # always warp
             do_warp = True
-        elif 0 < warp < 1:  # warp only a fraction of examples
-            do_warp = True if (self.rng.rand() < warp) else False
+        elif 0 < warp_prob < 1:  # warp only a fraction of examples
+            do_warp = True if (self.rng.rand() < warp_prob) else False
         else:  # never warp
             do_warp = False
 
@@ -471,7 +406,6 @@ class PatchCreator(data.Dataset):
 
         # sample example i if: batch_prob[i] < p
         self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
-        self._count = len(self.inputs)
 
     def check_files(self) -> None:  # TODO: Update for cdhw version
         """
@@ -485,13 +419,13 @@ class PatchCreator(data.Dataset):
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
                 notfound = True
-                if 'neuro_data_zxy' in p:
+                if 'neuro_data_cdhw' in p:
                     give_neuro_data_hint = True
         if give_neuro_data_hint:
-            print('\nIt looks like you are referencing the neuro_data_zxy dataset.\n'
+            print('\nIt looks like you are referencing the neuro_data_cdhw dataset.\n'
                   'To install the neuro_data_xzy dataset to the default location, run:\n'
-                  '  $ wget http://elektronn.org/downloads/neuro_data_zxy.zip\n'
-                  '  $ unzip neuro_data_zxy.zip -d ~/neuro_data_zxy')
+                  '  $ wget https://github.com/ELEKTRONN/elektronn.github.io/releases/download/neuro_data_cdhw/neuro_data_cdhw.zip\n'
+                  '  $ unzip neuro_data_cdhw.zip -d ~/neuro_data_cdhw')
         if notfound:
             print('\nPlease fetch the necessary dataset and/or '
                   'change the relevant file paths in the network config.')
@@ -502,18 +436,58 @@ class PatchCreator(data.Dataset):
         self.check_files()
         inp_h5sets, target_h5sets = [], []
         modestr = 'Training' if self.train else 'Validation'
-        print(f'\n{modestr} data set:')
+        memstr = ' (in memory)' if self.in_memory else ''
+        logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]
+            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]#[:, 50:-50, 100:-100, 100:-100]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
+            if self.in_memory:
+                inp_h5 = inp_h5.value
+                target_h5 = target_h5.value
 
-            print(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
-            print(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
+            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
+            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
             inp_h5sets.append(inp_h5)
             target_h5sets.append(target_h5)
         print()
 
         return inp_h5sets, target_h5sets
+
+
+def get_preview_batch(
+        h5data: Tuple[str, str],
+        preview_shape: Optional[Tuple[int, ...]] = None,
+        transform: Callable = transforms.Identity(),
+        in_memory: bool = False
+) -> torch.Tensor:
+    fname, key = h5data
+    inp_h5 = h5py.File(fname, 'r')[key]
+    if in_memory:
+        inp_h5 = inp_h5.value
+    dim = len(preview_shape)  # 2D or 3D
+    inp_shape = np.array(inp_h5.shape[-dim:])
+    if preview_shape is None:  # Slice everything
+        inp_lo = np.zeros_like(inp_shape)
+        inp_hi = inp_shape
+    else:  # Slice only a preview_shape-sized region from the center of the input
+        halfshape = np.array(preview_shape) // 2
+        inp_center = inp_shape // 2
+        inp_lo = inp_center - halfshape
+        inp_hi = inp_center + halfshape
+        if np.any(inp_center < halfshape):
+            raise ValueError(
+                'preview_shape is too big for shape of input source.'
+                f'Requested {preview_shape}, but can only deliver {tuple(inp_shape)}.'
+            )
+    memstr = ' (in memory)' if in_memory else ''
+    logger.info(f'\nPreview data{memstr}:')
+    logger.info(f'  input:       {fname}[{key}]: {inp_h5.shape} ({inp_h5.dtype})\n')
+    inp_np = slice_h5(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
+    if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
+        inp_np = inp_np[:, None]  # Add missing C dim
+    inp_np, _ = transform(inp_np, None)
+    inp = torch.from_numpy(inp_np)
+    return inp
 
 
 class SimpleNeuroData2d(data.Dataset):
@@ -549,7 +523,6 @@ class SimpleNeuroData2d(data.Dataset):
         self.inp = self.inp_file[inp_key].value.astype(np.float32)
         self.target = self.target_file[target_key].value.astype(np.int64)
         self.target = self.target[0]  # Squeeze superfluous first dimension
-
         self.target = self.target[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (dirty hack TODO)
 
         # Cut inp and target to same size
@@ -580,3 +553,4 @@ class SimpleNeuroData2d(data.Dataset):
     def close_files(self):
         self.inp_file.close()
         self.target_file.close()
+

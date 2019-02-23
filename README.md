@@ -7,9 +7,7 @@ convolutional neural networks for 3D semantic segmentation.
 Its focus is on HDF5 data loading/augmentation, training, monitoring
 and model evaluation.
 
-**It is currently in a very early stage of development** and will
-undergo major breaking changes in the next weeks, so we don't
-recommend using it yet if you are not already familiar with the code.
+**elektronn3** is under active development and its API is not yet stable.
 
 For a roadmap of planned features, see the ["enhancement" issues on the tracker](https://github.com/ELEKTRONN/elektronn3/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement).
 
@@ -17,7 +15,7 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 
 - Linux (support for Windows, MacOS and other systems is not planned)
 - Python 3.6 or later
-- PyTorch 0.4.1
+- PyTorch 1.0
 - For other requirements see `requirements.txt`
 
 

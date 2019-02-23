@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 import traceback
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Union
 
 import h5py
 import numpy as np
@@ -19,7 +19,7 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
-def _to_full_numpy(seq):
+def _to_full_numpy(seq) -> np.ndarray:
     if isinstance(seq, np.ndarray):
         return seq
     elif isinstance(seq[0], np.ndarray):
@@ -33,24 +33,28 @@ def _to_full_numpy(seq):
 
 
 def calculate_means(inputs: Sequence) -> Tuple[float]:
-    # TODO: This implementation can surely be optimized (esp. memory usage)
-    inputs = _to_full_numpy(inputs)  # (N, C, D, H, W)
-    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
-    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
-    means = flat.mean(axis=1)  # For each channel, calculate mean of all values
+    inputs = [
+        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
+        for inp in inputs
+    ]  # Necessary if shapes don't match
+    # Preserve C, but concatenate everything else into one flat dimension
+    inputs = np.concatenate(inputs, axis=1)
+    means = np.mean(inputs, axis=1)
     return tuple(means)
 
 
-# TODO: Respect separate channels
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
-    # TODO: This implementation can surely be optimized (esp. memory usage)
-    inputs = _to_full_numpy(inputs)
-    channelfirst = inputs.swapaxes(0, 1)  # (C, N, D, H, W)
-    flat = channelfirst.reshape(channelfirst.shape[0], -1)  # (C, N*D*H*W)
-    stds = flat.std(axis=1)  # For each channel, calculate std of all values
+    inputs = [
+        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
+        for inp in inputs
+    ]  # Necessary if shapes don't match
+    # Preserve C, but concatenate everything else into one flat dimension
+    inputs = np.concatenate(inputs, axis=1)
+    stds = np.std(inputs, axis=1)
     return tuple(stds)
 
 
+# TODO: inverse and inversesquared weights can get really small (~1e-16) -> potential numerical issues?
 def calculate_class_weights(
         targets: Sequence[np.ndarray],
         mode='binmean'
@@ -61,13 +65,28 @@ def calculate_class_weights(
     CrossEntropyLoss it's very important to do this when training on
     datasets with high class imbalance."""
 
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
+
     def __inverse(targets):
-        raise NotImplementedError  # TODO
-        # Weight of each class c1, c2, c3, ... with element counts n1, n2, n3, ... is assigned by:
-        # weight[i] = 1 / n[i]
+        """The weight of each class c1, c2, c3, ... with labeled-element
+        counts n1, n2, n3, ... is assigned by weight[i] = 1 / n[i]"""
+        classes = np.unique(targets)
+        # Count total number of labeled elements per class
+        num_labeled = np.array([
+            np.sum(np.equal(targets, c), dtype=np.float32)
+            for c in classes
+        ])
+        class_weights = 1 / num_labeled
+        return class_weights
 
     def __binmean(targets):
-        # This assumes a binary segmentation problem (background/foreground)
+        """Use the mean of the targets to determine class weights.
+
+        This assumes a binary segmentation problem (background/foreground) and
+        breaks in a multi-class setting."""
         target_mean = np.mean(targets)
         bg_weight = target_mean / (1. + target_mean)
         fg_weight = 1. - bg_weight
@@ -105,19 +124,19 @@ def calculate_nd_slice(src, coords_lo, coords_hi):
 
 
 def slice_h5(
-        src: h5py.Dataset,
+        src: Union[h5py.Dataset, np.ndarray],
         coords_lo: Sequence[int],
         coords_hi: Sequence[int],
         dtype: type = np.float32,
         prepend_empty_axis: bool = False,
         max_retries: int = 5,
+        check_bounds=True,
 ) -> np.ndarray:
-    """ Slice a patch of image data out of a h5py dataset.
+    """ Slice a patch of 3D image data out of a h5py dataset.
 
     Args:
         src: Source data set from which to read data.
-            The expected data shape is (C, D, H, W), so 3D images with a
-            channel-first layout (standard for most PyTorch code).
+            The expected data shapes are (C, D, H, W) or (D, H, W).
         coords_lo: Lower bound of the coordinates where data should be read
             from in ``src``.
         coords_hi: Upper bound of the coordinates where data should be read
@@ -128,10 +147,19 @@ def slice_h5(
             array before returning it.
         max_retries: Maximum retries if a read error occurs when reading from
             the HDF5 file.
+        check_bounds: If ``True`` (default), only indices that are within the
+            bounds of ``src`` will be allowed (no negative indices or slices
+            to indices that exceed the shape of ``src``, which would normally
+            just be ignored).
 
     Returns:
         Sliced image array.
     """
+    if check_bounds:
+        if np.any(np.array(coords_lo) < 0):
+            raise RuntimeError(f'coords_lo={coords_lo} exceeds src shape {src.shape[-3:]}')
+        if np.any(np.array(coords_hi) > np.array(src.shape[-3:])):
+            raise RuntimeError(f'coords_hi={coords_hi} exceeds src shape {src.shape[-3:]}')
     if max_retries <= 0:
         logger.error(
             f'slice_h5(): max_retries exceeded at {coords_lo}, {coords_hi}. Aborting...'
@@ -146,12 +174,21 @@ def slice_h5(
         ## srcv = src.value  # Workaround for hp5y indexing limitation. The `.value` call is very unfortunate! It loads the entire cube to RAM.
         ## cut = srcv[full_slice]
 
-        cut = src[
-            :,
-            coords_lo[0]:coords_hi[0],
-            coords_lo[1]:coords_hi[1],
-            coords_lo[2]:coords_hi[2]
-        ]
+        if src.ndim == 4:
+            cut = src[
+                :,
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        elif src.ndim == 3:
+            cut = src[
+                coords_lo[0]:coords_hi[0],
+                coords_lo[1]:coords_hi[1],
+                coords_lo[2]:coords_hi[2]
+            ]
+        else:
+            raise ValueError(f'Expected src.ndim to be 3 or 4, but got {src.ndim} instead.')
     # Work around mysterious random HDF5 read errors by recursively calling
     #  this function from within itself until it works again or until
     #  max_retries is exceeded.
