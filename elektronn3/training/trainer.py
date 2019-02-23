@@ -11,7 +11,7 @@ import shutil
 
 from pickle import PickleError
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List, Union
 
 import inspect
 import IPython
@@ -70,6 +70,7 @@ class Trainer:
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
+        enable_loss_mask
         valid_metrics: Validation metrics to be calculated on
             validation data after each training epoch. All metrics are logged
             to tensorboard.
@@ -187,6 +188,7 @@ class Trainer:
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
+            enable_loss_mask: bool = False,
             preview_batch: Optional[torch.Tensor] = None,
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
             preview_overlap_shape: Optional[Tuple[int, ...]] = None,
@@ -246,6 +248,7 @@ class Trainer:
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
         self.valid_metrics = valid_metrics
+        self.enable_loss_mask = enable_loss_mask
         self.preview_batch = preview_batch
         self.preview_tile_shape = preview_tile_shape
         self.preview_overlap_shape = preview_overlap_shape
@@ -436,15 +439,33 @@ class Trainer:
         running_mean_target = 0
         running_vx_size = 0
         timer = Timer()
-        pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, (inp, target) in pbar:
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
+        for i, batch in batch_iter:
+            # Currently two Dataset/DataLoader interfaces are supported:
+            #  the old one, which expects (inp, target) tuples from the Dataset,
+            #  and the new one, which is more flexible and expects dicts.
+            #  We will move to the dict interface because it allows us to pass
+            #  additional data from the Dataset to the training loop and are
+            #  not limited to encoding everything in (inp, target) tuples.
+            # TODO: Remove tuple interface when the dict interface is stable
+            batch: Union[Dict[str, Any], Tuple[torch.Tensor, torch.Tensor]]
+            if isinstance(batch, dict):  # Cool new dict interface
+                inp, target = batch['inp'], batch['target']
+                mask = batch.get('mask')
+                # info = batch.get('info')  # TODO: Handle info.
+                # # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+                dmask = None if mask is None else mask.to(self.device)
+            elif isinstance(batch, tuple) and len(batch) == 2:  # Deprecated tuple interface
+                inp, target = batch
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
 
             # forward pass
             dout = self.model(dinp)
-            dloss = self.criterion(dout, dtarget)
+            if self.enable_loss_mask and dmask is not None:
+                dloss = self.criterion(dout, dtarget, dmask)
+            else:
+                dloss = self.criterion(dout, dtarget)
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
@@ -467,7 +488,7 @@ class Trainer:
                 stats['tr_loss'] += loss
                 acc = float(metrics.bin_accuracy(target, out))
                 mean_target = float(target.to(torch.float32).mean())
-                pbar.set_description(f'Training (loss {loss:.4f})')
+                batch_iter.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             # this was changed to support ReduceLROnPlateau which does not implement get_lr
@@ -516,7 +537,15 @@ class Trainer:
         val_loss = 0
         stats = {name: 0 for name in self.valid_metrics.keys()}
         # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
-        for inp, target in tqdm(self.valid_loader, 'Validating'):
+        for batch in tqdm(self.valid_loader, 'Validating'):
+            if isinstance(batch, dict):  # Cool new dict interface
+                inp, target = batch['inp'], batch['target']
+                # mask = batch.get('mask')
+                # info = sample.get('info')
+                # # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+                # dmask = None if mask is None else mask.to(self.device)
+            elif isinstance(batch, tuple) and len(batch) == 2:  # Deprecated tuple interface
+                inp, target = batch
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)

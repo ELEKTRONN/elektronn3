@@ -204,7 +204,7 @@ class PatchCreator(data.Dataset):
         self.n_failed_warp = 0
         self.n_read_failures = 0
 
-    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self, index: int) -> Dict[str, Any]:
         # Note that the index is ignored. Samples are always random
         return self._get_random_sample()
 
@@ -264,9 +264,15 @@ class PatchCreator(data.Dataset):
                 continue
             break
 
-        # inp, target are still numpy arrays here. Relying on auto-conversion to
-        #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
-        return inp, target
+        inp = torch.as_tensor(inp)
+        target = torch.as_tensor(target)
+        sample = {
+            'inp': torch.as_tensor(inp),
+            'target': torch.as_tensor(target),
+            # 'info': None,
+            # 'mask': None
+        }
+        return sample
 
     def __len__(self) -> int:
         return self.epoch_size
