@@ -54,10 +54,9 @@ def calculate_stds(inputs: Sequence) -> Tuple[float]:
     return tuple(stds)
 
 
-# TODO: inverse and inversesquared weights can get really small (~1e-16) -> potential numerical issues?
 def calculate_class_weights(
         targets: Sequence[np.ndarray],
-        mode='binmean'
+        mode='inverse'
 ) -> np.ndarray:
     """Calulate class weights that assign more weight to less common classes.
 
@@ -72,14 +71,19 @@ def calculate_class_weights(
 
     def __inverse(targets):
         """The weight of each class c1, c2, c3, ... with labeled-element
-        counts n1, n2, n3, ... is assigned by weight[i] = 1 / n[i]"""
+        counts n1, n2, n3, ... is assigned by weight[i] = N / n[i],
+        where N is the total number of all elements in all ``targets``.
+        (We could achieve the same relative weight proportions by
+        using weight[i] = 1 / n[i], as proposed in
+        https://arxiv.org/abs/1707.03237, but we multiply by N to prevent
+        very small values that could lead to numerical issues."""
         classes = np.unique(targets)
         # Count total number of labeled elements per class
         num_labeled = np.array([
-            np.sum(np.equal(targets, c), dtype=np.float32)
+            np.sum(np.equal(targets, c))
             for c in classes
-        ])
-        class_weights = 1 / num_labeled
+        ], dtype=np.float32)
+        class_weights = targets.size / num_labeled
         return class_weights
 
     def __binmean(targets):

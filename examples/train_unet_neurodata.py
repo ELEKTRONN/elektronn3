@@ -125,6 +125,8 @@ else:  # Use publicly available neuro_data_cdhw dataset
     dataset_std = (42.599973,)
     class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
+# TODO: Recalculate above class_weights with mode='inverse'
+
 max_steps = args.max_steps
 max_runtime = args.max_runtime
 
