@@ -216,6 +216,33 @@ def _argmax(x, dim=1):
     return x.argmax(dim)
 
 
+# Helper for multi-class metric construction
+def channel_metric(metric, c, num_classes, argmax=True):
+    """Returns an evaluator that calculates the ``metric``
+    and selects its value for channel ``c``.
+
+    Example:
+        >>> from elektronn3.training import metrics
+        >>> num_classes = 5  # Example. Depends on model and data set
+        >>> # Metric evaluator dict that registers DSCs of all output channels.
+        >>> # You can pass it to elektronn3.training.Trainer as the ``valid_metrics``
+        >>> #  argument to make it log these values.
+        >>> dsc_evaluators = {
+        ...    f'val_DSC_c{c}': channel_metric(
+        ...        metrics.dice_coefficient,
+        ...        c=c, num_classes=num_classes
+        ...    )
+        ...    for c in range(num_classes)
+        ... }
+    """
+    def evaluator(target, out):
+        pred = _argmax(out) if argmax else out
+        m = metric(target, pred, num_classes=num_classes)
+        return m[c]
+
+    return evaluator
+
+
 # Metric evaluator shortcuts for raw network outputs in binary classification
 #  tasks ("bin_*"). "Raw" means not softmaxed or argmaxed.
 
