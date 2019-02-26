@@ -19,6 +19,9 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
+eps = 0.0001  # To avoid divisions by zero
+
+
 def _to_full_numpy(seq) -> np.ndarray:
     if isinstance(seq, np.ndarray):
         return seq
@@ -83,7 +86,7 @@ def calculate_class_weights(
             np.sum(np.equal(targets, c))
             for c in classes
         ], dtype=np.float32)
-        class_weights = (targets.size / num_labeled).astype(np.float32)
+        class_weights = (targets.size / num_labeled + eps).astype(np.float32)
         return class_weights
 
     def __binmean(targets):
