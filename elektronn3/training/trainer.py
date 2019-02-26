@@ -403,9 +403,9 @@ class Trainer:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
                 else:
-                    return
+                    break
                 if self.terminate:
-                    return
+                    break
             except Exception as e:
                 logger.exception('Unhandled exception during training:')
                 if self.ignore_errors:
@@ -417,7 +417,7 @@ class Trainer:
                           "further inspected by user.\n\n")
                     IPython.embed(header=self._shell_info)
                     if self.terminate:
-                        return
+                        break
                 else:
                     raise e
         self._save_model(suffix='_final')
@@ -485,21 +485,21 @@ class Trainer:
             running_mean_target += mean_target
             running_vx_size += inp.numel()
 
-            if i == len(self.train_loader) - 1:  # Last step in this epoch
-                # Preserve last training batch and network output for later
-                # visualization
-                images['inp'] = inp.numpy()
-                images['target'] = target.numpy()
-                images['out'] = out.numpy()
-
             self.step += 1
             if self.step >= max_steps:
                 logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
                 self.terminate = True
-                break
             if datetime.datetime.now() >= self.end_time:
                 logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
                 self.terminate = True
+            if i == len(self.train_loader) - 1 or self.terminate:
+                # Last step in this epoch or in the whole training
+                # Preserve last training batch and network output for later visualization
+                images['inp'] = inp.numpy()
+                images['target'] = target.numpy()
+                images['out'] = out.numpy()
+
+            if self.terminate:
                 break
 
         stats['tr_accuracy'] = running_acc / len(self.train_loader)
