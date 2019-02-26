@@ -17,7 +17,7 @@ def _channelwise_sum(x: torch.Tensor):
     return x.sum(dim=reduce_dims)
 
 
-# Simple n-dimensional dice loss. Minimalistic version for easier verification
+# TODO: Dense weight support
 def dice_loss(probs, target, weight=1., eps=0.0001):
     # Probs need to be softmax probabilities, not raw network outputs
     tsh, psh = target.shape, probs.shape
@@ -31,14 +31,18 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
         raise ValueError(
             f'Target shape {target.shape} is not compatible with output shape {probs.shape}.'
         )
+    # if weight is None:
+    #     weight = torch.ones(probs.shape[0], dtype=probs.dtype)  # (C,)
+    # if ignore_index is not None:
+    #     weight[:, ignore_index] = 0.
 
-    intersection = probs * onehot_target
-    numerator = 2 * _channelwise_sum(intersection)
-    denominator = probs + onehot_target
-    denominator = _channelwise_sum(denominator) + eps
-    loss_per_channel = 1 - (numerator / denominator)
-    weighted_loss_per_channel = weight * loss_per_channel
-    return weighted_loss_per_channel.mean()
+    intersection = probs * onehot_target  # (N, C, ...)
+    numerator = 2 * _channelwise_sum(intersection)  # (C,)
+    denominator = probs + onehot_target  # (N, C, ...)
+    denominator = _channelwise_sum(denominator) + eps  # (C,)
+    loss_per_channel = 1 - (numerator / denominator)  # (C,)
+    weighted_loss_per_channel = weight * loss_per_channel  # (C,)
+    return weighted_loss_per_channel.mean()  # ()
 
 
 class DiceLoss(torch.nn.Module):
@@ -59,7 +63,7 @@ class DiceLoss(torch.nn.Module):
             If ``False``, ``output`` is assumed to already contain softmax
             probabilities.
         weight: Weight tensor for class-wise loss rescaling.
-            Has to be of shape (C,).
+            Has to be of shape (C,). If ``None``, classes are weighted equally.
     """
     def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
         super().__init__()
