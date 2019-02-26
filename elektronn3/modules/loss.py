@@ -23,7 +23,7 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
     tsh, psh = target.shape, probs.shape
 
     if tsh == psh:  # Already one-hot
-        onehot_target = target.to(torch.float32)
+        onehot_target = target.to(probs.dtype)
     elif tsh[0] == psh[0] and tsh[1:] == psh[2:]:  # Assume dense target storage, convert to one-hot
         onehot_target = torch.zeros_like(probs)
         onehot_target.scatter_(1, target.unsqueeze(1), 1)
