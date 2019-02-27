@@ -4,6 +4,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
 import itertools
+import logging
 import os
 import time
 import zipfile
@@ -15,6 +16,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
+
+logger = logging.getLogger('elektronn3log')
 
 def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
     """Extend a spatial slice ([D,] H, W) to also include the non-spatial (N, C) dims."""
@@ -245,7 +248,7 @@ class Predictor:
         ...     nn.Conv2d(32, 2, 1))
         >>> inp = np.random.randn(2, 5, 10, 10)
         >>> model = Predictor(cnn)
-        >>> out = model.predict_proba(inp)
+        >>> out = model.predict(inp)
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
     # TODO: Maybe change signature to not require out_shape but num_classes
@@ -316,9 +319,6 @@ class Predictor:
 
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            # TODO: Why do we need to wrap this in torch.no_grad() although
-            #  inp.requires_grad = False? Without torch.no_grad(), memory
-            #  usage explodes.
             return self.model(inp)
 
     def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
@@ -347,11 +347,11 @@ class Predictor:
             out[low:high] = self._tiled_predict(inp[low:high])
         return out
 
-    def predict_proba(
+    def predict(
             self,
             inp: Union[np.ndarray, torch.Tensor],
-    ):
-        """ Predict class probabilites of an input tensor.
+    ) -> torch.Tensor:
+        """ Perform prediction on ``inp`` and return prediction.
 
         Args:
             inp: Input data, e.g. of shape (N, C, H, W).
@@ -373,7 +373,7 @@ class Predictor:
         # Lazily figure out these Predictor options based on the input it
         #  receives if they are not already set.
         # Not sure if that's a good idea because these are object-changing
-        #  side-effects in the otherwise pure predict_proba() function.
+        #  side-effects in the otherwise pure predict() function.
         if self.tile_shape is None:
             self.tile_shape = spatial_shape
         if self.overlap_shape is None:
@@ -398,6 +398,11 @@ class Predictor:
             #       inp by out because out may contain padding that we don't want to count)
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
+
+    def predict_proba(self, inp):
+        logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
+        return self.predict(inp)
+
 
 
 # TODO: This can be replaced with a single model.load_state_dict(state_dict) call

@@ -648,7 +648,7 @@ class Trainer:
             out_shape=out_shape,
             apply_softmax=self.apply_softmax_for_prediction,
         )
-        out = predictor.predict_proba(inp)
+        out = predictor.predict(inp)
         return out
 
 
