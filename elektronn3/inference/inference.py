@@ -183,6 +183,18 @@ class Predictor:
     """Class to perform inference using a ``torch.nn.Module`` object either
     passed directly or loaded from a file.
 
+    If both ``tile_shape`` and ``overlap_shape`` are ``None``, input tensors
+    are fed directly into the ``model`` (best for scalar predictions,
+    medium-sized 2D images or very small 3D images).
+    If you define ``tile_shape`` and ``overlap_shape``, these are used to
+    slice a large input into smaller overlapping tiles and perform predictions
+    on these tiles independently and later put the output tiles together into
+    one dense tensor without overlap again. Use this features if your model
+    has spatially interpretable (dense) outputs and if passing one input sample
+    to the ``model`` would result in an out-of-memory error. For more details
+    on this tiling mode, see
+    :py:meth:`elektronn3.inference.inference.tiled_apply()`.
+
     Args:
         model: Network model to be used for inference.
             The model can be passed as an ``torch.nn.Module``, or as a path
@@ -253,6 +265,9 @@ class Predictor:
     """
     # TODO: Maybe change signature to not require out_shape but num_classes
     #       and then calculate out_shape internally from it?
+    # TODO: out_shape includes batch_size as its first entry. That's redundant.
+    #     Since we only need out_shape if we also define a batch_size
+    #     override, we can infer batch_size from out_shape, right?
     def __init__(
             self,
             model: Union[nn.Module, str],
@@ -317,6 +332,11 @@ class Predictor:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
+        if self.tile_shape is None and self.overlap_shape is None:
+            #  have no spatial dimensions, so tiling doesn't make sense here.
+            self.enable_tiling = False
+        else:
+            self.enable_tiling = True
         self.model.eval()
 
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
@@ -324,16 +344,22 @@ class Predictor:
             return self.model(inp)
 
     def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
-        """ Tiled inference with overlapping input tiles."""
-        return tiled_apply(
-            self._predict,
-            inp=inp,
-            tile_shape=self.tile_shape,
-            overlap_shape=self.overlap_shape,
-            offset=self.offset,
-            out_shape=self.out_shape,
-            verbose=self.verbose
-        )
+        """Tiled inference with overlapping input tiles.
+
+        Tiling is not used if ``tile_shape`` and ``overlap_shape`` are
+        undefined."""
+        if self.enable_tiling:
+            return tiled_apply(
+                self._predict,
+                inp=inp,
+                tile_shape=self.tile_shape,
+                overlap_shape=self.overlap_shape,
+                offset=self.offset,
+                out_shape=self.out_shape,
+                verbose=self.verbose
+            )
+        # Otherwise: No tiling, apply model to the whole input in one step
+        return self._predict(inp)
 
     def _splitbatch_predict(
             self,
@@ -342,7 +368,12 @@ class Predictor:
     ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
+        if self.out_shape is None:
+            raise ValueError('If you define a batch_size, you also need to supply out_shape.')
         out = torch.empty(tuple(self.out_shape), dtype=torch.float32)
+        # TODO: Make sure that out_shape[0] is divisible by num_batches or at
+        #     least warn about empty regions in the output if that's not the
+        #     case. out[out_shape[0] % num_batches:, ...] will be empty.
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
