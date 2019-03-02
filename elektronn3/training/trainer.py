@@ -637,7 +637,7 @@ class Trainer:
     ) -> torch.Tensor:
         if self.num_classes is None:
             raise RuntimeError('Can\'t do preview prediction if Trainer.num_classes is not set.')
-        out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
+        out_shape = (self.num_classes, *inp.shape[2:])
         predictor = Predictor(
             model=self.model,
             device=self.device,

@@ -17,7 +17,11 @@ from torch import nn
 from tqdm import tqdm
 
 
+# TODO: It's confusing that tiled_apply expects out_shape to include the N dim, but
+#     Predictor has a parameter with the same name but which doesn't include N.
+
 logger = logging.getLogger('elektronn3log')
+
 
 def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
     """Extend a spatial slice ([D,] H, W) to also include the non-spatial (N, C) dims."""
@@ -235,18 +239,19 @@ class Predictor:
             If your inference fails due to shape issues, as a rule of thumb,
             try adjusting your ``overlap_shape`` so that
             ``tile_shape + 2 * overlap`` is divisible by 16 or 32.
-        out_shape: Expected shape of the output tensor
+        out_shape: Expected shape of the output tensor.
             It doesn't just refer to spatial shape, but to the actual tensor
-            shape including N and C dimensions.
-            Note: ``model(inp)`` is never actually executed – ``out_shape`` is
-            merely used to pre-allocate the output tensor so it can be filled
-            later.
+            shape of one sample, including the channel dimension C, but
+            **excluding** the batch dimension N.
+            Note: ``model(inp)`` is never actually executed if tiling is used
+            – ``out_shape`` is merely used to pre-allocate the output tensor so
+            it can be filled later.
             If you know how many channels your model output has
             (``num_classes``, ``num_out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
             yourself as follows:
             >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
-            >>> out_shape = (inp.shape[0], num_out_channels, *inp.shape[2:])
+            >>> out_shape = (num_out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
@@ -255,19 +260,14 @@ class Predictor:
         verbose: If ``True``, report inference speed.
 
     Examples:
-        >>> cnn = nn.Sequential(
+        >>> model = nn.Sequential(
         ...     nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
         ...     nn.Conv2d(32, 2, 1))
         >>> inp = np.random.randn(2, 5, 10, 10)
-        >>> model = Predictor(cnn)
-        >>> out = model.predict(inp)
+        >>> predictor = Predictor(model)
+        >>> out = predictor.predict(inp)
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
-    # TODO: Maybe change signature to not require out_shape but num_classes
-    #       and then calculate out_shape internally from it?
-    # TODO: out_shape includes batch_size as its first entry. That's redundant.
-    #     Since we only need out_shape if we also define a batch_size
-    #     override, we can infer batch_size from out_shape, right?
     def __init__(
             self,
             model: Union[nn.Module, str],
@@ -355,7 +355,7 @@ class Predictor:
                 tile_shape=self.tile_shape,
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
-                out_shape=self.out_shape,
+                out_shape=(inp.shape[0], *self.out_shape),
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
@@ -370,10 +370,7 @@ class Predictor:
         ``batch_size`` and perform inference on each of them separately."""
         if self.out_shape is None:
             raise ValueError('If you define a batch_size, you also need to supply out_shape.')
-        out = torch.empty(tuple(self.out_shape), dtype=torch.float32)
-        # TODO: Make sure that out_shape[0] is divisible by num_batches or at
-        #     least warn about empty regions in the output if that's not the
-        #     case. out[out_shape[0] % num_batches:, ...] will be empty.
+        out = torch.empty((inp.shape[0], *self.out_shape), dtype=self.dtype)
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
