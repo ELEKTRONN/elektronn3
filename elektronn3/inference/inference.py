@@ -269,6 +269,8 @@ class Predictor:
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        elif isinstance(device, str):
+            device = torch.device(device)
         self.device = device
         self.batch_size = batch_size
         if tile_shape is not None:
@@ -366,7 +368,8 @@ class Predictor:
         if self.verbose:
             start = time.time()
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
-        inp.pin_memory()
+        if self.device.type == 'cuda':
+            inp.pin_memory()
         inp = inp.to(self.device, non_blocking=True)
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
@@ -389,7 +392,8 @@ class Predictor:
         # Explicit synchronization so the next GPU operation won't be
         #  mysteriously slow. If we don't synchronize manually here, profilers
         #  will misleadingly report a huge amount of time spent in out.cpu()
-        torch.cuda.synchronize()
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
         out = out.cpu()
         if self.verbose:
             dtime = time.time() - start
