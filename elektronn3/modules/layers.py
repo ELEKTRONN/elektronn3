@@ -11,6 +11,9 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 
+from .partialconv2d import PartialConv2d
+from .partialconv3d import PartialConv3d
+
 
 class Identity(nn.Module):
     def forward(self, x):
