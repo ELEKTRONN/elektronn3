@@ -121,10 +121,10 @@ class AdaptiveConv3d(nn.Module):
             kwargs['stride'] = kwargs.get('stride', (0, 1, 1))[1:]
             kwargs['padding'] = kwargs.get('padding', (0, 0, 0))[1:]
             kwargs['dilation'] = kwargs.get('dilation', (1, 1, 1))[1:]
-            self.conv = nn.Conv2d(*args, **kwargs)
+            self.conv = PartialConv2d(*args, **kwargs)
             self.forward = self.forward2d
         else:
-            self.conv = nn.Conv3d(*args, **kwargs)
+            self.conv = PartialConv3d(*args, **kwargs)
             self.forward = self.forward3d
 
     def forward2d(self, x):

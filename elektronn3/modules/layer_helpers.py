@@ -10,15 +10,15 @@ import copy
 
 from torch import nn
 
-from elektronn3.modules.layers import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv
+from elektronn3.modules.layers import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv, PartialConv3d, PartialConv2d
 
 
 def get_conv(dim=3, adaptive=False):
     """Chooses an implementation for a convolution layer."""
     if dim == 3:
-        return AdaptiveConv3d if adaptive else nn.Conv3d
+        return AdaptiveConv3d if adaptive else PartialConv3d
     elif dim == 2:
-        return nn.Conv2d
+        return AdaptiveConv3d if adaptive else PartialConv2d
     else:
         raise ValueError('dim has to be 2 or 3')
 
