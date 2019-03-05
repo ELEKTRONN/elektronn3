@@ -28,7 +28,7 @@ def dice_loss(probs, target, weight=1., eps=0.0001, onehot_target=False):
         onehot_target = torch.zeros_like(probs)
         onehot_target.scatter_(1, target.unsqueeze(1), 1)
     else:
-        onehot_target = target.to(torch.float32)
+        onehot_target = target.to(probs.dtype)
 
     intersection = probs * onehot_target
     numerator = 2 * _channelwise_sum(intersection)
