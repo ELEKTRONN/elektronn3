@@ -85,8 +85,8 @@ def calculate_class_weights(
         num_labeled = np.array([
             np.sum(np.equal(targets, c))
             for c in classes
-        ], dtype=np.float32)
-        class_weights = (targets.size / num_labeled + eps).astype(np.float32)
+        ], dtype=np.float32) + eps
+        class_weights = (targets.size / num_labeled).astype(np.float32)
         return class_weights
 
     def __binmean(targets):
