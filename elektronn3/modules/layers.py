@@ -12,6 +12,9 @@ import torch
 from torch import nn
 
 
+from .l1batchnorm import L1BatchNorm
+
+
 class Identity(nn.Module):
     def forward(self, x):
         return x

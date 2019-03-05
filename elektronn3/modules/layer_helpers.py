@@ -10,7 +10,9 @@ import copy
 
 from torch import nn
 
-from elektronn3.modules.layers import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv
+from elektronn3.modules.layers import (
+    AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv, L1BatchNorm
+)
 
 
 def get_conv(dim=3, adaptive=False):
@@ -45,6 +47,7 @@ def get_maxpool(dim=3):
 
 def get_batchnorm(dim=3):
     """Chooses an implementation for a batch normalization layer."""
+    # return L1BatchNorm
     if dim == 3:
         return nn.BatchNorm3d
     elif dim == 2:

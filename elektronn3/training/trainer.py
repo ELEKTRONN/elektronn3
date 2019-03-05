@@ -465,7 +465,7 @@ class Trainer:
             with torch.no_grad():
                 loss = float(dloss)
                 stats['tr_loss'] += loss
-                acc = float(metrics.bin_accuracy(target, out))
+                acc = float(metrics.bin_accuracy(target, out))  # TODO: This shouldn't be hardcoded
                 mean_target = float(target.to(torch.float32).mean())
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
