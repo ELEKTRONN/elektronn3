@@ -683,21 +683,9 @@ class Backup:
     def archive_backup(self):
         """Archiving the source folder, the training script and environment info.
 
-        The training script is saved with the prefix '0-' to distinguish from regular scripts.
-        Some of the information saved in the env info is:
-        PyTorch version: 0.4.0
-        Is debug build: No
-        CUDA used to build PyTorch: 8.0.61
-        OS: CentOS Linux release 7.3.1611 (Core)
-        GCC version: (GCC) 5.2.0
-        CMake version: Could not collect
-        Python version: 3.6
-        Is CUDA available: Yes
-        CUDA runtime version: 8.0.44
-        GPU models and configuration:
-        GPU 0: GeForce GTX 980 Ti
-        GPU 1: GeForce GTX 980 Ti
-        .
+        The training script is saved with the prefix "0-" to distinguish from regular scripts.
+        Environment information equivalent to the output of ``python -m torch.utils.collect_env``
+        is saved in a file named "env_info.txt".
         """
 
         # Archiving the Training script
@@ -723,6 +711,7 @@ def findcudatensors() -> Tuple[int, List[torch.Tensor]]:
     ``print([x.shape for x in findcudatensors()[1])``.
 
     Returns a tuple of
+
     - total memory usage of found tensors in MiB
     - a list of all of those tensors, ordered by size."""
     tensors = []

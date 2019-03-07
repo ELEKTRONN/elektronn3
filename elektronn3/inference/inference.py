@@ -250,6 +250,7 @@ class Predictor:
             (``num_classes``, ``num_out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
             yourself as follows:
+
             >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
             >>> out_shape = (num_out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
