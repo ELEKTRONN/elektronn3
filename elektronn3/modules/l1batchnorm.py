@@ -44,9 +44,10 @@ class L1BatchNorm(nn.Module):
             absdiff = x_minus_mean.abs()
             l1mean = absdiff.mean(dim=reduce_dims, keepdim=True)
             l1scaled = l1mean * self.l2factor + self.eps
-            mom = self.momentum
-            self.running_mean.mul_(mom).add_(mean.flatten() * (1 - mom))
-            self.running_var.mul_(mom).add_(l1scaled.flatten() * (1 - mom))
+            with torch.no_grad():  # Update running stats
+                mom = self.momentum
+                self.running_mean.mul_(mom).add_(mean.flatten() * (1 - mom))
+                self.running_var.mul_(mom).add_(l1scaled.flatten() * (1 - mom))
         else:
             mean = self.running_mean.view(b_sh)
             l1scaled = self.running_var.view(b_sh)
