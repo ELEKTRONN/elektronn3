@@ -7,7 +7,6 @@ import datetime
 import gc
 import logging
 import os
-import traceback
 import shutil
 
 from pickle import PickleError
@@ -110,6 +109,8 @@ class Trainer:
             `py:mod:`torch.optim.lr_scheduler`.
         overlay_alpha: Alpha (transparency) value for alpha-blending of
             overlay image plots.
+        enable_videos: Enables video visualizations for 3D image data
+            in tensorboard. Requires the moviepy package.
         enable_tensorboard: If ``True``, tensorboard logging/plotting is
             enabled during training.
         tensorboard_root_path: Path to the root directory under which
@@ -198,6 +199,7 @@ class Trainer:
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.2,
+            enable_videos: bool = True,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
@@ -293,7 +295,13 @@ class Trainer:
         self.schedulers = schedulers
 
         self.num_classes = num_classes
-
+        if enable_videos:
+            try:
+                import moviepy
+            except:
+                logger.warning('moviepy is not installed. Disabling video logs.')
+                enable_videos = False
+        self.enable_videos = enable_videos
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
             if self.sample_plotting_handler is None:
@@ -376,15 +384,16 @@ class Trainer:
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self._tb_log_scalars(stats, 'stats')
-                    self._tb_log_scalars(misc, 'misc')
-                    if self.preview_batch is not None:
-                        if self.epoch % self.preview_interval == 0 or self.epoch == 1:
-                            # TODO: Free as much GPU memory as possible to make more
-                            #       room for preview inference
-                            # TODO: Also save preview inference results in a (3D) HDF5 file
-                            self.preview_plotting_handler(self)
-                    self.sample_plotting_handler(self, images, group='tr_samples')
+                    try:
+                        self._tb_log_scalars(stats, 'stats')
+                        self._tb_log_scalars(misc, 'misc')
+                        if self.preview_batch is not None:
+                            if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                                # TODO: Also save preview inference results in a (3D) HDF5 file
+                                self.preview_plotting_handler(self)
+                        self.sample_plotting_handler(self, images, group='tr_samples')
+                    except Exception:
+                        logger.exception('Error occured while logging to tensorboard:')
 
                 # Save trained model state
                 self._save_model()
@@ -396,11 +405,11 @@ class Trainer:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
                 else:
-                    return
+                    break
                 if self.terminate:
-                    return
+                    break
             except Exception as e:
-                traceback.print_exc()
+                logger.exception('Unhandled exception during training:')
                 if self.ignore_errors:
                     # Just print the traceback and try to carry on with training.
                     # This can go wrong in unexpected ways, so don't leave the training unattended.
@@ -410,7 +419,7 @@ class Trainer:
                           "further inspected by user.\n\n")
                     IPython.embed(header=self._shell_info)
                     if self.terminate:
-                        return
+                        break
                 else:
                     raise e
         self._save_model(suffix='_final')
@@ -478,21 +487,21 @@ class Trainer:
             running_mean_target += mean_target
             running_vx_size += inp.numel()
 
-            if i == len(self.train_loader) - 1:  # Last step in this epoch
-                # Preserve last training batch and network output for later
-                # visualization
-                images['inp'] = inp.numpy()
-                images['target'] = target.numpy()
-                images['out'] = out.numpy()
-
             self.step += 1
             if self.step >= max_steps:
                 logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
                 self.terminate = True
-                break
             if datetime.datetime.now() >= self.end_time:
                 logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
                 self.terminate = True
+            if i == len(self.train_loader) - 1 or self.terminate:
+                # Last step in this epoch or in the whole training
+                # Preserve last training batch and network output for later visualization
+                images['inp'] = inp.numpy()
+                images['target'] = target.numpy()
+                images['out'] = out.numpy()
+
+            if self.terminate:
                 break
 
         stats['tr_accuracy'] = running_acc / len(self.train_loader)
@@ -521,15 +530,18 @@ class Trainer:
                     stats[name] += evaluator(target, out) / len(self.valid_loader)
 
         if self.tb:
-            self.sample_plotting_handler(
-                self,
-                {
-                    'inp': inp.numpy(),
-                    'out': out.numpy(),
-                    'target': target.numpy()
-                },
-                group='val_samples'
-            )
+            try:
+                self.sample_plotting_handler(
+                    self,
+                    {
+                        'inp': inp.numpy(),
+                        'out': out.numpy(),
+                        'target': target.numpy()
+                    },
+                    group='val_samples'
+                )
+            except Exception:
+                logger.exception('Error occured while logging to tensorboard:')
 
         stats['val_loss'] = val_loss
 
@@ -627,7 +639,7 @@ class Trainer:
     ) -> torch.Tensor:
         if self.num_classes is None:
             raise RuntimeError('Can\'t do preview prediction if Trainer.num_classes is not set.')
-        out_shape = (inp.shape[0], self.num_classes, *inp.shape[2:])
+        out_shape = (self.num_classes, *inp.shape[2:])
         predictor = Predictor(
             model=self.model,
             device=self.device,
@@ -638,7 +650,7 @@ class Trainer:
             out_shape=out_shape,
             apply_softmax=self.apply_softmax_for_prediction,
         )
-        out = predictor.predict_proba(inp)
+        out = predictor.predict(inp)
         return out
 
 

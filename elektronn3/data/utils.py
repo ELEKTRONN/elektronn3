@@ -19,6 +19,9 @@ from elektronn3 import floatX
 logger = logging.getLogger("elektronn3log")
 
 
+eps = 0.0001  # To avoid divisions by zero
+
+
 def _to_full_numpy(seq) -> np.ndarray:
     if isinstance(seq, np.ndarray):
         return seq
@@ -34,10 +37,9 @@ def _to_full_numpy(seq) -> np.ndarray:
 
 def calculate_means(inputs: Sequence) -> Tuple[float]:
     inputs = [
-        _to_full_numpy(inp)
-        .reshape(inp.shape[0], -1)  # Flatten every dim except C
+        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
         for inp in inputs
-    ]
+    ]  # Necessary if shapes don't match
     # Preserve C, but concatenate everything else into one flat dimension
     inputs = np.concatenate(inputs, axis=1)
     means = np.mean(inputs, axis=1)
@@ -46,10 +48,9 @@ def calculate_means(inputs: Sequence) -> Tuple[float]:
 
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
     inputs = [
-        _to_full_numpy(inp)
-            .reshape(inp.shape[0], -1)  # Flatten every dim except C
+        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
         for inp in inputs
-    ]
+    ]  # Necessary if shapes don't match
     # Preserve C, but concatenate everything else into one flat dimension
     inputs = np.concatenate(inputs, axis=1)
     stds = np.std(inputs, axis=1)
@@ -58,7 +59,7 @@ def calculate_stds(inputs: Sequence) -> Tuple[float]:
 
 def calculate_class_weights(
         targets: Sequence[np.ndarray],
-        mode='binmean'
+        mode='inverse'
 ) -> np.ndarray:
     """Calulate class weights that assign more weight to less common classes.
 
@@ -66,16 +67,26 @@ def calculate_class_weights(
     CrossEntropyLoss it's very important to do this when training on
     datasets with high class imbalance."""
 
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
+
     def __inverse(targets):
         """The weight of each class c1, c2, c3, ... with labeled-element
-        counts n1, n2, n3, ... is assigned by weight[i] = 1 / n[i]"""
+        counts n1, n2, n3, ... is assigned by weight[i] = N / n[i],
+        where N is the total number of all elements in all ``targets``.
+        (We could achieve the same relative weight proportions by
+        using weight[i] = 1 / n[i], as proposed in
+        https://arxiv.org/abs/1707.03237, but we multiply by N to prevent
+        very small values that could lead to numerical issues."""
         classes = np.unique(targets)
         # Count total number of labeled elements per class
         num_labeled = np.array([
-            np.sum(np.equal(targets, c), dtype=np.float32)
+            np.sum(np.equal(targets, c))
             for c in classes
-        ])
-        class_weights = 1 / num_labeled
+        ], dtype=np.float32)
+        class_weights = (targets.size / num_labeled + eps).astype(np.float32)
         return class_weights
 
     def __binmean(targets):

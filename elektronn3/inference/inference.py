@@ -4,6 +4,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
 import itertools
+import logging
 import os
 import time
 import zipfile
@@ -14,6 +15,12 @@ import numpy as np
 import torch
 from torch import nn
 from tqdm import tqdm
+
+
+# TODO: It's confusing that tiled_apply expects out_shape to include the N dim, but
+#     Predictor has a parameter with the same name but which doesn't include N.
+
+logger = logging.getLogger('elektronn3log')
 
 
 def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
@@ -180,6 +187,18 @@ class Predictor:
     """Class to perform inference using a ``torch.nn.Module`` object either
     passed directly or loaded from a file.
 
+    If both ``tile_shape`` and ``overlap_shape`` are ``None``, input tensors
+    are fed directly into the ``model`` (best for scalar predictions,
+    medium-sized 2D images or very small 3D images).
+    If you define ``tile_shape`` and ``overlap_shape``, these are used to
+    slice a large input into smaller overlapping tiles and perform predictions
+    on these tiles independently and later put the output tiles together into
+    one dense tensor without overlap again. Use this features if your model
+    has spatially interpretable (dense) outputs and if passing one input sample
+    to the ``model`` would result in an out-of-memory error. For more details
+    on this tiling mode, see
+    :py:meth:`elektronn3.inference.inference.tiled_apply()`.
+
     Args:
         model: Network model to be used for inference.
             The model can be passed as an ``torch.nn.Module``, or as a path
@@ -220,18 +239,19 @@ class Predictor:
             If your inference fails due to shape issues, as a rule of thumb,
             try adjusting your ``overlap_shape`` so that
             ``tile_shape + 2 * overlap`` is divisible by 16 or 32.
-        out_shape: Expected shape of the output tensor
+        out_shape: Expected shape of the output tensor.
             It doesn't just refer to spatial shape, but to the actual tensor
-            shape including N and C dimensions.
-            Note: ``model(inp)`` is never actually executed – ``out_shape`` is
-            merely used to pre-allocate the output tensor so it can be filled
-            later.
+            shape of one sample, including the channel dimension C, but
+            **excluding** the batch dimension N.
+            Note: ``model(inp)`` is never actually executed if tiling is used
+            – ``out_shape`` is merely used to pre-allocate the output tensor so
+            it can be filled later.
             If you know how many channels your model output has
             (``num_classes``, ``num_out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
             yourself as follows:
             >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
-            >>> out_shape = (inp.shape[0], num_out_channels, *inp.shape[2:])
+            >>> out_shape = (num_out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
@@ -240,16 +260,14 @@ class Predictor:
         verbose: If ``True``, report inference speed.
 
     Examples:
-        >>> cnn = nn.Sequential(
+        >>> model = nn.Sequential(
         ...     nn.Conv2d(5, 32, 3, padding=1), nn.ReLU(),
         ...     nn.Conv2d(32, 2, 1))
         >>> inp = np.random.randn(2, 5, 10, 10)
-        >>> model = Predictor(cnn)
-        >>> out = model.predict_proba(inp)
+        >>> predictor = Predictor(model)
+        >>> out = predictor.predict(inp)
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
-    # TODO: Maybe change signature to not require out_shape but num_classes
-    #       and then calculate out_shape internally from it?
     def __init__(
             self,
             model: Union[nn.Module, str],
@@ -266,6 +284,8 @@ class Predictor:
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        elif isinstance(device, str):
+            device = torch.device(device)
         self.device = device
         self.batch_size = batch_size
         if tile_shape is not None:
@@ -312,26 +332,34 @@ class Predictor:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
+        if self.tile_shape is None and self.overlap_shape is None:
+            #  have no spatial dimensions, so tiling doesn't make sense here.
+            self.enable_tiling = False
+        else:
+            self.enable_tiling = True
         self.model.eval()
 
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            # TODO: Why do we need to wrap this in torch.no_grad() although
-            #  inp.requires_grad = False? Without torch.no_grad(), memory
-            #  usage explodes.
             return self.model(inp)
 
     def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
-        """ Tiled inference with overlapping input tiles."""
-        return tiled_apply(
-            self._predict,
-            inp=inp,
-            tile_shape=self.tile_shape,
-            overlap_shape=self.overlap_shape,
-            offset=self.offset,
-            out_shape=self.out_shape,
-            verbose=self.verbose
-        )
+        """Tiled inference with overlapping input tiles.
+
+        Tiling is not used if ``tile_shape`` and ``overlap_shape`` are
+        undefined."""
+        if self.enable_tiling:
+            return tiled_apply(
+                self._predict,
+                inp=inp,
+                tile_shape=self.tile_shape,
+                overlap_shape=self.overlap_shape,
+                offset=self.offset,
+                out_shape=(inp.shape[0], *self.out_shape),
+                verbose=self.verbose
+            )
+        # Otherwise: No tiling, apply model to the whole input in one step
+        return self._predict(inp)
 
     def _splitbatch_predict(
             self,
@@ -340,18 +368,20 @@ class Predictor:
     ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
-        out = torch.empty(tuple(self.out_shape), dtype=torch.float32)
+        if self.out_shape is None:
+            raise ValueError('If you define a batch_size, you also need to supply out_shape.')
+        out = torch.empty((inp.shape[0], *self.out_shape), dtype=self.dtype)
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
             out[low:high] = self._tiled_predict(inp[low:high])
         return out
 
-    def predict_proba(
+    def predict(
             self,
             inp: Union[np.ndarray, torch.Tensor],
-    ):
-        """ Predict class probabilites of an input tensor.
+    ) -> torch.Tensor:
+        """ Perform prediction on ``inp`` and return prediction.
 
         Args:
             inp: Input data, e.g. of shape (N, C, H, W).
@@ -365,15 +395,16 @@ class Predictor:
         """
         if self.verbose:
             start = time.time()
-        inp = torch.as_tensor(inp, dtype=self.dtype)
-        inp.pin_memory()
+        inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
+        if self.device.type == 'cuda':
+            inp.pin_memory()
         inp = inp.to(self.device, non_blocking=True)
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         # Lazily figure out these Predictor options based on the input it
         #  receives if they are not already set.
         # Not sure if that's a good idea because these are object-changing
-        #  side-effects in the otherwise pure predict_proba() function.
+        #  side-effects in the otherwise pure predict() function.
         if self.tile_shape is None:
             self.tile_shape = spatial_shape
         if self.overlap_shape is None:
@@ -389,13 +420,21 @@ class Predictor:
         # Explicit synchronization so the next GPU operation won't be
         #  mysteriously slow. If we don't synchronize manually here, profilers
         #  will misleadingly report a huge amount of time spent in out.cpu()
-        torch.cuda.synchronize()
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
         out = out.cpu()
         if self.verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
+            # TODO: Report speed in terms of output, not input (This is not as easy as replacing
+            #       inp by out because out may contain padding that we don't want to count)
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
+
+    def predict_proba(self, inp):
+        logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
+        return self.predict(inp)
+
 
 
 # TODO: This can be replaced with a single model.load_state_dict(state_dict) call

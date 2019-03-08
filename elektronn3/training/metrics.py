@@ -36,6 +36,8 @@ import sklearn.metrics
 import torch
 
 
+eps = 0.0001  # To avoid divisions by zero
+
 # TODO: Tests would make a lot of sense here.
 
 # TODO: Support ignoring certain classes (labels).
@@ -104,7 +106,7 @@ def precision(target, pred, num_classes=2, mean=False):
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     # Compute metrics for each class simulataneously
-    prec = tp / (tp + fp)  # Per-class precision
+    prec = tp / (tp + fp + eps)  # Per-class precision
     if mean:
         prec = prec.mean().item()
     return prec * 100
@@ -114,7 +116,7 @@ def recall(target, pred, num_classes=2, mean=False):
     """Recall metric a.k.a. sensitivity a.k.a. hit rate (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    rec = tp / (tp + fn)  # Per-class recall
+    rec = tp / (tp + fn + eps)  # Per-class recall
     if mean:
         rec = rec.mean().item()
     return rec * 100
@@ -124,7 +126,7 @@ def accuracy(target, pred, num_classes=2, mean=False):
     """Accuracy metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    acc = (tp + tn) / (tp + tn + fp + fn)  # Per-class accuracy
+    acc = (tp + tn) / (tp + tn + fp + fn + eps)  # Per-class accuracy
     if mean:
         acc = acc.mean().item()
     return acc * 100
@@ -134,7 +136,7 @@ def dice_coefficient(target, pred, num_classes=2, mean=False):
     """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    dsc = 2 * tp / (2 * tp + fp + fn)  # Per-class (Sørensen-)Dice similarity coefficient
+    dsc = 2 * tp / (2 * tp + fp + fn + eps)  # Per-class (Sørensen-)Dice similarity coefficient
     if mean:
         dsc = dsc.mean().item()
     return dsc * 100
@@ -144,7 +146,7 @@ def iou(target, pred, num_classes=2, mean=False):
     """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
-    iu = tp / (tp + fp + fn)  # Per-class Intersection over Union
+    iu = tp / (tp + fp + fn + eps)  # Per-class Intersection over Union
     if mean:
         iu = iu.mean().item()
     return iu * 100
@@ -212,6 +214,33 @@ def _softmax(x, dim=1):
 @lru_cache(maxsize=128)
 def _argmax(x, dim=1):
     return x.argmax(dim)
+
+
+# Helper for multi-class metric construction
+def channel_metric(metric, c, num_classes, argmax=True):
+    """Returns an evaluator that calculates the ``metric``
+    and selects its value for channel ``c``.
+
+    Example:
+        >>> from elektronn3.training import metrics
+        >>> num_classes = 5  # Example. Depends on model and data set
+        >>> # Metric evaluator dict that registers DSCs of all output channels.
+        >>> # You can pass it to elektronn3.training.Trainer as the ``valid_metrics``
+        >>> #  argument to make it log these values.
+        >>> dsc_evaluators = {
+        ...    f'val_DSC_c{c}': channel_metric(
+        ...        metrics.dice_coefficient,
+        ...        c=c, num_classes=num_classes
+        ...    )
+        ...    for c in range(num_classes)
+        ... }
+    """
+    def evaluator(target, out):
+        pred = _argmax(out) if argmax else out
+        m = metric(target, pred, num_classes=num_classes)
+        return m[c]
+
+    return evaluator
 
 
 # Metric evaluator shortcuts for raw network outputs in binary classification

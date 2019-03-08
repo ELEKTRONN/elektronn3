@@ -59,19 +59,21 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
-from elektronn3.training import Trainer, Backup, DiceLoss, metrics, Padam
+from elektronn3.training import Trainer, Backup, metrics, Padam
+from elektronn3.modules import DiceLoss
 from elektronn3.models.unet import UNet
 
 
 torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 model = UNet(
-    n_blocks=3,
+    n_blocks=4,
     start_filts=32,
     planar_blocks=(0,),
     activation='relu',
     batch_norm=True,
     # conv_mode='valid',
+    # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
     adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
 # Example for a model-compatible input.
@@ -96,7 +98,7 @@ save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-    fnames = [f for f in os.listdir(data_root) if f.endswith('.h5')]
+    fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
     input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
     target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
     valid_indices = [1, 3, 5, 7]
@@ -123,6 +125,8 @@ else:  # Use publicly available neuro_data_cdhw dataset
     dataset_std = (42.599973,)
     class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
+# TODO: Recalculate above class_weights with mode='inverse'
+
 max_steps = args.max_steps
 max_runtime = args.max_runtime
 
@@ -147,8 +151,9 @@ train_transform = transforms.Compose(common_transforms + [
 valid_transform = transforms.Compose(common_transforms + [])
 
 # Specify data set
+aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
 common_data_kwargs = {  # Common options for training and valid sets.
-    'aniso_factor': 2,
+    'aniso_factor': aniso_factor,
     'patch_shape': (48, 96, 96),
     # 'offset': (8, 20, 20),
     'num_classes': 2,
@@ -160,18 +165,20 @@ train_dataset = PatchCreator(
     epoch_size=args.epoch_size,
     warp_prob=0.2,
     warp_kwargs={
-        'sample_aniso': True,
+        'sample_aniso': aniso_factor != 1,
         'perspective': True,
         'warp_amount': 0.1,
     },
-    transform=train_transform,**common_data_kwargs
+    transform=train_transform,
+    **common_data_kwargs
 )
-valid_dataset = PatchCreator(
+valid_dataset = None if not valid_indices else PatchCreator(
     input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
     epoch_size=10,  # How many samples to use for each validation run
     warp_prob=0,
+    warp_kwargs={'sample_aniso': aniso_factor != 1},
     transform=valid_transform,
     **common_data_kwargs
 )
@@ -224,13 +231,14 @@ trainer = Trainer(
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
+    # enable_videos=False,  # Uncomment to get rid of videos in tensorboard
     offset=train_dataset.offset,
     apply_softmax_for_prediction=True,
     num_classes=train_dataset.num_classes,
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),
     preview_overlap_shape=(32, 64, 64),
-    # mixed_precision=True,  # Enable to use Apex for mixed precision training
+    mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
 # Archiving training script, src folder, env info

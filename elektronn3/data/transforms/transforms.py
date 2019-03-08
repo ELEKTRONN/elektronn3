@@ -112,6 +112,37 @@ class DropIfTooMuchBG:
         return inp, target  # Return inp, target unmodified
 
 
+class SmoothOneHotTarget:
+    """Converts target tensors to one-hot encoding, with optional label smoothing.
+
+    Args:
+        num_classes: Number of classes (C) in the data set.
+        smooth_eps: Label smoothing strength. If ``smooth_eps=0`` (default), no
+            smoothing is applied and regular one-hot tensors are returned.
+            See section 7 of https://arxiv.org/abs/1512.00567
+    """
+    # TODO: Add example to docstring
+    def __init__(self, num_classes: int, smooth_eps: float = 0.):
+        assert 0 <= smooth_eps < 0.5
+        self.num_classes = num_classes
+        self.smooth_eps = smooth_eps
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # returned without modifications
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.smooth_eps == 0.:
+            eye = np.eye(self.num_classes)
+        else:
+            # Create a "soft" eye where  0 is replaced by smooth_eps and 1 by (1 - smooth_eps)
+            eye = np.full((self.num_classes, self.num_classes), self.smooth_eps)
+            np.fill_diagonal(eye, 1. - self.smooth_eps)
+        onehot = np.moveaxis(eye[target], -1, 0)
+        assert np.all(onehot.argmax(0) == target)
+        return inp, onehot
+
+
 class Normalize:
     """Normalizes inputs with supplied per-channel means and stds.
 
@@ -176,6 +207,8 @@ class RandomGammaCorrection:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
@@ -238,6 +271,8 @@ class RandomGrayAugment:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
@@ -302,6 +337,8 @@ class AdditiveGaussianNoise:
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None
     ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
@@ -429,7 +466,7 @@ class RandomFlip:
             ndim_spatial: int = 2,
             rng: Optional[np.random.RandomState] = None
     ):
-        self.noise_generator = RandInt(rng=rng)
+        self.randint = RandInt(rng=rng)
         self.ndim_spatial = ndim_spatial
 
     def __call__(
@@ -437,30 +474,22 @@ class RandomFlip:
             inp: np.ndarray,
             target: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
-        # flip_dims = self.noise_generator(self.ndim_spatial)
-        # for dim in range(self.ndim_spatial):
-        #     if flip_dims[dim]:
-        #         inp = np.flip(inp, -dim)
-        #         # PyTorch DataLoader doesn't support negative strides, so we
-        #         #  have to remove them by forcing contiguous memory layout.
-        #         inp = np.ascontiguousarray(inp)
-        #         if target is not None:
-        #             target = np.flip(target, -dim)
-        #             target = np.ascontiguousarray(target)
-        # return inp, target
-        flip_dims = np.random.randint(0, 2, self.ndim_spatial)
+        flip_dims = self.randint(self.ndim_spatial)
         # flip all images at once
-        slices_inp = tuple([slice(None, None, 1) for _ in range(len(inp.shape) - self.ndim_spatial)] + \
-                 [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+        slices_inp = tuple(
+            [slice(None, None, 1) for _ in range(len(inp.shape) - self.ndim_spatial)] +
+            [slice(None, None, (-1)**flip_d) for flip_d in flip_dims]
+        )
         inp_flipped = inp[slices_inp].copy()
         if target is not None:
-            slices_target = tuple([slice(None, None, 1) for _ in range(len(target.shape) - self.ndim_spatial)] + \
-                     [slice(None, None, (-1)**flip_d) for flip_d in flip_dims])
+            slices_target = tuple(
+                [slice(None, None, 1) for _ in range(len(target.shape) - self.ndim_spatial)] +
+                [slice(None, None, (-1)**flip_d) for flip_d in flip_dims]
+            )
             target_flipped = target[slices_target].copy()
         else:
             target_flipped = None
         return inp_flipped, target_flipped
-
 
 
 # TODO: Functional API (transforms.functional).

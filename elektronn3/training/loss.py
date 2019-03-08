@@ -4,15 +4,11 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch
 
+"""Loss functions"""
+
 import torch
-from torch.nn import functional as F
+
 from elektronn3.training.lovasz_losses import lovasz_softmax
-import numpy as np
-from torch.nn import CrossEntropyLoss
-from scipy.ndimage.filters import gaussian_filter
-from scipy import misc
-from sklearn.preprocessing import LabelBinarizer
-# TODO: Citations (V-NET and https://arxiv.org/abs/1707.03237)
 
 
 def _channelwise_sum(x: torch.Tensor):
@@ -21,27 +17,55 @@ def _channelwise_sum(x: torch.Tensor):
     return x.sum(dim=reduce_dims)
 
 
-# Simple n-dimensional dice loss. Minimalistic version for easier verification
-def dice_loss(probs, target, weight=1., eps=0.0001, onehot_target=False):
+# TODO: Dense weight support
+def dice_loss(probs, target, weight=1., eps=0.0001):
     # Probs need to be softmax probabilities, not raw network outputs
-    if not onehot_target:
+    tsh, psh = target.shape, probs.shape
+
+    if tsh == psh:  # Already one-hot
+        onehot_target = target.to(probs.dtype)
+    elif tsh[0] == psh[0] and tsh[1:] == psh[2:]:  # Assume dense target storage, convert to one-hot
         onehot_target = torch.zeros_like(probs)
         onehot_target.scatter_(1, target.unsqueeze(1), 1)
     else:
-        onehot_target = target.to(probs.dtype)
+        raise ValueError(
+            f'Target shape {target.shape} is not compatible with output shape {probs.shape}.'
+        )
+    # if weight is None:
+    #     weight = torch.ones(probs.shape[0], dtype=probs.dtype)  # (C,)
+    # if ignore_index is not None:
+    #     weight[:, ignore_index] = 0.
 
-    intersection = probs * onehot_target
-    numerator = 2 * _channelwise_sum(intersection)
-    denominator = probs + onehot_target
-    denominator = _channelwise_sum(denominator) + eps
-    loss_per_channel = 1 - (numerator / denominator)
-    weighted_loss_per_channel = weight * loss_per_channel
-    return weighted_loss_per_channel.mean()
+    intersection = probs * onehot_target  # (N, C, ...)
+    numerator = 2 * _channelwise_sum(intersection)  # (C,)
+    denominator = probs + onehot_target  # (N, C, ...)
+    denominator = _channelwise_sum(denominator) + eps  # (C,)
+    loss_per_channel = 1 - (numerator / denominator)  # (C,)
+    weighted_loss_per_channel = weight * loss_per_channel  # (C,)
+    return weighted_loss_per_channel.mean()  # ()
 
 
 class DiceLoss(torch.nn.Module):
-    def __init__(self, apply_softmax=True, weight=torch.tensor(1.),
-                 onehot_target=False):
+    """Generalized Dice Loss, as described in https://arxiv.org/abs/1707.03237.
+
+    Works for n-dimensional data. Assuming that the ``output`` tensor to be
+    compared to the ``target`` has the shape (N, C, D, H, W), the ``target``
+    can either have the same shape (N, C, D, H, W) (one-hot encoded) or
+    (N, D, H, W) (with dense class indices, as in
+    ``torch.nn.CrossEntropyLoss``). If the latter shape is detected, the
+    ``target`` is automatically internally converted to a one-hot tensor
+    for loss calculation.
+
+    Args:
+        apply_softmax: If ``True``, a softmax operation is applied to the
+            ``output`` tensor before loss calculation. This is necessary if
+            your model does not already apply softmax as the last layer.
+            If ``False``, ``output`` is assumed to already contain softmax
+            probabilities.
+        weight: Weight tensor for class-wise loss rescaling.
+            Has to be of shape (C,). If ``None``, classes are weighted equally.
+    """
+    def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
         super().__init__()
         if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
@@ -49,12 +73,10 @@ class DiceLoss(torch.nn.Module):
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
         self.register_buffer('weight', weight)
-        self.onehot_target = onehot_target
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.dice(probs, target, weight=self.weight,
-                         onehot_target=self.onehot_target)
+        return self.dice(probs, target, weight=self.weight)
 
 
 class LovaszLoss(torch.nn.Module):
@@ -120,67 +142,3 @@ def __dice_loss_binary(output, target, smooth=0, eps=0.0001):
 
     return 1 - ((2 * intersection + smooth) /
                 (iflat.sum() + tflat.sum() + smooth + eps))
-
-
-class BlurryBoarderLoss(torch.nn.Module):
-    # Cross-entropy loss with per-voxel weights. Weights of voxels close
-    # to label boundaries are reduced by applying weights which
-    # are highest inside a class region and blurred at the boundaries
-    # by Gaussian smoothing towards 0
-    # TODO: GPU support ->
-    def __init__(self, softmax=True, sigma=2.5):
-        super().__init__()
-        self.sigma = sigma
-        if softmax:
-            self.softmax = torch.nn.Softmax(dim=1)
-        else:
-            self.softmax = lambda x: x  # Identity
-        self.blurry_boarder_weights = blurry_boarder_weights
-
-    def forward(self, output, target):
-        boarder_w =  self.blurry_boarder_weights(output.size(), target,
-                                                 self.sigma)
-        loss = F.cross_entropy(output, target, reduce=False)
-        loss = loss * boarder_w
-        return loss.mean()
-
-
-def blurry_boarder_weights(output_shape, target, sigma):
-    boarder_w = target.cpu().numpy()
-    # vigra.taggedView(target.numpy(), 'xcyz') ISSUE: gaussianSmoothing does not
-    # support t-axis which should be used as batch axis
-    # conflicting python 3.5/.6 dependencies of vigra vs E3
-    # smoothing is applied per-channel
-    n_classes = output_shape[1]
-    if np.isscalar(sigma):
-        sigma = [sigma] * (len(boarder_w.shape) - 1)
-    else:
-        assert len(sigma) == (len(boarder_w.shape) - 1)
-        sigma = list(sigma)
-    # add zero smoothing along channels, unfortunately this is not supported by scipy and vigra does not support python 3.6...
-    sigma = [0] + sigma
-    # fit to number of classes
-    lb = LabelBinarizer().fit(np.arange(n_classes))
-    # use probas shape because target shape does not have explicit class axis
-    orig_shape = list(output_shape)
-    orig_shape[1] = 1 if n_classes <= 2 else n_classes # for binary data label binarizes keeps it at length 1
-    # change to shape (b, x, y, (z), C) because 'LabelBinarizer' outputs (N, C)
-    orig_shape += orig_shape[1:2]
-    orig_shape.pop(1)
-    boarder_w = lb.transform(boarder_w.flatten())
-    # now reshape to (b, x, y, (z), C) to (b, C, x, y, (z))
-    boarder_w = boarder_w.reshape(orig_shape)  # (b, x, y, (z), C)
-    boarder_w = boarder_w.swapaxes(-1, -2)  # (b, x, y, C, (z)) or (b, x, C, y)
-    boarder_w = boarder_w.swapaxes(-2, -3)  # (b, x, C, y, (z)) or (b, C, x, y)
-    if len(orig_shape) == 5:
-        boarder_w = boarder_w.swapaxes(-3, -4)  # (b, C, x, y, z)
-    if orig_shape[1] == 1:
-        boarder_w = np.hstack((boarder_w == 0, boarder_w == 1))
-    boarder_w = boarder_w.astype(np.float32)
-    for ii in range(len(target)):
-        curr_patch = boarder_w[ii]
-        boarder_w[ii] = gaussian_filter(curr_patch, sigma=sigma)
-    # choose weights according to maximum value along class axis. this leads to a low weights symmetricly spread along the boundary of classes.
-    boarder_w = torch.from_numpy(np.max(boarder_w, axis=1)).float().cuda()
-    boarder_w = boarder_w / boarder_w.mean()  # normalize mean
-    return boarder_w
