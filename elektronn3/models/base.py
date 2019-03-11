@@ -94,7 +94,7 @@ class InferenceModel(object):
                     out[low:high] = res.cpu()
                 del inp_stride
                 torch.cuda.empty_cache()
-            assert high >=n_samples, "Prediction less samples then given" \
+            assert high >= n_samples, "Prediction less samples then given" \
                                      " in input."
         if verbose:
             dtime = time.time() - start
@@ -141,5 +141,11 @@ def load_model(src: str) -> nn.Module:
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
             new_state_dict[k.replace('module.', '')] = v
-        model.load_state_dict(new_state_dict)
+        try:  # HACK to ensure backwards compat. with example cube models TODO: remove ASAP
+            model.load_state_dict(new_state_dict)
+        except RuntimeError:
+            newnew_state_dict = OrderedDict()
+            for k, v in new_state_dict.items():
+                newnew_state_dict[k.replace('pretrained_net.', 'base_net.')] = v
+            model.load_state_dict(newnew_state_dict)
     return model.eval()
