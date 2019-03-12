@@ -331,7 +331,7 @@ class Trainer:
         # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DelayedDataLoader(
-                self.valid_dataset, self.batchsize, num_workers=0, pin_memory=True,
+                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
                 timeout=60
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
