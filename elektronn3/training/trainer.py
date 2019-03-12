@@ -199,7 +199,7 @@ class Trainer:
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.2,
-            enable_videos: bool = True,
+            enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
