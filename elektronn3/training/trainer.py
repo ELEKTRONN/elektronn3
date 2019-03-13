@@ -29,9 +29,6 @@ from elektronn3.training import metrics
 from elektronn3.data.utils import squash01
 from elektronn3 import __file__ as arch_src
 
-#from apex import amp
-#from apex.fp16_utils import FP16_Optimizer
-
 
 logger = logging.getLogger('elektronn3log')
 
@@ -284,40 +281,6 @@ class Trainer:
                     if torch.isnan(loss):
                         logger.error('NaN loss detected! Aborting training.')
                         raise NaNException
-
-                    #self.optimizer.zero_grad()
-                    #loss.backward()
-                    #self.optimizer.step()
-
-                    # experimenting with FP16_Optimizer
-                    #optimizer = FP16_Optimizer(self.optimizer, static_loss_scale=128.0)
-                    #optimizer.zero_grad()
-                    #optimizer.backward(loss)
-                    #optimizer.step()
-
-
-
-
-                    #mixed precision with apex
-                    #amp_handle = amp.init(enabled=True)
-
-                    #
-                    # #Explicitly wrapping optimizers
-                    # amp_handle = amp.init()
-                    # optimizer=amp_handle.wrap_optimizer(self.optimizer)
-                    #
-                    # with optimizer.scale_loss(loss) as scaled_loss:
-                    #     scaled_loss.backward()
-                    # self.optimizer.step()
-
-                    #
-                    # # update step
-                    # self.optimizer.zero_grad()
-                    # #loss.backward()
-                    # # mixed precision with apex
-                    ##with amp_handle.scale_loss(loss, self.optimizer) as scaled_loss:
-                     ##   scaled_loss.backward()
-                    ##self.optimizer.step()
 
                     # # update step
                     self.optimizer.zero_grad()
