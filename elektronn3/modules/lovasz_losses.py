@@ -7,6 +7,7 @@
 # This file is mostly copied from https://github.com/bermanmaxim/LovaszSoftmax.
 # Modifications for elektronn3:
 # - Support 5D images
+# - Avoid zero division in low-precision training by adding a small constant eps in divisions
 
 """
 Lovasz-Softmax and Jaccard hinge loss in PyTorch
@@ -26,6 +27,9 @@ except ImportError: # py3k
     from itertools import  filterfalse
 
 
+eps = 0.0001  # To avoid divisions by zero, esp. in low-precision training
+
+
 def lovasz_grad(gt_sorted):
     """
     Computes gradient of the Lovasz extension w.r.t sorted errors
@@ -35,7 +39,7 @@ def lovasz_grad(gt_sorted):
     gts = gt_sorted.sum()
     intersection = gts - gt_sorted.float().cumsum(0)
     union = gts + (1 - gt_sorted).float().cumsum(0)
-    jaccard = 1. - intersection / union
+    jaccard = 1. - intersection / (union + eps)
     if p > 1: # cover 1-pixel case
         jaccard[1:p] = jaccard[1:p] - jaccard[0:-1]
     return jaccard
@@ -55,7 +59,7 @@ def iou_binary(preds, labels, EMPTY=1., ignore=None, per_image=True):
         if not union:
             iou = EMPTY
         else:
-            iou = float(intersection) / union
+            iou = float(intersection) / (union + eps)
         ious.append(iou)
     iou = mean(ious)    # mean accross images if per_image
     return 100 * iou
@@ -77,7 +81,7 @@ def iou(preds, labels, C, EMPTY=1., ignore=None, per_image=False):
                 if not union:
                     iou.append(EMPTY)
                 else:
-                    iou.append(float(intersection) / union)
+                    iou.append(float(intersection) / (union + eps))
         ious.append(iou)
     ious = map(mean, zip(*ious)) # mean accross images if per_image
     return 100 * np.array(ious)
@@ -166,7 +170,7 @@ def lovasz_softmax(probas, labels, only_present=False, per_image=False, ignore=N
     Multi-class Lovasz-Softmax loss
       probas: [B, C, H, W] Variable, class probabilities at each prediction (between 0 and 1)
       labels: [B, H, W] Tensor, ground truth labels (between 0 and C - 1)
-      only_present: average only on classes present in ground truth
+      only_present: average only on num_classes present in ground truth
       per_image: compute the loss per image instead of per batch
       ignore: void class labels
     """
@@ -183,7 +187,7 @@ def lovasz_softmax_flat(probas, labels, only_present=False):
     Multi-class Lovasz-Softmax loss
       probas: [P, C] Variable, class probabilities at each prediction (between 0 and 1)
       labels: [P] Tensor, ground truth labels (between 0 and C - 1)
-      only_present: average only on classes present in ground truth
+      only_present: average only on num_classes present in ground truth
     """
     C = probas.size(1)
     losses = []

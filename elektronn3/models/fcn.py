@@ -1,8 +1,18 @@
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+
+"""
+adopted from https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/models/fcn.py
+LICENSE https://github.com/meetshah1995/pytorch-semseg/blob/master/LICENSE
+#In every layer few steps have been commented because of Memory constraints (please uncomment them acc to the resources)
+"""
+
+
 import torch.nn as nn
 import torch.nn.functional as F
-# from https://github.com/meetshah1995/pytorch-semseg/blob/master/ptsemseg/models/fcn.py
-# FCN32s
-#In every layer few steps have been commented because of Memory constraints (please uncomment them acc to the resources)
+
 
 class fcn32s(nn.Module):
 

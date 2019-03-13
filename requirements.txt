@@ -1,18 +1,20 @@
 # python>=3.6
 
-torch>=0.4.1
+torch>=1.0.0
 numpy
 scipy
 h5py
 matplotlib
 seaborn
 numba
+tbb
 scikit-learn
+scikit-image
 ipython
 tqdm
 pillow
 colorlog
+tensorboardX
 
-# For tensorboard logger (not strictly required):
+# For hosting a tensorboard server (not strictly required):
 tensorboard>=1.8.0
-tensorflow>=1.8.0
