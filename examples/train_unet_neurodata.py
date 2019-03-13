@@ -54,8 +54,9 @@ from elektronn3.models.unet import UNet
 
 torch.manual_seed(0)
 
+
 # USER PATHS
-save_root = os.path.expanduser('~/e3training/')
+save_root = os.path.expanduser('~/e3training/mahsaBranchWithElasticTransformAndRGB')
 os.makedirs(save_root, exist_ok=True)
 data_root = os.path.expanduser('~/neuro_data_cdhw/')
 input_h5data = [
@@ -96,9 +97,11 @@ common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
-    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
-    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
-    # transforms.RandomBlurring({'probability': 0.5})
+    #transforms.RandomGrayAugment(channels=[0], prob=0.3),
+    # transforms.AdditiveGaussianNoise(sigma=0.1,prob=0.3),
+    # transforms.RandomBlurring({'probability': 0.5}),
+    #transforms.RandomGaussianBlur(channels=[0], prob=0.3),
+    #transforms.ElasticTransform()
 ])
 valid_transform = transforms.Compose(common_transforms + [])
 

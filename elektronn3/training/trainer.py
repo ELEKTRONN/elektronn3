@@ -29,7 +29,8 @@ from elektronn3.training import metrics
 from elektronn3.data.utils import squash01
 from elektronn3 import __file__ as arch_src
 
-from apex import amp
+#from apex import amp
+#from apex.fp16_utils import FP16_Optimizer
 
 
 logger = logging.getLogger('elektronn3log')
@@ -275,7 +276,8 @@ class Trainer:
                 timer = Timer()
                 for inp, target in self.train_loader:
                     inp, target = inp.to(self.device), target.to(self.device)
-
+                    torch.cuda.empty_cache()  #Mahsa added this to experiment with apex
+                    torch.cuda.memory_allocated()
                     # forward pass
                     out = self.model(inp)
                     loss = self.criterion(out, target)
@@ -283,16 +285,43 @@ class Trainer:
                         logger.error('NaN loss detected! Aborting training.')
                         raise NaNException
 
-                    #mixed precision with apex
-                    amp_handle = amp.init(enabled=True)
-
-
-                    # update step
-                    self.optimizer.zero_grad()
+                    #self.optimizer.zero_grad()
                     #loss.backward()
-                    # mixed precision with apex
-                    with amp_handle.scale_loss(loss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
+                    #self.optimizer.step()
+
+                    # experimenting with FP16_Optimizer
+                    #optimizer = FP16_Optimizer(self.optimizer, static_loss_scale=128.0)
+                    #optimizer.zero_grad()
+                    #optimizer.backward(loss)
+                    #optimizer.step()
+
+
+
+
+                    #mixed precision with apex
+                    #amp_handle = amp.init(enabled=True)
+
+                    #
+                    # #Explicitly wrapping optimizers
+                    # amp_handle = amp.init()
+                    # optimizer=amp_handle.wrap_optimizer(self.optimizer)
+                    #
+                    # with optimizer.scale_loss(loss) as scaled_loss:
+                    #     scaled_loss.backward()
+                    # self.optimizer.step()
+
+                    #
+                    # # update step
+                    # self.optimizer.zero_grad()
+                    # #loss.backward()
+                    # # mixed precision with apex
+                    ##with amp_handle.scale_loss(loss, self.optimizer) as scaled_loss:
+                     ##   scaled_loss.backward()
+                    ##self.optimizer.step()
+
+                    # # update step
+                    self.optimizer.zero_grad()
+                    loss.backward()
                     self.optimizer.step()
 
                     # Prevent accidental autograd overheads after optimizer step
@@ -336,6 +365,7 @@ class Trainer:
                         logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
                         self.terminate = True
                         break
+
                 stats['tr_accuracy'] = running_acc / len(self.train_loader)
                 stats['tr_loss'] /= len(self.train_loader)
                 misc['tr_speed'] = len(self.train_loader) / timer.t_passed
