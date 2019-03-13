@@ -142,18 +142,14 @@ common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
-<<<<<<< HEAD
-    #transforms.RandomGrayAugment(channels=[0], prob=0.3),
-    # transforms.AdditiveGaussianNoise(sigma=0.1,prob=0.3),
-    # transforms.RandomBlurring({'probability': 0.5}),
-    #transforms.RandomGaussianBlur(channels=[0], prob=0.3),
-    #transforms.ElasticTransform()
-=======
+
     # transforms.RandomGrayAugment(channels=[0], prob=0.3),
     # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
     # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
     # transforms.RandomBlurring({'probability': 0.5})
->>>>>>> 4addaa8f28e07a7046b5910ad41776ecd264fbdd
+    # transforms.RandomGaussianBlur(channels=[0], prob=0.3),
+    # transforms.ElasticTransform()
+
 ])
 valid_transform = transforms.Compose(common_transforms + [])
 
