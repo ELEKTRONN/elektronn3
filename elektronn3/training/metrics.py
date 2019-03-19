@@ -99,6 +99,9 @@ def confusion_matrix(
 
         cm[c] = torch.tensor([true_pos, true_neg, false_pos, false_neg])
 
+        if pos_target.sum(dtype=dtype) == 0:
+            cm[c] = torch.tensor([float('nan')] * 4)
+
     return cm
 
 
