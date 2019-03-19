@@ -12,7 +12,7 @@ import torch
 from torch import nn
 
 
-from .l1batchnorm import L1BatchNorm
+from .l1batchnorm import L1BatchNorm, L1GroupNorm
 
 
 class Identity(nn.Module):

@@ -11,7 +11,8 @@ import copy
 from torch import nn
 
 from elektronn3.modules.layers import (
-    AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv, L1BatchNorm
+    AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv, L1BatchNorm,
+    L1GroupNorm
 )
 
 
@@ -45,9 +46,16 @@ def get_maxpool(dim=3):
         raise ValueError('dim has to be 2 or 3')
 
 
+# class GroupNorm(nn.GroupNorm):
+# class GroupNorm(L1GroupNorm):
+#     def __init__(self, num_channels, *args, **kwargs):
+#         super().__init__(num_groups=16, num_channels=num_channels, *args, **kwargs)
+
+
 def get_batchnorm(dim=3):
     """Chooses an implementation for a batch normalization layer."""
     # return L1BatchNorm
+    # return L1GroupNorm
     if dim == 3:
         return nn.BatchNorm3d
     elif dim == 2:
