@@ -30,7 +30,8 @@ class InferenceModel(object):
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
     def __init__(self, src: Union[str, nn.Module], disable_cuda: bool = False,
-                 multi_gpu: bool = True):
+                 multi_gpu: bool = True, normalize_func=None):
+        self.normalize_func = normalize_func
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -49,7 +50,7 @@ class InferenceModel(object):
         self.model.to(self.device)
 
     def predict_proba(self, inp: np.ndarray, bs: int = 10,
-                      verbose: bool = False):
+                        verbose: bool = False):
         """
 
         Args:
@@ -62,6 +63,8 @@ class InferenceModel(object):
         """
         if verbose:
             start = time.time()
+        if self.normalize_func is not None:
+            inp = self.normalize_func(inp)
         if type(inp) is np.ndarray:
             inp = torch.Tensor(inp)
         with torch.no_grad():
