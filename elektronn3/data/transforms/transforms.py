@@ -513,6 +513,22 @@ class ElasticTransform:
 
             rng: Optional random state for deterministic execution
 
+            channels: If ``channels`` is ``None``, the change is applied to
+                all channels of the input tensor.
+                If ``channels`` is a ``Sequence[int]``, change is only applied
+                to the specified channels.
+
+            prob: probability (between 0 and 1) with which to perform this
+                augmentation. The input is returned unmodified with a probability
+                of ``1 - prob``
+
+            target_discrete: bool
+
+                This information is used to decide what kind of interpolation should
+                be used for reading target data:
+                    - discrete targets are obtained by nearest-neighbor interpolation
+                    - non-discrete (continuous) targets are linearly interpolated.
+
         The input image should be of dimensions (C, H, W) or (C, D, H, W).
         C must be included.
 
@@ -525,6 +541,7 @@ class ElasticTransform:
             channels: Optional[Sequence[int]] = None,
             prob: float = 0.25,
             rng: Optional[np.random.RandomState] = None,
+            target_discrete: bool = True,
 
     ):
         self.sigma = sigma
@@ -532,6 +549,7 @@ class ElasticTransform:
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
+        self.target_discrete = target_discrete
 
     def __call__(
             self,
@@ -542,28 +560,36 @@ class ElasticTransform:
         if self.rng.rand() > self.prob:
             return inp, target
         channels = range(inp.shape[0]) if self.channels is None else self.channels
+
         deformed_img = np.empty_like(inp)
+        deformed_target = np.empty_like(target)
         for c in channels:
             shape = inp[c].shape
             if inp[c].ndim ==3 :
-                dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
                 dz = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                x, y, z = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
-                indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(z + dz, (-1, 1))
+                dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
+                indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
 
             elif inp[c].ndim == 2 :
-                dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                dy = gaussian_filter((self.rng.rand(*shape)* 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                x, y = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
-                indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+                dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                dx = gaussian_filter((self.rng.rand(*shape)* 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+                y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
+                indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
 
             else:
                 raise ValueError("Image dimension not understood!")
 
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
 
-        return deformed_img, target
+            if target is None:
+                return deformed_img
+            else:
+                assert inp.shape == target.shape
+                target_order = 0 if self.target_discrete is True else 1
+                deformed_target[c] = map_coordinates(target[c], indices, order=target_order, mode='nearest').reshape(shape)
+                return deformed_img, deformed_target
 
 
 class SqueezeTarget:
