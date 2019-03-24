@@ -361,19 +361,19 @@ class Trainer:
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.
                 if self.step // len(self.train_dataset) > 1:
-                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
+                    tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
                 else:
                     tr_loss_gain = 0
                 self._tracker.update_history([
-                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
-                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
+                    self.step, self._timer.t_passed, np.mean(stats['tr_loss']), np.mean(stats['val_loss']),
+                    tr_loss_gain, np.nanmean(stats['tr_accuracy']), stats['val_accuracy'], misc['learning_rate'], 0, 0
                 ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
                 loss_smooth = self._tracker.loss._ema
 
                 # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
-                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", misc['mean_target'] * 100, tr_loss_gain)
+                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, np.mean(stats['tr_loss']), np.nanmean(stats['tr_accuracy']))
+                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", np.mean(misc['mean_target']) * 100, tr_loss_gain)
                 text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
                 logger.info(text)
 
@@ -426,15 +426,13 @@ class Trainer:
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, float] = {'tr_loss': 0.0}
+        stats: Dict[str, List[float]] = {stat: [] for stat in ['tr_loss', 'tr_accuracy']}
         # Other scalars to be logged
-        misc: Dict[str, float] = {}
+        misc: Dict[str, List[float]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
         images: Dict[str, np.ndarray] = {}
 
-        running_acc = 0
-        running_mean_target = 0
-        running_vx_size = 0
+        running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target) in pbar:
@@ -464,9 +462,11 @@ class Trainer:
 
             with torch.no_grad():
                 loss = float(dloss)
-                stats['tr_loss'] += loss
                 acc = float(metrics.bin_accuracy(target, out))  # TODO: This shouldn't be hardcoded
                 mean_target = float(target.to(torch.float32).mean())
+                stats['tr_loss'].append(loss)
+                stats['tr_accuracy'].append(acc)
+                misc['mean_target'].append(mean_target)
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
@@ -481,8 +481,6 @@ class Trainer:
                 else:
                     sched.step()
 
-            running_acc += acc
-            running_mean_target += mean_target
             running_vx_size += inp.numel()
 
             self.step += 1
@@ -502,19 +500,16 @@ class Trainer:
             if self.terminate:
                 break
 
-        stats['tr_accuracy'] = running_acc / len(self.train_loader)
-        stats['tr_loss'] /= len(self.train_loader)
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
-        misc['mean_target'] = running_mean_target / len(self.train_loader)
 
         return stats, misc, images
 
     def _validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
-        val_loss = 0
-        stats = {name: 0 for name in self.valid_metrics.keys()}
+        val_loss = []
+        stats = {name: [] for name in self.valid_metrics.keys()}
         # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
         for inp, target in tqdm(self.valid_loader, 'Validating'):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
@@ -522,10 +517,10 @@ class Trainer:
             dtarget = target.to(self.device, non_blocking=True)
             with torch.no_grad():
                 dout = self.model(dinp)
-                val_loss += self.criterion(dout, dtarget).item() / len(self.valid_loader)
+                val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
                 for name, evaluator in self.valid_metrics.items():
-                    stats[name] += evaluator(target, out) / len(self.valid_loader)
+                    stats[name].append(evaluator(target, out))
 
         if self.tb:
             try:
@@ -541,7 +536,9 @@ class Trainer:
             except Exception:
                 logger.exception('Error occured while logging to tensorboard:')
 
-        stats['val_loss'] = val_loss
+        stats['val_loss'] = np.mean(val_loss)
+        for name in self.valid_metrics.keys():
+            stats[name] = np.nanmean(stats[name])
 
         self.model.train()  # Reset model to training mode
 
@@ -624,7 +621,11 @@ class Trainer:
             tag: str = 'default'
     ) -> None:
         for key, value in scalars.items():
-            self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+            if isinstance(value, (list, tuple, np.ndarray)):
+                for i in range(len(value)):
+                    self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
+            else:
+                self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     # TODO: Make more configurable
     # TODO: Inference on secondary GPU
