@@ -97,12 +97,13 @@ def confusion_matrix(
         pos_pred = pred == c
         neg_pred = ~pos_pred
         pos_target = target == c
+        ign_target = target == num_classes - 1
         neg_target = ~pos_target
 
-        true_pos = (pos_pred & pos_target).sum(dtype=dtype)
-        true_neg = (neg_pred & neg_target).sum(dtype=dtype)
-        false_pos = (pos_pred & neg_target).sum(dtype=dtype)
-        false_neg = (neg_pred & pos_target).sum(dtype=dtype)
+        true_pos = (pos_pred & pos_target & ~ign_target).sum(dtype=dtype)
+        true_neg = (neg_pred & neg_target & ~ign_target).sum(dtype=dtype)
+        false_pos = (pos_pred & neg_target & ~ign_target).sum(dtype=dtype)
+        false_neg = (neg_pred & pos_target & ~ign_target).sum(dtype=dtype)
 
         cm[c] = torch.tensor([true_pos, true_neg, false_pos, false_neg])
 
