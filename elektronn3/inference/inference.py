@@ -117,14 +117,15 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=inp.dtype, device=inp.device)
+    out = torch.empty(out_shape, dtype=inp.dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
+    device=inp.device
 
     # Create padded input with overlap
     padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
-    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype, device=inp.device)
+    inp_padded = torch.empty(tuple(padded_shape), dtype=inp.dtype, device='cpu')
 
     padslice = _extend_nc(
         [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
@@ -173,7 +174,7 @@ Tensor
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
-        inp_tile = inp_padded[inp_slice]
+        inp_tile = inp_padded[inp_slice].clone().detach().to(device, non_blocking=True)
         out_tile = func(inp_tile)
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
