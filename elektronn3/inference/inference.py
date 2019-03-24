@@ -397,6 +397,15 @@ class Predictor:
         """
         if self.verbose:
             start = time.time()
+
+        orig_shape = inp.shape
+        new_shape = np.array(inp.shape)
+        new_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+        foo = np.zeros(new_shape.tolist())
+        foo[0:1,0:1,0:orig_shape[2],0:orig_shape[3],0:orig_shape[4]] = inp
+        inp = foo
+        self.out_shape = (self.out_shape[0], *new_shape[2:])
+
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         if self.device.type == 'cuda':
             inp.pin_memory()
@@ -431,7 +440,7 @@ class Predictor:
             # TODO: Report speed in terms of output, not input (This is not as easy as replacing
             #       inp by out because out may contain padding that we don't want to count)
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
-        return out
+        return out[0:1,0:self.out_shape[0],0:orig_shape[2],0:orig_shape[3],0:orig_shape[4]]
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
