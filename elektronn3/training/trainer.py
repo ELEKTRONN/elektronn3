@@ -426,13 +426,13 @@ class Trainer:
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, list] = {stat: [] for stat in ['tr_loss', 'tr_accuracy']}
+        stats: Dict[str, List[float]] = {stat: [] for stat in ['tr_loss', 'tr_accuracy']}
         # Other scalars to be logged
-        misc: Dict[str, float] = {misc: [] for misc in ['mean_target']}
+        misc: Dict[str, List[float]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
         images: Dict[str, np.ndarray] = {}
 
-        running_vx_size = 0
+        running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target) in pbar:
