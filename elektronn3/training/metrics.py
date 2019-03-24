@@ -54,7 +54,8 @@ def confusion_matrix(
         pred: torch.LongTensor,
         num_classes: int = 2,
         dtype: torch.dtype = torch.float32,
-        device: torch.device = torch.device('cpu')
+        device: torch.device = torch.device('cpu'),
+        nan_when_empty: bool = True
 ) -> torch.Tensor:
     """ Calculate per-class confusion matrix.
 
@@ -72,6 +73,9 @@ def confusion_matrix(
             against overflows and can be used directly in true divisions
             without re-casting.
         device: PyTorch device on which to store the confusion matrix
+        nan_when_empty: If ``True`` (default), the confusion matrix will
+            be filled with NaN values for each channel of which there are
+            no positive entries in the ``target`` tensor.
 
     Returns:
         Confusion matrix ``cm``, with shape ``(num_classes, 4)``, where
@@ -84,6 +88,9 @@ def confusion_matrix(
 
         E.g. ``cm[1][2]`` contains the number of false positive predictions
         of class ``1``.
+        If ``nan_when_empty`` is enabled and there are no positive elements
+        of class ``1`` in ``target``, ``cm[1]`` will instead be filled with
+        NaN values.
     """
     cm = torch.empty(num_classes, 4, dtype=dtype, device=device)
     for c in range(num_classes):
@@ -99,7 +106,7 @@ def confusion_matrix(
 
         cm[c] = torch.tensor([true_pos, true_neg, false_pos, false_neg])
 
-        if pos_target.sum(dtype=dtype) == 0:
+        if nan_when_empty and pos_target.sum(dtype=dtype) == 0:
             cm[c] = torch.tensor([float('nan')] * 4)
 
     return cm
