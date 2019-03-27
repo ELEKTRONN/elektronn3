@@ -330,7 +330,9 @@ class TripletNetTrainer(Trainer):
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = incorrect / len(self.valid_loader)
         self.tb_log_sample_images(
-            {'inp_ref': inp0, 'inp_+': inp1, 'inp_-': inp2},
+            {'inp_ref': inp0.detach().cpu().numpy(),
+             'inp_+': inp1.detach().cpu().numpy(),
+             'inp_-': inp2.detach().cpu().numpy()},
             group='val_samples'
         )
 
