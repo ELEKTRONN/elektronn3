@@ -216,13 +216,15 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'preview_tile_shape and preview_overlap_shape!'
             )
-        if num_workers > 1 and 'PatchCreator' in str(type(train_dataset)):
+        if num_workers > 1 and 'PatchCreator' in str(type(train_dataset)) \
+                and not getattr(train_dataset, 'in_memory'):
             logger.warning(
                 'Training with num_workers > 1 can cause instabilities if '
-                'you are using PatchCreator.\nBe advised that PatchCreator '
+                'you are using PatchCreator without in_memory=True.\nBe advised that PatchCreator '
                 'might randomly deliver broken batches in your training and '
-                'can crash it at any point of time.\n'
-                'Please set num_workers to 1 or 0.\n'
+                'can crash it at any point of time because HDF5 is not fork-safe.\n'
+                'Please set num_workers to 1 or 0 or consider enabling '
+                'in_memory=True for PatchCreator.\n'
             )
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell

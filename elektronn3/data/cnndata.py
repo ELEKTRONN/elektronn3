@@ -439,16 +439,23 @@ class PatchCreator(data.Dataset):
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]#[:, 50:-50, 100:-100, 100:-100]
-            target_h5 = h5py.File(target_fname, 'r')[target_key]
+            inp_h5_file = h5py.File(inp_fname, 'r')
+            inp_h5_data = inp_h5_file[inp_key]#[:, 50:-50, 100:-100, 100:-100]
+            target_h5_file = h5py.File(target_fname, 'r')
+            target_h5_data = target_h5_file[target_key]
             if self.in_memory:
-                inp_h5 = inp_h5.value
-                target_h5 = target_h5.value
+                # Get copies of the dataset contents as in-memory numpy arrays
+                inp_h5_val = inp_h5_data[()]
+                inp_h5_file.close()
+                inp_h5_data = inp_h5_val
+                target_h5_val = target_h5_data[()]
+                target_h5_file.close()
+                target_h5_data = target_h5_val
 
-            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
-            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
-            inp_h5sets.append(inp_h5)
-            target_h5sets.append(target_h5)
+            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
+            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
+            inp_h5sets.append(inp_h5_data)
+            target_h5sets.append(target_h5_data)
         print()
 
         return inp_h5sets, target_h5sets
