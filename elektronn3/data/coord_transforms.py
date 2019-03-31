@@ -283,8 +283,24 @@ def make_dest_corners(sh):
 
 
 class WarpingOOBError(ValueError):
+    """Raised when transformed coordinates are refer to out-of-bounds areas.
+
+    This is expected to happen a lot when using random warping, but
+    is caught early on before reading data.
+    The dataset iterator is expected to handle this exception by just retrying
+    the same call again, which will re-randomize the transformation."""
     def __init__(self, *args, **kwargs):
         super(WarpingOOBError, self).__init__( *args, **kwargs)
+
+
+class WarpingSanityError(Exception):
+    """Raised when a sanity check of coordinate warping fails.
+
+    This can happen due to random numerical inaccuracies, but it shouldn't occur
+    more often than every few hundred thousand warp_slice() calls."""
+    # TODO: Can we fix these errors? It's really hard to debug them because
+    #       they appear randomly, with a chance of ~ 1 in a million.
+    pass
 
 
 def warp_slice(
@@ -406,9 +422,9 @@ def warp_slice(
     lo = lo.astype(floatX)
 
     if debug and np.any((src_coords - lo).max(2).max(1).max(0) >= img_cut.shape[-3:]):
-        raise RuntimeError(f'Warping is broken: src_coords check failed (too high).\n{(src_coords - lo).max(2).max(1).max(0), img_cut.shape[-3:]}')
+        raise WarpingSanityError(f'src_coords check failed (too high).\n{(src_coords - lo).max(2).max(1).max(0), img_cut.shape[-3:]}')
     if debug and np.any((src_coords - lo).min(2).min(1).min(0) < 0):
-        raise RuntimeError(f'Warping is broken: src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
+        raise WarpingSanityError(f'src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
 
     for k in range(n_f):
         map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
@@ -430,9 +446,9 @@ def warp_slice(
             target_discrete_ix = [i in target_discrete_ix for i in range(n_f_t)]
 
         if debug and np.any((src_coords_target - lo_targ).max(2).max(1).max(0) >= target_cut.shape[-3:]):
-            raise RuntimeError(f'Warping is broken: src_coords_target check failed (too high).\n{(src_coords_target - lo_targ).max(2).max(1).max(0)}\n{target_cut.shape[-3:]}')
+            raise WarpingSanityError(f'src_coords_target check failed (too high).\n{(src_coords_target - lo_targ).max(2).max(1).max(0)}\n{target_cut.shape[-3:]}')
         if debug and np.any((src_coords_target - lo_targ).min(2).min(1).min(0) < 0):
-            raise RuntimeError(f'Warping is broken: src_coords_target check failed (negative indices).\n{(src_coords_target - lo_targ).min(2).min(1).min(0)}')
+            raise WarpingSanityError(f'src_coords_target check failed (negative indices).\n{(src_coords_target - lo_targ).min(2).min(1).min(0)}')
 
         for k, discr in enumerate(target_discrete_ix):
             if discr:

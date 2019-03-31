@@ -235,7 +235,9 @@ class PatchCreator(data.Dataset):
                         'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
                     )
                 continue
-            # TODO: Actually find out what's causing those.
+            except coord_transforms.WarpingSanityError:
+                logger.exception('Invalid coordinate values encountered while warping. Retrying...')
+                continue
             except OSError:
                 if self.n_read_failures > self.n_successful_warp:
                     logger.error(
