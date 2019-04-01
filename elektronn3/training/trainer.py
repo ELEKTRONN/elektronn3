@@ -379,6 +379,9 @@ class Trainer:
                 # Logging to stdout, text log file
                 text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
                 text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
+                # tr_loss_std = stats['tr_loss_std']
+                # val_loss_std = stats['val_loss_std']
+                # text += f'tr_loss_std={tr_loss_std:.2e},  val_loss_std={val_loss_std:.2e}'
                 logger.info(text)
 
                 # Plot tracker stats to pngs in save_path
@@ -504,6 +507,7 @@ class Trainer:
             if self.terminate:
                 break
 
+        stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
@@ -541,6 +545,7 @@ class Trainer:
                 logger.exception('Error occured while logging to tensorboard:')
 
         stats['val_loss'] = np.mean(val_loss)
+        stats['val_loss_std'] = np.std(val_loss)
         for name in self.valid_metrics.keys():
             stats[name] = np.nanmean(stats[name])
 
