@@ -194,7 +194,8 @@ def _tb_log_sample_images(
     inp_slice = batch2img(images['inp'])[0]
 
     # TODO: Support one-hot targets
-    # Check if the network is being trained for classification
+    # TODO: Support multi-label targets
+    # Check if the network is being trained for classification with class index target tensors
     is_classification = target_batch.ndim == out_batch.ndim - 1
     # If it's not classification, we assume a regression scenario
     is_regression = np.all(target_batch.shape == out_batch.shape)

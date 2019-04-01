@@ -23,9 +23,8 @@ from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from elektronn3.training import handlers
-from elektronn3.training.train_utils import Timer, pretty_string_time
-from elektronn3.training.train_utils import DelayedDataLoader
-from elektronn3.training.train_utils import HistoryTracker
+from elektronn3.training.train_utils import pretty_string_time
+from elektronn3.training.train_utils import Timer, DelayedDataLoader, HistoryTracker
 
 from torch.utils import collect_env
 from elektronn3.training import metrics
@@ -359,7 +358,6 @@ class Trainer:
                     valid_stats = self._validate()
                     stats.update(valid_stats)
 
-
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.
                 if self.step // len(self.train_dataset) > 1:
@@ -371,12 +369,16 @@ class Trainer:
                     tr_loss_gain, np.nanmean(stats['tr_accuracy']), stats['val_accuracy'], misc['learning_rate'], 0, 0
                 ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
-                loss_smooth = self._tracker.loss._ema
+
+                tr_loss = np.mean(stats['tr_loss'])
+                val_loss = np.mean(stats['val_loss'])
+                lr = misc['learning_rate']
+                tr_speed = misc['tr_speed']
+                tr_speed_vx = misc['tr_speed_vx']
 
                 # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, np.mean(stats['tr_loss']), np.nanmean(stats['tr_accuracy']))
-                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", np.mean(misc['mean_target']) * 100, tr_loss_gain)
-                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
+                text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
+                text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
                 logger.info(text)
 
                 # Plot tracker stats to pngs in save_path
