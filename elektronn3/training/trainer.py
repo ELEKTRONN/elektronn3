@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 
+from math import nan
 from pickle import PickleError
 from textwrap import dedent
 from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List
@@ -353,7 +354,7 @@ class Trainer:
                 self.epoch += 1
 
                 if self.valid_dataset is None:
-                    stats['val_loss'], stats['val_accuracy'] = float('nan'), float('nan')
+                    stats['val_loss'] = nan
                 else:
                     valid_stats = self._validate()
                     stats.update(valid_stats)
@@ -364,9 +365,14 @@ class Trainer:
                     tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
                 else:
                     tr_loss_gain = 0
+                if not stats.get('tr_accuracy'):
+                    tr_accuracy = nan
+                else:
+                    tr_accuracy = np.nanmean(stats['tr_accuracy'])
+                val_accuracy = stats.get('val_accuracy', nan)
                 self._tracker.update_history([
                     self.step, self._timer.t_passed, np.mean(stats['tr_loss']), np.mean(stats['val_loss']),
-                    tr_loss_gain, np.nanmean(stats['tr_accuracy']), stats['val_accuracy'], misc['learning_rate'], 0, 0
+                    tr_loss_gain, tr_accuracy, val_accuracy, misc['learning_rate'], 0, 0
                 ])  # 0's correspond to mom and gradnet (?)
                 t = pretty_string_time(self._timer.t_passed)
 
@@ -433,7 +439,7 @@ class Trainer:
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, List[float]] = {stat: [] for stat in ['tr_loss', 'tr_accuracy']}
+        stats: Dict[str, List[float]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
         misc: Dict[str, List[float]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
@@ -469,10 +475,8 @@ class Trainer:
 
             with torch.no_grad():
                 loss = float(dloss)
-                acc = float(metrics.bin_accuracy(target, out))  # TODO: This shouldn't be hardcoded
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
-                stats['tr_accuracy'].append(acc)
                 misc['mean_target'].append(mean_target)
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
