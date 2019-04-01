@@ -7,8 +7,9 @@
 __all__ = ['warp_slice', 'get_warped_coord_transform', 'WarpingOOBError']
 
 import itertools
-from typing import Tuple, Union, Optional
+from typing import Tuple, Union, Optional, Sequence
 from functools import reduce, lru_cache
+import h5py
 import numpy as np
 import numba
 from elektronn3 import floatX
@@ -304,9 +305,14 @@ class WarpingSanityError(Exception):
 
 
 def warp_slice(
-        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None,
-        debug=True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
-) -> Tuple[np.ndarray, np.ndarray]:
+        inp_src: Union[h5py.Dataset, np.ndarray],
+        patch_shape: Union[Tuple[int], np.ndarray],
+        M: np.ndarray,
+        target_src: Optional[Union[h5py.Dataset, np.ndarray]] = None,
+        target_patch_shape: Optional[Union[Tuple[int], np.ndarray]] = None,
+        target_discrete_ix: Optional[Sequence[int]] = None,
+        debug: bool = True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
     Warping is applied by multiplying the original source coordinates with
@@ -325,19 +331,19 @@ def warp_slice(
 
     Parameters
     ----------
-    inp_src: h5py.Dataset
+    inp_src
         Input image source (in HDF5)
-    patch_shape: tuple or np.ndarray
+    patch_shape
         (spatial only) Patch shape ``(D, H, W)``
         (spatial shape of the neural network's input node)
-    M: np.ndarray
+    M
         Forward warping tansformation matrix (4x4).
         Must contain translations in source and target_src array.
-    target_src: h5py.Dataset or None
+    target_src
         Optional target source array to be extracted from in the same way.
-    target_patch_shape: tuple or np.ndarray
+    target_patch_shape
         Patch size for the ``target_src`` array.
-    target_discrete_ix: list
+    target_discrete_ix
         List of target channels that contain discrete values.
         By default (``None``), every channel is is seen as discrete (this is
         generally the case for classification tasks).
@@ -345,12 +351,14 @@ def warp_slice(
         be used for reading target data:
         - discrete targets are obtained by nearest-neighbor interpolation
         - non-discrete (continuous) targets are linearly interpolated.
+    debug: If ``True`` (default), enable additional sanity checks to catch
+        warping issues early.
 
     Returns
     -------
-    inp: np.ndarray
+    inp
         Warped input image slice
-    target: np.ndarray or None
+    target
         Warped target_src image slice
         or ``None``, if ``target_src is None``.
     """
