@@ -93,9 +93,8 @@ elif args.jit == 'train':
     model = tracedmodel
 
 
-
 # USER PATHS
-save_root = os.path.expanduser('~/e3training/mahsaBranchWithElasticTransformAndRGB')
+save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
@@ -142,14 +141,10 @@ common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
-
     # transforms.RandomGrayAugment(channels=[0], prob=0.3),
     # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
     # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
     # transforms.RandomBlurring({'probability': 0.5})
-    # transforms.RandomGaussianBlur(channels=[0], prob=0.3),
-    # transforms.ElasticTransform()
-
 ])
 valid_transform = transforms.Compose(common_transforms + [])
 
@@ -241,7 +236,7 @@ trainer = Trainer(
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),
     preview_overlap_shape=(32, 64, 64),
-    mixed_precision=True,  # Enable to use Apex for mixed precision training
+    # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
 # Archiving training script, src folder, env info

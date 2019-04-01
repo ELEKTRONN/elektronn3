@@ -510,22 +510,18 @@ class ElasticTransform:
         Args:
             sigma: Sigma parameter of the gaussian distribution to draw from
             alpha: Strength of the elastic transform
-
             rng: Optional random state for deterministic execution
-
             channels: If ``channels`` is ``None``, the change is applied to
                 all channels of the input tensor.
                 If ``channels`` is a ``Sequence[int]``, change is only applied
                 to the specified channels.
-
             prob: probability (between 0 and 1) with which to perform this
                 augmentation. The input is returned unmodified with a probability
                 of ``1 - prob``
-
             target_discrete: bool
-
                 This information is used to decide what kind of interpolation should
                 be used for reading target data:
+
                     - discrete targets are obtained by nearest-neighbor interpolation
                     - non-discrete (continuous) targets are linearly interpolated.
 
@@ -584,9 +580,10 @@ class ElasticTransform:
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
 
             if target is None:
-                return deformed_img
+                return deformed_img, target
+            else if inp.shape != target.shape:
+                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
             else:
-                assert inp.shape == target.shape
                 target_order = 0 if self.target_discrete is True else 1
                 deformed_target[c] = map_coordinates(target[c], indices, order=target_order, mode='nearest').reshape(shape)
                 return deformed_img, deformed_target
