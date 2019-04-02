@@ -112,7 +112,7 @@ def confusion_matrix(
     return cm
 
 
-def precision(target, pred, num_classes=2, mean=False):
+def precision(target, pred, num_classes=2, mean=True):
     """Precision metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -123,7 +123,7 @@ def precision(target, pred, num_classes=2, mean=False):
     return prec * 100
 
 
-def recall(target, pred, num_classes=2, mean=False):
+def recall(target, pred, num_classes=2, mean=True):
     """Recall metric a.k.a. sensitivity a.k.a. hit rate (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -133,7 +133,7 @@ def recall(target, pred, num_classes=2, mean=False):
     return rec * 100
 
 
-def accuracy(target, pred, num_classes=2, mean=False):
+def accuracy(target, pred, num_classes=2, mean=True):
     """Accuracy metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -143,7 +143,7 @@ def accuracy(target, pred, num_classes=2, mean=False):
     return acc * 100
 
 
-def dice_coefficient(target, pred, num_classes=2, mean=False):
+def dice_coefficient(target, pred, num_classes=2, mean=True):
     """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -153,7 +153,7 @@ def dice_coefficient(target, pred, num_classes=2, mean=False):
     return dsc * 100
 
 
-def iou(target, pred, num_classes=2, mean=False):
+def iou(target, pred, num_classes=2, mean=True):
     """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -163,7 +163,7 @@ def iou(target, pred, num_classes=2, mean=False):
     return iu * 100
 
 
-def auroc(target, probs, mean=False):
+def auroc(target, probs, mean=True):
     """ Area under Curve (AuC) of the ROC curve (in %).
 
     .. note::
@@ -190,7 +190,7 @@ def auroc(target, probs, mean=False):
     return auc * 100
 
 
-def average_precision(target, probs, mean=False):
+def average_precision(target, probs, mean=True):
     """Average precision (AP) metric based on PR curves (in %).
 
     .. note::
@@ -271,9 +271,8 @@ def bin_recall(target, out):
     )[1]  # Take only the score for class 1
 
 
-def bin_accuracy(target, out, fast=False):
+def bin_accuracy(target, out):
     pred = _argmax(out)
-    # return torch.sum(target == pred).item() / target.numel() * 100
     return accuracy(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1
