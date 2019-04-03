@@ -585,6 +585,9 @@ class Trainer:
         # TODO: Document ScriptModule saving special cases
         # TODO: Logging
         model = self.model
+
+        model_trainmode = model.training
+
         # We do this awkard check because there are too many different
         # parallel wrappers in PyTorch and some of them have changed names
         # in different releases (DataParallel, DistributedDataParallel{,CPU}).
@@ -617,7 +620,6 @@ class Trainer:
                 # traced_eval.save('eval_' + model_path)
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
-
         except (TypeError, PickleError) as exc:
             # If model is already a ScriptModule, it can't be saved with torch.save()
             # Use ScriptModule.save() instead in this case.
@@ -627,6 +629,10 @@ class Trainer:
                 model.save(model_path)
             else:
                 raise exc
+        finally:
+            # Reset training state to the one it had before this function call,
+            # because it could have changed with the model.eval() call above.
+            model.training = model_trainmode
 
     def _tb_log_scalars(
             self,
