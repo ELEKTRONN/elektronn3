@@ -12,7 +12,7 @@ import shutil
 from math import nan
 from pickle import PickleError
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List, Union
 
 import inspect
 import IPython
@@ -359,52 +359,12 @@ class Trainer:
                     valid_stats = self._validate()
                     stats.update(valid_stats)
 
-                # Update history tracker (kind of made obsolete by tensorboard)
-                # TODO: Decide what to do with this, now that most things are already in tensorboard.
-                if self.step // len(self.train_dataset) > 1:
-                    tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
-                else:
-                    tr_loss_gain = 0
-                if not stats.get('tr_accuracy'):
-                    tr_accuracy = nan
-                else:
-                    tr_accuracy = np.nanmean(stats['tr_accuracy'])
-                val_accuracy = stats.get('val_accuracy', nan)
-                self._tracker.update_history([
-                    self.step, self._timer.t_passed, np.mean(stats['tr_loss']), np.mean(stats['val_loss']),
-                    tr_loss_gain, tr_accuracy, val_accuracy, misc['learning_rate'], 0, 0
-                ])  # 0's correspond to mom and gradnet (?)
-                t = pretty_string_time(self._timer.t_passed)
-
-                tr_loss = np.mean(stats['tr_loss'])
-                val_loss = np.mean(stats['val_loss'])
-                lr = misc['learning_rate']
-                tr_speed = misc['tr_speed']
-                tr_speed_vx = misc['tr_speed_vx']
-
-                # Logging to stdout, text log file
-                text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
-                text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
-                # tr_loss_std = stats['tr_loss_std']
-                # val_loss_std = stats['val_loss_std']
-                # text += f'tr_loss_std={tr_loss_std:.2e},  val_loss_std={val_loss_std:.2e}'
-                logger.info(text)
-
-                # Plot tracker stats to pngs in save_path
-                self._tracker.plot(self.save_path)
-
-                # Reporting to tensorboard logger
-                if self.tb:
-                    try:
-                        self._tb_log_scalars(stats, 'stats')
-                        self._tb_log_scalars(misc, 'misc')
-                        if self.preview_batch is not None:
-                            if self.epoch % self.preview_interval == 0 or self.epoch == 1:
-                                # TODO: Also save preview inference results in a (3D) HDF5 file
-                                self.preview_plotting_handler(self)
-                        self.sample_plotting_handler(self, images, group='tr_samples')
-                    except Exception:
-                        logger.exception('Error occured while logging to tensorboard:')
+                # Log to stdout and text log file
+                self._log_basic(stats, misc)
+                # Render visualizations and log to tensorboard
+                self._log_to_tensorboard(stats, misc, images)
+                # Legacy non-tensorboard logging to files
+                self._log_to_history_tracker(stats, misc)
 
                 # Save trained model state
                 self._save_model()
@@ -439,9 +399,9 @@ class Trainer:
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, List[float]] = {stat: [] for stat in ['tr_loss']}
+        stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
-        misc: Dict[str, List[float]] = {misc: [] for misc in ['mean_target']}
+        misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
         images: Dict[str, np.ndarray] = {}
 
@@ -633,6 +593,51 @@ class Trainer:
             # Reset training state to the one it had before this function call,
             # because it could have changed with the model.eval() call above.
             model.training = model_trainmode
+
+    def _log_basic(self, stats, misc):
+        """Log to stdout and text log file"""
+        tr_loss = np.mean(stats['tr_loss'])
+        val_loss = np.mean(stats['val_loss'])
+        lr = misc['learning_rate']
+        tr_speed = misc['tr_speed']
+        tr_speed_vx = misc['tr_speed_vx']
+        t = pretty_string_time(self._timer.t_passed)
+        text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
+        text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
+        logger.info(text)
+
+    def _log_to_tensorboard(self, stats: Dict, misc: Dict, images: Dict) -> None:
+        """Create visualizations, make preview predictions, log and plot to tensorboard"""
+        if self.tb:
+            try:
+                self._tb_log_scalars(stats, 'stats')
+                self._tb_log_scalars(misc, 'misc')
+                if self.preview_batch is not None:
+                    if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                        # TODO: Also save preview inference results in a (3D) HDF5 file
+                        self.preview_plotting_handler(self)
+                self.sample_plotting_handler(self, images, group='tr_samples')
+            except Exception:
+                logger.exception('Error occured while logging to tensorboard:')
+
+    def _log_to_history_tracker(self, stats: Dict, misc: Dict) -> None:
+        """Update history tracker and plot stats (kind of made obsolete by tensorboard)"""
+        # TODO: Decide what to do with this, now that most things are already in tensorboard.
+        if self.step // len(self.train_dataset) > 1:
+            tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
+        else:
+            tr_loss_gain = 0
+        if not stats.get('tr_accuracy'):
+            tr_accuracy = nan
+        else:
+            tr_accuracy = np.nanmean(stats['tr_accuracy'])
+        val_accuracy = stats.get('val_accuracy', nan)
+        self._tracker.update_history([
+            self.step, self._timer.t_passed, np.mean(stats['tr_loss']), np.mean(stats['val_loss']),
+            tr_loss_gain, tr_accuracy, val_accuracy, misc['learning_rate'], 0, 0
+        ])
+        # Plot tracker stats to pngs in save_path
+        self._tracker.plot(self.save_path)
 
     def _tb_log_scalars(
             self,
