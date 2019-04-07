@@ -31,6 +31,9 @@ To install **elektronn3** in development mode, run
 To update your installation, just `git pull` in your clone
 directory.
 
+If you are not familiar with virtualenv and conda or are not sure about some of
+the required steps, you can find a more detailed setup guide [here](https://github.com/ELEKTRONN/elektronn3/blob/master/setup.md)
+
 # Training
 
 For a quick test run, first ensure that the neuro_data_cdhw data set is
