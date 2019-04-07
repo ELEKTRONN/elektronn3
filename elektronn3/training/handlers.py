@@ -302,6 +302,9 @@ def _tb_log_sample_images(
         inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
         target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
         pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+        # Ensure the value range remains [0, 1]
+        target_slice_ov = np.clip(target_slice_ov, 0, 1)
+        pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
         trainer.tb.add_figure(
             f'{group}/target_overlay',
             plot_image(target_slice_ov, colorbar=False),
