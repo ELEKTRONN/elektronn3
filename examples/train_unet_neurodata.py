@@ -60,6 +60,7 @@ elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics, Padam
+from elektronn3.training import CosineAnnealingWarmRestarts
 from elektronn3.modules import DiceLoss
 from elektronn3.models.unet import UNet
 
@@ -227,7 +228,9 @@ trainer = Trainer(
     exp_name=args.exp_name,
     example_input=example_input,
     enable_save_trace=enable_save_trace,
-    # schedulers={"lr": optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)},
+    schedulers={'lr': CosineAnnealingWarmRestarts(
+        optimizer, T_0=10000, T_mult=2
+    )},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
