@@ -6,7 +6,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 # TODO: Delete this when it's merged and released in PyTorch.
 
 
-class SGDR(_LRScheduler):
+class CosineAnnealingWarmRestarts(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
@@ -32,7 +32,7 @@ class SGDR(_LRScheduler):
         self.T = int(T_0)
         self.T_mult = T_mult
         self.eta_min = eta_min
-        super(SGDR, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, last_epoch)
         self.T_cur = last_epoch
 
     def get_lr(self):
@@ -41,7 +41,7 @@ class SGDR(_LRScheduler):
 
     def step(self, epoch=None):
         """Step could be called after every update, i.e. if one epoch has 10 iterations(num_train / batch_size),
-        we could called SGDR.step(0.1), SGDR.step(0.2), etc.
+        we could call step(0.1), step(0.2), etc.
         """
         if epoch is None:
             epoch = self.last_epoch + 1
