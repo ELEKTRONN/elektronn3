@@ -295,6 +295,7 @@ class Trainer:
         if schedulers is None:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
+        self.__lr_closetozero_alreadytriggered = False  # Used in periodic scheduler handling
 
         self.num_classes = num_classes
         if enable_videos:
@@ -443,6 +444,9 @@ class Trainer:
 
             # this was changed to support ReduceLROnPlateau which does not implement get_lr
             misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
+
+            self._handle_lr(misc['learning_rate'])
+
             # update schedules
             for sched in self.schedulers.values():
                 # support ReduceLROnPlateau; doc. uses validation loss instead
@@ -476,6 +480,37 @@ class Trainer:
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
         return stats, misc, images
+
+    def _handle_lr(self, lr, min_lr=0, atol=1e-7):
+        """Handle quasi-periodic LR schedulers that lower the LR to values
+        close to min_lr but then ramp it up again
+        (Cosine Annealing, SGDR, Cyclical LRs etc.).
+
+        Model saving is triggered if the absolute difference between ``min_lr``
+        and the current learning rate ``lr`` is smaller than the tolerance
+        threshold ``atol``.
+        The value of ``atol`` is important to get right:
+
+        - If it's too high, you risk triggering it too early, when the learning
+          rate is still decreasing for a while after.
+        - If it's too low, the trigger might not fire at all because the current
+          learning rate will always have more than ``atol`` difference from
+          ``min_lr``.
+
+        Therefore set ``atol`` to a value that can realistically make the
+        following condition true: ``abs(lr - min_lr) < atol``
+        """
+        lr_closetozero = np.isclose(lr, min_lr, rtol=0, atol=atol)
+        if lr_closetozero:  # Very low LR
+            if not self.__lr_closetozero_alreadytriggered:
+                logger.info(f'Near-zero lr={lr} detected. Saving model...')
+                self._save_model(suffix=f'_nearzerolr_step{self.step}')
+                self.__lr_closetozero_alreadytriggered = True
+            # else: pass, because we don't want to trigger it again all the time.
+        else:
+            # When LR is higher again, re-enable the close-to-zero trigger
+            #  for the next close-to-zero LR phase.
+            self.__lr_closetozero_alreadytriggered = False
 
     def _validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
