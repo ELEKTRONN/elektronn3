@@ -65,15 +65,13 @@ class InferenceModel(object):
             start = time.time()
         if self.normalize_func is not None:
             inp = self.normalize_func(inp)
-        if type(inp) is np.ndarray:
-            inp = torch.Tensor(inp)
         with torch.no_grad():
             # get output shape shape
             if type(inp) is tuple:
                 out = self.model(*(torch.Tensor(ii[:2]).to(torch.float32).to(self.device) for ii in inp))
                 n_samples = len(inp[0])
             else:
-                out = self.model(inp[:2].to(torch.float32).to(self.device))
+                out = self.model(torch.Tensor(inp[:2]).to(torch.float32).to(self.device))
                 n_samples = len(inp)
             # change sample number according to input
             if type(out) is tuple:
@@ -88,14 +86,20 @@ class InferenceModel(object):
                     inp_stride = tuple(torch.Tensor(ii[low:high]).to(torch.float32).to(self.device) for ii in inp)
                     res = self.model(*inp_stride)
                 else:
-                    inp_stride = inp[low:high].to(torch.float32).to(self.device)
+                    inp_stride = torch.Tensor(inp[low:high]).to(torch.float32).to(self.device)
                     res = self.model(inp_stride)
                 if type(res) is tuple:
                     for ii in range(len(res)):
-                        out[ii][low:high] = res[ii].cpu()
+                        out[ii][low:high] = res[ii].detach().cpu()
                 else:
-                    out[low:high] = res.cpu()
+                    out[low:high] = res.detach().cpu()
+                if type(inp_stride) is tuple:
+                    for el in inp_stride:
+                        el.detach_()
+                else:
+                    inp_stride.detach_()
                 del inp_stride
+                del res
                 torch.cuda.empty_cache()
             assert high >= n_samples, "Prediction less samples then given" \
                                      " in input."
