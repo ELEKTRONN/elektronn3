@@ -474,6 +474,8 @@ class RandomFlip:
             inp: np.ndarray,
             target: Optional[np.ndarray] = None
     ) -> Tuple[np.ndarray, np.ndarray]:
+        # TODO: np.flip now supports multi-dimensional flipping as of numpy 1.15
+        #       So we can rewrite this with np.flip to make it more readable.
         flip_dims = self.randint(self.ndim_spatial)
         # flip all images at once
         slices_inp = tuple(

@@ -4,6 +4,8 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
+from collections import deque
+
 import gc
 import logging
 import os
@@ -296,6 +298,7 @@ class Trainer:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
         self.__lr_closetozero_alreadytriggered = False  # Used in periodic scheduler handling
+        self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
         self.num_classes = num_classes
         if enable_videos:
@@ -407,6 +410,8 @@ class Trainer:
         images: Dict[str, np.ndarray] = {}
 
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
+        self._lr_nhood.clear()
+        self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target) in pbar:
@@ -442,11 +447,8 @@ class Trainer:
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
-            # this was changed to support ReduceLROnPlateau which does not implement get_lr
-            misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
-
-            self._handle_lr(misc['learning_rate'])
-
+            # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
+            misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
             # update schedules
             for sched in self.schedulers.values():
                 # support ReduceLROnPlateau; doc. uses validation loss instead
@@ -455,6 +457,9 @@ class Trainer:
                     sched.step(metrics=loss)
                 else:
                     sched.step()
+            # Append LR of the next iteration (after sched.step()) for local LR minima detection
+            self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
+            self._handle_lr()
 
             running_vx_size += inp.numel()
 
@@ -481,36 +486,29 @@ class Trainer:
 
         return stats, misc, images
 
-    def _handle_lr(self, lr, min_lr=0, atol=1e-7):
-        """Handle quasi-periodic LR schedulers that lower the LR to values
-        close to min_lr but then ramp it up again
+    def _handle_lr(self) -> None:
+        r"""Handle quasi-periodic learning rate schedulers that lower the
+        learning rate to local minima but then ramp it up again
         (Cosine Annealing, SGDR, Cyclical LRs etc.).
 
-        Model saving is triggered if the absolute difference between ``min_lr``
-        and the current learning rate ``lr`` is smaller than the tolerance
-        threshold ``atol``.
-        The value of ``atol`` is important to get right:
+        Model saving is triggered when a local minimum of learning rates is
+        detected. For the motivation of this behavior, see
+        https://arxiv.org/abs/1704.00109. The saved models can be used to build
+        an ensemble.
 
-        - If it's too high, you risk triggering it too early, when the learning
-          rate is still decreasing for a while after.
-        - If it's too low, the trigger might not fire at all because the current
-          learning rate will always have more than ``atol`` difference from
-          ``min_lr``.
-
-        Therefore set ``atol`` to a value that can realistically make the
-        following condition true: ``abs(lr - min_lr) < atol``
+        Local minima are found by checking for the simple criterion
+        :math:`\lr_{t-1}` > \lr{t} < lr{t+1}`.
         """
-        lr_closetozero = np.isclose(lr, min_lr, rtol=0, atol=atol)
-        if lr_closetozero:  # Very low LR
-            if not self.__lr_closetozero_alreadytriggered:
-                logger.info(f'Near-zero lr={lr} detected. Saving model...')
-                self._save_model(suffix=f'_nearzerolr_step{self.step}')
-                self.__lr_closetozero_alreadytriggered = True
-            # else: pass, because we don't want to trigger it again all the time.
-        else:
-            # When LR is higher again, re-enable the close-to-zero trigger
-            #  for the next close-to-zero LR phase.
-            self.__lr_closetozero_alreadytriggered = False
+        if len(self._lr_nhood) < 3:
+            return  # Can't get lrs, but at this early stage it's also not relevant
+        last_lr = self._lr_nhood[-3]
+        curr_lr = self._lr_nhood[-2]
+        next_lr = self._lr_nhood[-1]
+        if last_lr > curr_lr < next_lr:
+            logger.info(
+                f'Local learning rate minimum {curr_lr:.2e} detected at step '
+                f'{self.step}. Saving model...')
+            self._save_model(suffix=f'_nearzerolr_step{self.step}')
 
     def _validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
