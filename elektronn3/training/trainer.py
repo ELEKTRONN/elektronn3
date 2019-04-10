@@ -508,7 +508,7 @@ class Trainer:
             logger.info(
                 f'Local learning rate minimum {curr_lr:.2e} detected at step '
                 f'{self.step}. Saving model...')
-            self._save_model(suffix=f'_nearzerolr_step{self.step}')
+            self._save_model(suffix=f'_minlr_step{self.step}')
 
     def _validate(self) -> Dict[str, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
