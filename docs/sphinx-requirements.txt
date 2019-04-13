@@ -18,6 +18,6 @@ colorlog
 tensorboardX
 
 # For building documentation:
-sphinx
+sphinx>=2.0
 sphinx_rtd_theme
 sphinx-autodoc-typehints
