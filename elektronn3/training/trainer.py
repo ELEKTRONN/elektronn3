@@ -705,9 +705,11 @@ class Trainer:
         for key, value in scalars.items():
             if isinstance(value, (list, tuple, np.ndarray)):
                 for i in range(len(value)):
-                    self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
+                    if not np.isnan(value[i]):
+                        self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
             else:
-                self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+                if not np.isnan(value):
+                    self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     # TODO: Make more configurable
     # TODO: Inference on secondary GPU
