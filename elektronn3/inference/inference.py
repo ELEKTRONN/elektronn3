@@ -321,6 +321,8 @@ class Predictor:
         self.model = model
         if isinstance(state_dict_src, str):
             state_dict = torch.load(state_dict_src)
+            if 'model_state_dict' in state_dict:  # Handle nested dicts
+                state_dict = state_dict['model_state_dict']
         elif isinstance(state_dict_src, dict) or state_dict_src is None:
             state_dict = state_dict_src
         else:

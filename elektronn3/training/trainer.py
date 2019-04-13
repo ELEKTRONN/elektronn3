@@ -561,7 +561,9 @@ class Trainer:
 
         Writes the following files in the ``self.save_path``:
 
-        - ``state_dict.pth`` contains the ``state_dict`` of the trained model.
+        - ``state_dicts.pth`` contains the a dict that holds the ``state_dict``
+          of the trained model, the ``state_dict`` of the optimizer and
+          some meta information (global step, epoch, best validation loss)
           The included parameters can be read and used to overwrite another
           model's ``state_dict``. The model code (architecture) itself is not
           included in this file.
@@ -614,7 +616,13 @@ class Trainer:
         state_dict_path = os.path.join(self.save_path, f'state_dict{suffix}.pth')
         model_path = os.path.join(self.save_path, f'model{suffix}.pt')
 
-        torch.save(model.state_dict(), state_dict_path)
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'global_step': self.step,
+            'epoch': self.epoch,
+            'best_val_loss': self.best_val_loss
+        }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}.')
         try:
             # Try saving directly as an uncompiled nn.Module

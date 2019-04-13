@@ -132,8 +132,10 @@ max_steps = args.max_steps
 max_runtime = args.max_runtime
 
 if args.resume is not None:  # Load pretrained network
+    # TODO: Restore optimizer state dict below if possible
     try:  # Assume it's a state_dict for the model
-        model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
+        state_dict = torch.load(os.path.expanduser(args.resume))
+        model.load_state_dict(state_dict['model_state_dict'])
     except _pickle.UnpicklingError as exc:
         # Assume it's a complete saved ScriptModule
         model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
