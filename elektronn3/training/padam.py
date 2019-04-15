@@ -3,7 +3,7 @@
 # (C) Jinghui Chen, Quanquan Gu 2018
 # https://openreview.net/forum?id=BJll6o09tm
 
-from torch.optim import *
+from torch.optim import Optimizer
 import torch
 import math
 import numpy as np
