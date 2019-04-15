@@ -131,11 +131,12 @@ else:  # Use publicly available neuro_data_cdhw dataset
 max_steps = args.max_steps
 max_runtime = args.max_runtime
 
+optimizer_state_dict = None  # If a state dict is available, this will be filled with it
 if args.resume is not None:  # Load pretrained network
-    # TODO: Restore optimizer state dict below if possible
     try:  # Assume it's a state_dict for the model
         state_dict = torch.load(os.path.expanduser(args.resume))
         model.load_state_dict(state_dict['model_state_dict'])
+        optimizer_state_dict = state_dict['optimizer_state_dict']
     except _pickle.UnpicklingError as exc:
         # Assume it's a complete saved ScriptModule
         model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
@@ -199,6 +200,8 @@ optimizer = Padam(
     weight_decay=0.5e-4,
     partial=1/4,
 )
+if optimizer_state_dict is not None:
+    optimizer.load_state_dict(optimizer_state_dict)
 
 # All these metrics assume a binary classification problem. If you have
 #  non-binary targets, remember to adapt the metrics!
