@@ -5,10 +5,30 @@
 # Authors: Martin Drawitsch
 
 """Loss functions"""
+from typing import Sequence
 
 import torch
 
 from elektronn3.modules.lovasz_losses import lovasz_softmax
+
+
+class CombinedLoss(torch.nn.Module):
+    def __init__(self, *criteria: Sequence[torch.nn.Module], device=None, weight=None):
+        super().__init__()
+        self.criteria = torch.nn.ModuleList(criteria)
+        self.device = device
+        if weight is None:
+            weight = torch.ones(len(criteria))
+        else:
+            weight = torch.as_tensor(weight, dtype=torch.float32)
+            assert weight.shape == (len(criteria),)
+        self.register_buffer('weight', weight.to(self.device))
+
+    def forward(self, *args):
+        loss = torch.tensor(0., device=self.device)
+        for crit, weight in zip(self.criteria, self.weight):
+            loss += weight * crit(*args)
+        return loss
 
 
 def _channelwise_sum(x: torch.Tensor):
