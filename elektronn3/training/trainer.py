@@ -366,19 +366,20 @@ class Trainer:
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
         while not self.terminate:
             try:
-                stats, misc, images = self._train(max_steps, max_runtime)
+                stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
                 if self.valid_dataset is None:
                     stats['val_loss'] = nan
+                    val_sample_images = None
                 else:
-                    valid_stats = self._validate()
+                    valid_stats, val_sample_images = self._validate()
                     stats.update(valid_stats)
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
-                self._log_to_tensorboard(stats, misc, images)
+                self._log_to_tensorboard(stats, misc, tr_sample_images, val_sample_images)
                 # Legacy non-tensorboard logging to files
                 self._log_to_history_tracker(stats, misc)
 
@@ -522,7 +523,7 @@ class Trainer:
                 f'{self.step}. Saving model...')
             self._save_model(suffix=f'_minlr_step{self.step}')
 
-    def _validate(self) -> Dict[str, float]:
+    def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = []
@@ -539,19 +540,11 @@ class Trainer:
                 for name, evaluator in self.valid_metrics.items():
                     stats[name].append(evaluator(target, out))
 
-        if self.tb:
-            try:
-                self.sample_plotting_handler(
-                    self,
-                    {
-                        'inp': inp.numpy(),
-                        'out': out.numpy(),
-                        'target': target.numpy()
-                    },
-                    group='val_samples'
-                )
-            except Exception:
-                logger.exception('Error occured while logging to tensorboard:')
+        images = {
+            'inp': inp.numpy(),
+            'out': out.numpy(),
+            'target': target.numpy()
+        }
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
@@ -560,8 +553,7 @@ class Trainer:
 
         self.model.train()  # Reset model to training mode
 
-        # TODO: Refactor: Remove side effects (plotting)
-        return stats
+        return stats, images
 
     def _save_model(
             self,
@@ -676,7 +668,13 @@ class Trainer:
         text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
         logger.info(text)
 
-    def _log_to_tensorboard(self, stats: Dict, misc: Dict, images: Dict) -> None:
+    def _log_to_tensorboard(
+            self,
+            stats: Dict,
+            misc: Dict,
+            tr_images: Dict,
+            val_images: Optional[Dict]
+    ) -> None:
         """Create visualizations, make preview predictions, log and plot to tensorboard"""
         if self.tb:
             try:
@@ -686,7 +684,9 @@ class Trainer:
                     if self.epoch % self.preview_interval == 0 or self.epoch == 1:
                         # TODO: Also save preview inference results in a (3D) HDF5 file
                         self.preview_plotting_handler(self)
-                self.sample_plotting_handler(self, images, group='tr_samples')
+                self.sample_plotting_handler(self, tr_images, group='tr_samples')
+                if val_images is not None:
+                    self.sample_plotting_handler(self, val_images, group='val_samples')
             except Exception:
                 logger.exception('Error occured while logging to tensorboard:')
 
