@@ -186,10 +186,6 @@ class PatchCreator(data.Dataset):
         self.transform = transform
 
         # Setup internal stuff
-        # TODO: Support custom rng for better reproducibility
-        self.rng = np.random.RandomState(
-            np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
-        )
         self.pid = os.getpid()
 
         # The following fields will be filled when reading data
@@ -212,7 +208,6 @@ class PatchCreator(data.Dataset):
         #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
-        self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
         warp_prob = self.warp_prob
         while True:
@@ -288,16 +283,6 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp, self.n_failed_warp,
             float(self.n_successful_warp)/(self.n_failed_warp+self.n_successful_warp))
 
-    def _reseed(self) -> None:
-        """Reseeds the rng if the process ID has changed!"""
-        current_pid = os.getpid()
-        if current_pid != self.pid:
-            logger.debug(f'New worker process started (PID {current_pid})')
-            self.pid = current_pid
-            self.rng.seed(
-                np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
-            )
-
     def warp_cut(
             self,
             inp_src: h5py.Dataset,
@@ -342,7 +327,7 @@ class PatchCreator(data.Dataset):
         if (warp_prob is True) or (warp_prob == 1):  # always warp
             do_warp = True
         elif 0 < warp_prob < 1:  # warp only a fraction of examples
-            do_warp = True if (self.rng.rand() < warp_prob) else False
+            do_warp = True if (np.random.rand() < warp_prob) else False
         else:  # never warp
             do_warp = False
 
@@ -356,7 +341,6 @@ class PatchCreator(data.Dataset):
             aniso_factor=self.aniso_factor,
             target_src_shape=target_src.shape,
             target_patch_shape=self.target_patch_size,
-            rng=self.rng,
             **warp_kwargs
         )
 
@@ -377,7 +361,7 @@ class PatchCreator(data.Dataset):
         or randomly on valid data
         """
         if self.train:
-            p = self.rng.rand()
+            p = np.random.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
             inp_source, target_source = self.inputs[i], self.targets[i]
         else:
@@ -385,7 +369,7 @@ class PatchCreator(data.Dataset):
                 raise ValueError("No validation set")
 
             # TODO: Sampling weight for validation data?
-            i = self.rng.randint(0, len(self.inputs))
+            i = np.random.randint(0, len(self.inputs))
             inp_source, target_source = self.inputs[i], self.targets[i]
 
         return inp_source, target_source

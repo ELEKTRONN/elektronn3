@@ -197,7 +197,6 @@ class RandomGammaCorrection:
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
             of ``1 - prob``.
-        rng: Optional random state for deterministic execution
     """
     def __init__(
             self,
@@ -205,15 +204,13 @@ class RandomGammaCorrection:
             gamma_min: float = 0.25,  # Prevent gamma <= 0 (0 causes zero division)
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
-            rng: Optional[np.random.RandomState] = None
     ):
         if not channels:  # Support empty sequences as an alias for None
             channels = None
         self.channels = channels
         self.prob = prob
-        self.rng = np.random.RandomState() if rng is None else rng
         self.gamma_generator = Normal(
-            mean=1.0, sigma=gamma_std, bounds=(gamma_min, np.inf), rng=rng
+            mean=1.0, sigma=gamma_std, bounds=(gamma_min, np.inf)
         )
 
     def __call__(
@@ -222,7 +219,7 @@ class RandomGammaCorrection:
             target: Optional[np.ndarray] = None  # returned without modifications
             # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        if self.rng.rand() > self.prob:
+        if np.random.rand() > self.prob:
             return inp, target
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         gcorr = np.empty_like(inp)
@@ -269,13 +266,11 @@ class RandomGrayAugment:
             self,
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
-            rng: Optional[np.random.RandomState] = None
     ):
         if not channels:  # Support empty sequences as an alias for None
             channels = None
         self.channels = channels
         self.prob = prob
-        self.rng = np.random.RandomState() if rng is None else rng
 
     def __call__(
             self,
@@ -283,7 +278,7 @@ class RandomGrayAugment:
             target: Optional[np.ndarray] = None  # returned without modifications
             # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        if self.rng.rand() > self.prob:
+        if np.random.rand() > self.prob:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
@@ -299,9 +294,9 @@ class RandomGrayAugment:
         for c in channels:  # TODO: Can we vectorize this?
             aug[c] = skimage.exposure.rescale_intensity(inp[c], out_range=(0, 1))
 
-        alpha = 1 + (self.rng.rand(nc) - 0.5) * 0.3  # ~ contrast
-        beta = (self.rng.rand(nc) - 0.5) * 0.3  # Mediates whether values are clipped for shadows or lights
-        gamma = 2.0 ** (self.rng.rand(nc) * 2 - 1)  # Sample from [0.5, 2]
+        alpha = 1 + (np.random.rand(nc) - 0.5) * 0.3  # ~ contrast
+        beta = (np.random.rand(nc) - 0.5) * 0.3  # Mediates whether values are clipped for shadows or lights
+        gamma = 2.0 ** (np.random.rand(nc) * 2 - 1)  # Sample from [0.5, 2]
 
         aug[channels] = aug[channels] * alpha[:, None, None] + beta[:, None, None]
         aug[channels] = np.clip(aug[channels], 0, 1)
@@ -328,21 +323,18 @@ class AdditiveGaussianNoise:
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
             of ``1 - prob``.
-        rng: Optional random state for deterministic execution
     """
     def __init__(
             self,
             sigma: float = 0.1,
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
-            rng: Optional[np.random.RandomState] = None
     ):
         if not channels:  # Support empty sequences as an alias for None
             channels = None
         self.channels = channels
         self.prob = prob
-        self.rng = np.random.RandomState() if rng is None else rng
-        self.noise_generator = Normal(mean=0, sigma=sigma, rng=rng)
+        self.noise_generator = Normal(mean=0, sigma=sigma)
 
     def __call__(
             self,
@@ -350,7 +342,7 @@ class AdditiveGaussianNoise:
             target: Optional[np.ndarray] = None  # returned without modifications
             # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        if self.rng.rand() > self.prob:
+        if np.random.rand() > self.prob:
             return inp, target
         noise = np.empty_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
@@ -464,9 +456,8 @@ class RandomFlip:
     def __init__(
             self,
             ndim_spatial: int = 2,
-            rng: Optional[np.random.RandomState] = None
     ):
-        self.randint = RandInt(rng=rng)
+        self.randint = RandInt()
         self.ndim_spatial = ndim_spatial
 
     def __call__(

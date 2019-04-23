@@ -42,6 +42,18 @@ class NaNException(RuntimeError):
     pass
 
 
+def _worker_init_fn(worker_id: int) -> None:
+    """Sets a unique but deterministic random seed for background workers.
+
+    Only sets the seed for NumPy because PyTorch and Python's own RNGs
+    take care of reseeding on their own.
+    See https://github.com/numpy/numpy/issues/9650."""
+    # Modulo 2**32 because np.random.seed() only accepts values up to 2**32 - 1
+    initial_seed = torch.initial_seed() % 2**32
+    worker_seed = initial_seed + worker_id
+    np.random.seed(worker_seed)
+
+
 class Trainer:
     """ Training loop abstraction with IPython and tensorboard integration.
 
@@ -327,7 +339,7 @@ class Trainer:
         self.train_loader = DelayedDataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60
+            timeout=60, worker_init_fn=_worker_init_fn
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
@@ -338,7 +350,7 @@ class Trainer:
         if valid_dataset is not None:
             self.valid_loader = DelayedDataLoader(
                 self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
-                timeout=60
+                timeout=60, worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
 

@@ -8,13 +8,13 @@
 
 import argparse
 import os
+import random
 import _pickle
 
 import torch
 from torch import nn
 from torch import optim
-
-# TODO: Make torch and numpy RNG seed configurable
+import numpy as np
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -45,7 +45,23 @@ parser.add_argument(
 "onsave": Use regular Python model for training, but trace it on-demand for saving training state;
 "train": Use traced model for training and serialize it on disk"""
 )
+parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument(
+    '--deterministic', action='store_true',
+    help='Run in fully deterministic mode (at the cost of execution speed).'
+)
 args = parser.parse_args()
+
+# Set up all RNG seeds, set level of determinism
+random_seed = args.seed
+torch.manual_seed(random_seed)
+np.random.seed(random_seed)
+random.seed(random_seed)
+deterministic = args.deterministic
+if deterministic:
+    torch.backends.cudnn.deterministic = True
+else:
+    torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 if not args.disable_cuda and torch.cuda.is_available():
     device = torch.device('cuda')
@@ -64,8 +80,6 @@ from elektronn3.training import CosineAnnealingWarmRestarts
 from elektronn3.modules import DiceLoss
 from elektronn3.models.unet import UNet
 
-
-torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 model = UNet(
     n_blocks=4,

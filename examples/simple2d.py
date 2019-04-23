@@ -16,10 +16,12 @@ be implemented.
 
 import argparse
 import os
+import random
 
 import torch
 from torch import nn
 from torch import optim
+import numpy as np
 
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3
@@ -46,9 +48,23 @@ parser.add_argument(
     '-d', '--disable-trace', action='store_true',
     help='Disable tracing JIT compilation of the model.'
 )
+parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument(
+    '--deterministic', action='store_true',
+    help='Run in fully deterministic mode (at the cost of execution speed).'
+)
 args = parser.parse_args()
 
-torch.manual_seed(0)
+# Set up all RNG seeds, set level of determinism
+random_seed = args.seed
+torch.manual_seed(random_seed)
+np.random.seed(random_seed)
+random.seed(random_seed)
+deterministic = args.deterministic
+if deterministic:
+    torch.backends.cudnn.deterministic = True
+else:
+    torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 if not args.disable_cuda and torch.cuda.is_available():
     device = torch.device('cuda')
@@ -67,7 +83,6 @@ model = UNet(
 if not args.disable_trace:
     x = torch.randn(1, 1, 64, 64, device=device)
     model = torch.jit.trace(model, x)
-
 
 
 # USER PATHS
