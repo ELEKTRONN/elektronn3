@@ -5,7 +5,7 @@
 # Authors: Martin Drawitsch
 
 """Loss functions"""
-from typing import Sequence
+from typing import Sequence, Optional
 
 import torch
 
@@ -13,7 +13,21 @@ from elektronn3.modules.lovasz_losses import lovasz_softmax
 
 
 class CombinedLoss(torch.nn.Module):
-    def __init__(self, *criteria: Sequence[torch.nn.Module], device=None, weight=None):
+    """Defines a loss function as a weighted sum of combinable loss criteria.
+
+    Args:
+        criteria: List of loss criterion modules that should be combined.
+        weight: Weight assigned to the individual loss criteria (in the same
+            order as ``criteria``).
+        device: The device on which the loss should be computed. This needs
+            to be set to the device that the loss arguments are allocated on.
+    """
+    def __init__(
+            self,
+            criteria: Sequence[torch.nn.Module],
+            weight: Optional[Sequence[float]] = None,
+            device: torch.device = None
+    ):
         super().__init__()
         self.criteria = torch.nn.ModuleList(criteria)
         self.device = device
