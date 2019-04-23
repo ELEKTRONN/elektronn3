@@ -561,24 +561,6 @@ class ElasticTransform:
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
 
-        #if target is not None:
-        #   target_channels = target.shape[0] if target.ndim == 4 else 1
-
-        target_c = True   # the first dim of target is number of channels
-        if target is not None:
-            if target.ndim == 4:  # (C, D, H, W)
-                target_channels = target.shape[0]
-            elif target.ndim == 3:  # (C, H, W) or (D, H, W)
-                if inp.ndim == 3:  # (C, H, W)
-                    target_channels = target.shape[0]
-                elif inp.ndim == 4:  # (D, H, W)
-                    target_c = False
-                    target_channels = 1
-
-        if self.target_discrete_ix is None:
-            self.target_discrete_ix = [True for i in range(target_channels)]
-        else:
-            self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
 
         if inp.ndim == 4:
             shape = inp[0].shape
@@ -603,22 +585,36 @@ class ElasticTransform:
             raise ValueError("Image dimension not understood!")
 
         deformed_img = np.empty_like(inp)
-        deformed_target = np.empty_like(target)
-
         for c in channels:
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
-
-        if target_c == True:
-            for tc in range(target_channels):
-                target_order = 0 if self.target_discrete_ix[tc] is True else 1
-                deformed_target[tc] = map_coordinates(target[tc], indices, order=0 ).reshape(shape)
-        else:
-            target_order = 0 if self.target_discrete_ix[0] is True else 1
-            deformed_target = map_coordinates(target, indices, order=0).reshape(shape)
 
         if target is None:
             return deformed_img, target
         else:
+            target_c = True  # True if the first dim of target is the number of channels
+            if target.ndim == 4:  # (C, D, H, W)
+                target_channels = target.shape[0]
+            elif target.ndim == 3:  # (C, H, W) or (D, H, W)
+                if inp.ndim == 3:  # (C, H, W)
+                    target_channels = target.shape[0]
+                elif inp.ndim == 4:  # (D, H, W)
+                    target_c = False
+                    target_channels = 1
+            #if target is not None do the followings
+            if self.target_discrete_ix is None:
+                self.target_discrete_ix = [True for i in range(target_channels)]
+            else:
+                self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
+
+            deformed_target = np.empty_like(target)
+            if target_c == True:
+                for tc in range(target_channels):
+                    target_order = 0 if self.target_discrete_ix[tc] is True else 1
+                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order ).reshape(shape)
+            else:
+                target_order = 0 if self.target_discrete_ix[0] is True else 1
+                deformed_target = map_coordinates(target, indices, order=target_order).reshape(shape)
+
             return deformed_img, deformed_target
 
 
