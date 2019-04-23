@@ -518,7 +518,10 @@ class ElasticTransform:
             prob: probability (between 0 and 1) with which to perform this
                 augmentation. The input is returned unmodified with a probability
                 of ``1 - prob``
-            target_discrete: bool
+            target_discrete_ix: list
+                List of target channels that contain discrete values.
+                By default (``None``), every channel is is seen as discrete (this is
+                generally the case for classification tasks).
                 This information is used to decide what kind of interpolation should
                 be used for reading target data:
 
@@ -558,8 +561,19 @@ class ElasticTransform:
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
 
+        #if target is not None:
+        #   target_channels = target.shape[0] if target.ndim == 4 else 1
+
+        target_c = True   # the first dim of target is number of channels
         if target is not None:
-            target_channels = target.shape[0] if target.ndim == 4 else 1
+            if target.ndim == 4:  # (C, D, H, W)
+                target_channels = target.shape[0]
+            elif target.ndim == 3:  # (C, H, W) or (D, H, W)
+                if inp.ndim == 3:  # (C, H, W)
+                    target_channels = target.shape[0]
+                elif inp.ndim == 4:  # (D, H, W)
+                    target_c = False
+                    target_channels = 1
 
         if self.target_discrete_ix is None:
             self.target_discrete_ix = [True for i in range(target_channels)]
@@ -588,29 +602,23 @@ class ElasticTransform:
         else:
             raise ValueError("Image dimension not understood!")
 
-        print("input shape:", shape)
-        print("target shape:", target.shape)
         deformed_img = np.empty_like(inp)
         deformed_target = np.empty_like(target)
 
         for c in channels:
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
 
-        for tc in range(target_channels):
-            print("target channels:", target_channels)
-            print("printing the discrete index: ",self.target_discrete_ix )
-            target_order = 0 if self.target_discrete_ix[tc] is True else 1
-            print("printing the target order:", target_order)
-            deformed_target[tc] = map_coordinates(target[tc], indices, order=0 ).reshape(shape)
-
+        if target_c == True:
+            for tc in range(target_channels):
+                target_order = 0 if self.target_discrete_ix[tc] is True else 1
+                deformed_target[tc] = map_coordinates(target[tc], indices, order=0 ).reshape(shape)
+        else:
+            target_order = 0 if self.target_discrete_ix[0] is True else 1
+            deformed_target = map_coordinates(target, indices, order=0).reshape(shape)
 
         if target is None:
             return deformed_img, target
-
         else:
-            print("target is not None")
-            print("target values:", np.unique(target))
-            print("deformed_target values:",np.unique(deformed_target))
             return deformed_img, deformed_target
 
 
