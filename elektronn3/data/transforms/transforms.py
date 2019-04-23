@@ -537,7 +537,7 @@ class ElasticTransform:
             channels: Optional[Sequence[int]] = None,
             prob: float = 0.25,
             rng: Optional[np.random.RandomState] = None,
-            target_discrete: bool = True,
+            target_discrete_ix: Optional[list]= None,
 
     ):
         self.sigma = sigma
@@ -545,7 +545,7 @@ class ElasticTransform:
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
-        self.target_discrete = target_discrete
+        self.target_discrete_ix = target_discrete_ix
 
     def __call__(
             self,
@@ -555,38 +555,63 @@ class ElasticTransform:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
             return inp, target
+
         channels = range(inp.shape[0]) if self.channels is None else self.channels
 
+        if target is not None:
+            target_channels = target.shape[0] if target.ndim == 4 else 1
+
+        if self.target_discrete_ix is None:
+            self.target_discrete_ix = [True for i in range(target_channels)]
+        else:
+            self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
+
+        if inp.ndim == 4:
+            shape = inp[0].shape
+            if inp.shape[-3:] != target.shape[-3:]:
+                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
+            dz = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
+            indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+
+        elif inp.ndim == 3:
+            shape = inp[0].shape
+            if inp.shape[-2:] != target.shape[-2:]:
+                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
+            dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
+            indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
+
+        else:
+            raise ValueError("Image dimension not understood!")
+
+        print("input shape:", shape)
+        print("target shape:", target.shape)
         deformed_img = np.empty_like(inp)
         deformed_target = np.empty_like(target)
+
         for c in channels:
-            shape = inp[c].shape
-            if inp[c].ndim ==3 :
-                dz = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
-                indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
-
-            elif inp[c].ndim == 2 :
-                dy = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                dx = gaussian_filter((self.rng.rand(*shape)* 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-                y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
-                indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
-
-            else:
-                raise ValueError("Image dimension not understood!")
-
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
 
-            if target is None:
-                return deformed_img, target
-            else if inp.shape != target.shape:
-                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
-            else:
-                target_order = 0 if self.target_discrete is True else 1
-                deformed_target[c] = map_coordinates(target[c], indices, order=target_order, mode='nearest').reshape(shape)
-                return deformed_img, deformed_target
+        for tc in range(target_channels):
+            print("target channels:", target_channels)
+            print("printing the discrete index: ",self.target_discrete_ix )
+            target_order = 0 if self.target_discrete_ix[tc] is True else 1
+            print("printing the target order:", target_order)
+            deformed_target[tc] = map_coordinates(target[tc], indices, order=0 ).reshape(shape)
+
+
+        if target is None:
+            return deformed_img, target
+
+        else:
+            print("target is not None")
+            print("target values:", np.unique(target))
+            print("deformed_target values:",np.unique(deformed_target))
+            return deformed_img, deformed_target
 
 
 class SqueezeTarget:
