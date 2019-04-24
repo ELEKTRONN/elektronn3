@@ -485,7 +485,6 @@ class RandomFlip:
         return inp_flipped, target_flipped
 
 
-
 # TODO: Functional API (transforms.functional).
 #       The current object-oriented interface should be rewritten as a wrapper
 #       for the functional API (see implementation in torchvision).

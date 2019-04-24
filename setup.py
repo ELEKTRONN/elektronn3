@@ -32,7 +32,10 @@ setup(
         'tqdm',
         'scikit-learn',
         'scikit-image',
+        'tensorflow',
+        'tensorboard',
         'tensorboardX',
+        'torchvision'
     ],
 
 )
