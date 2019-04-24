@@ -75,9 +75,9 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
-from elektronn3.training import Trainer, Backup, metrics, Padam
+from elektronn3.training import Trainer, Backup, metrics
 from elektronn3.training import CosineAnnealingWarmRestarts
-from elektronn3.modules import DiceLoss
+from elektronn3.modules import DiceLoss, CombinedLoss
 from elektronn3.models.unet import UNet
 
 
@@ -208,11 +208,10 @@ preview_batch = get_preview_batch(
     transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
 
-optimizer = Padam(
+optimizer = optim.SGD(
     model.parameters(),
     lr=0.1,
     weight_decay=0.5e-4,
-    partial=1/4,
 )
 if optimizer_state_dict is not None:
     optimizer.load_state_dict(optimizer_state_dict)
@@ -230,8 +229,9 @@ valid_metrics = {
 }
 
 
-# criterion = nn.CrossEntropyLoss(weight=class_weights)
-criterion = DiceLoss(apply_softmax=True, weight=class_weights)
+crossentropy = nn.CrossEntropyLoss(weight=class_weights)
+dice = DiceLoss(apply_softmax=True, weight=class_weights)
+criterion = CombinedLoss([crossentropy, dice], weight=[1., 1.], device=device)
 
 # Create trainer
 trainer = Trainer(
@@ -248,7 +248,7 @@ trainer = Trainer(
     example_input=example_input,
     enable_save_trace=enable_save_trace,
     schedulers={'lr': CosineAnnealingWarmRestarts(
-        optimizer, T_0=10000, T_mult=2
+        optimizer, T_0=10000, eta_min=1e-6, T_mult=1.5
     )},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
