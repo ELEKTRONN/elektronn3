@@ -260,6 +260,12 @@ class Predictor:
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        strict_shapes: If ``False`` (default), force the ``output_shape`` to be
+            a multiple of the ``tile_shape`` by padding the input. This allows
+            for greater flexibility of the ``tile_shape`` but potentially wastes
+            more computation (the padded region will be passed into the model
+            but will later be discarded from the output tensor).
+            If ``True``, incompatible shapes will result in an error.
         verbose: If ``True``, report inference speed.
 
     Examples:
@@ -283,6 +289,7 @@ class Predictor:
             offset: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
+            strict_shapes: bool = False,
             verbose: bool = False,
     ):
         if device is None:
@@ -300,6 +307,8 @@ class Predictor:
             offset = np.array(offset)
         self.overlap_shape = overlap_shape
         self.offset = offset
+        if out_shape is not None:
+            out_shape = np.array(out_shape)
         self.out_shape = out_shape
         self.float16 = float16
         if float16 and not isinstance(model, str):
@@ -308,6 +317,7 @@ class Predictor:
                 'that are passed as file paths (strings).'
             )
         self.dtype = torch.float16 if float16 else torch.float32
+        self.strict_shapes = strict_shapes
         self.verbose = verbose
         if isinstance(model, str):
             if os.path.isfile(model):
@@ -400,6 +410,8 @@ class Predictor:
         """
         if self.verbose:
             start = time.time()
+        # Check/change out_shape for divisibility by tile_shape
+        inp, relevant_slice = self._ensure_matching_shapes(inp)
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         if self.device.type == 'cuda':
             inp.pin_memory()
@@ -427,7 +439,7 @@ class Predictor:
         #  will misleadingly report a huge amount of time spent in out.cpu()
         if self.device.type == 'cuda':
             torch.cuda.synchronize()
-        out = out.cpu()
+        out = out.cpu() if relevant_slice is None else out[relevant_slice].cpu()
         if self.verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
@@ -435,6 +447,51 @@ class Predictor:
             #       inp by out because out may contain padding that we don't want to count)
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
+
+    # TODO: Make this work with input shape != output shape
+    def _ensure_matching_shapes(self, inp: np.ndarray) -> Tuple[np.ndarray, Optional[slice]]:
+        if self.out_shape is not None and np.any(self.out_shape[1:] % self.tile_shape):
+            if self.strict_shapes:
+                raise ValueError(
+                    'Make sure that out_shape is divisible by tile_shape or '
+                    'relax this constraint by setting strict_shapes=False.'
+                )
+            elif np.any(inp.shape[2:] != self.out_shape[1:]):
+                raise NotImplementedError(
+                    'Automatic padding for out_shape that is not divisible '
+                    'by tile_shape is not (yet) implemented. Please change '
+                    'your input shape or tile_shape accordingly.'
+                )
+            else:
+                orig_shape = inp.shape
+                padded_shape = np.array(inp.shape)
+                padded_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+                padded_inp = np.zeros(padded_shape)
+                # Define the relevant region (that is: without the padding that was just added)
+                relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
+                padded_inp[relevant_slice] = inp
+                inp = padded_inp
+                padded_out_shape = (self.out_shape[0], *padded_shape[2:])
+                if np.any(padded_out_shape != self.out_shape):
+                    sh_diff = np.subtract(padded_out_shape, self.out_shape)
+                    # Only nonzero elements are multiplied, otherwise it will be 0.
+                    wasted_pix = np.prod(sh_diff[sh_diff != 0])
+                    total_pix = np.prod(padded_out_shape)
+                    wasted_percentage = 100 * wasted_pix / total_pix
+                    logger.info(
+                        f'Adapting out_shape {tuple(self.out_shape[1:])} to '
+                        f'tile_shape {tuple(self.tile_shape)} '
+                        f'by padding out_shape to {tuple(padded_out_shape[1:])}.\n'
+                        f'At least {wasted_percentage:.2f}% of total compute will be '
+                        f'wasted by this padding.'
+                    )
+                    # TODO: Calculate exact compute waste by looking at increased tile overlaps
+                    #  (the current estimation omits the (potentially high-impact) added per-tile
+                    #  padding/overlaps via overlap_shape.
+                    self.out_shape = padded_out_shape
+        else:
+            relevant_slice = None
+        return inp, relevant_slice
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
