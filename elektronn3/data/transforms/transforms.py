@@ -594,12 +594,15 @@ class ElasticTransform:
             target_c = True  # True if the first dim of target is the number of channels
             if target.ndim == 4:  # (C, D, H, W)
                 target_channels = target.shape[0]
+                target_shape = target[0].shape
             elif target.ndim == 3:  # (C, H, W) or (D, H, W)
                 if inp.ndim == 3:  # (C, H, W)
                     target_channels = target.shape[0]
+                    target_shape = target[0].shape
                 elif inp.ndim == 4:  # (D, H, W)
                     target_c = False
                     target_channels = 1
+                    target_shape = target.shape
             #if target is not None do the followings
             if self.target_discrete_ix is None:
                 self.target_discrete_ix = [True for i in range(target_channels)]
@@ -610,10 +613,10 @@ class ElasticTransform:
             if target_c == True:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
-                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order ).reshape(shape)
+                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order ).reshape(target_shape)
             else:
                 target_order = 0 if self.target_discrete_ix[0] is True else 1
-                deformed_target = map_coordinates(target, indices, order=target_order).reshape(shape)
+                deformed_target = map_coordinates(target, indices, order=target_order).reshape(target_shape)
 
             return deformed_img, deformed_target
 
