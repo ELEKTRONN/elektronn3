@@ -229,9 +229,10 @@ valid_metrics = {
 }
 
 
-crossentropy = nn.CrossEntropyLoss(weight=class_weights)
+# crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
-criterion = CombinedLoss([crossentropy, dice], weight=[1., 1.], device=device)
+# criterion = CombinedLoss([crossentropy, dice], weight=[1., 1.], device=device)
+criterion = dice
 
 # Create trainer
 trainer = Trainer(
