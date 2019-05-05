@@ -76,7 +76,7 @@ elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics
-from elektronn3.training import CosineAnnealingWarmRestarts
+from elektronn3.training import CosineAnnealingWarmRestarts, SWA
 from elektronn3.modules import DiceLoss, CombinedLoss
 from elektronn3.models.unet import UNet
 
@@ -213,6 +213,7 @@ optimizer = optim.SGD(
     lr=0.1,
     weight_decay=0.5e-4,
 )
+optimizer = SWA(optimizer)
 if optimizer_state_dict is not None:
     optimizer.load_state_dict(optimizer_state_dict)
 

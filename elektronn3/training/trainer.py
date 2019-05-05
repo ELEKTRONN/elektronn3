@@ -26,6 +26,7 @@ from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from elektronn3.training import handlers
+from elektronn3.training.swa import SWA
 from elektronn3.training.train_utils import pretty_string_time
 from elektronn3.training.train_utils import Timer, DelayedDataLoader, HistoryTracker
 
@@ -437,6 +438,8 @@ class Trainer:
             dloss = self.criterion(dout, dtarget)
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
+                import IPython; IPython.embed(); raise SystemExit
+
                 raise NaNException
 
             # update step
@@ -511,6 +514,15 @@ class Trainer:
 
         Local minima are found by checking for the simple criterion
         :math:`\lr_{t-1}` > \lr{t} < lr{t+1}`.
+
+        If an SWA (Stochastic Weight Averaging) optimizer is detected, the SWA
+        algorithm is performed (see https://arxiv.org/abs/1803.05407) and the
+        resulting model is also saved, marked by the "_swa" file name suffix.
+        Note that the saved SWA model doesn't feature corrected batch norm
+        stats, so if the model uses batch normalization with running statistics,
+        you need to ensure this yourself by running
+        :py:meth:`elektronn3.trainer.SWA.bn_update()` on it after loading the
+        model.
         """
         if len(self._lr_nhood) < 3:
             return  # Can't get lrs, but at this early stage it's also not relevant
@@ -522,6 +534,14 @@ class Trainer:
                 f'Local learning rate minimum {curr_lr:.2e} detected at step '
                 f'{self.step}. Saving model...')
             self._save_model(suffix=f'_minlr_step{self.step}')
+            # Handle Stochastic Weight Averaging optimizer if SWA is used
+            if isinstance(self.optimizer, SWA):
+                self.optimizer.update_swa()  # Put current model params into SWA buffer
+                self.optimizer.swap_swa_sgd()  # Perform SWA and write results into model params
+                # TODO: Define an swa_loader and optionally update bn stats here with it
+                # SWA.bn_update(swa_loader, self.model, device=self.device)
+                self._save_model(suffix='_swa', verbose=False)
+                self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
