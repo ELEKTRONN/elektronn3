@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 
+from itertools import islice
 from math import nan
 from pickle import PickleError
 from textwrap import dedent
@@ -518,11 +519,18 @@ class Trainer:
         If an SWA (Stochastic Weight Averaging) optimizer is detected, the SWA
         algorithm is performed (see https://arxiv.org/abs/1803.05407) and the
         resulting model is also saved, marked by the "_swa" file name suffix.
-        Note that the saved SWA model doesn't feature corrected batch norm
-        stats, so if the model uses batch normalization with running statistics,
-        you need to ensure this yourself by running
-        :py:meth:`elektronn3.trainer.SWA.bn_update()` on it after loading the
-        model.
+
+        .. note::
+            The saved SWA model performs batch norm statistics correction
+            only on a limited number of batches from the ``self.train_loader``
+            (currently hardcoded to 10),
+            so if the model uses batch normalization with running statistics and
+            you suspect that this amount of batches won't be representative
+            enough for your input data distribution, you might want to ensure a
+            good estimate yourself by running
+            :py:meth:`elektronn3.trainer.SWA.bn_update()` on the model with a
+            larger number of input batches after loading the model for
+            inference.
         """
         if len(self._lr_nhood) < 3:
             return  # Can't get lrs, but at this early stage it's also not relevant
@@ -536,10 +544,15 @@ class Trainer:
             self._save_model(suffix=f'_minlr_step{self.step}')
             # Handle Stochastic Weight Averaging optimizer if SWA is used
             if isinstance(self.optimizer, SWA):
+                # TODO: Make bn_update configurable (esp. number of batches)
                 self.optimizer.update_swa()  # Put current model params into SWA buffer
                 self.optimizer.swap_swa_sgd()  # Perform SWA and write results into model params
-                # TODO: Define an swa_loader and optionally update bn stats here with it
-                # SWA.bn_update(swa_loader, self.model, device=self.device)
+                max_bn_corr_batches = 10  # Batches to use to correct SWA batchnorm stats
+                # We're assuming here that len(self.train_loader), which is an upper bound for
+                #  len(swa_loader), is sufficient for a good stat estimation
+                swa_loader = islice(self.train_loader, max_bn_corr_batches)
+                # This may be expensive (comparable to validation computations)
+                SWA.bn_update(swa_loader, self.model, device=self.device)
                 self._save_model(suffix='_swa', verbose=False)
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
