@@ -553,7 +553,7 @@ class ElasticTransform:
     def __call__(
             self,
             inp: np.ndarray,
-            target: Optional[np.ndarray] = None  # returned without modifications
+            target: Optional[np.ndarray] = None 
 
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
@@ -603,14 +603,14 @@ class ElasticTransform:
                     target_c = False
                     target_channels = 1
                     target_shape = target.shape
-            #if target is not None do the followings
+
             if self.target_discrete_ix is None:
                 self.target_discrete_ix = [True for i in range(target_channels)]
             else:
                 self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
 
             deformed_target = np.empty_like(target)
-            if target_c == True:
+            if target_c:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
                     deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order ).reshape(target_shape)
