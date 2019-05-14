@@ -15,6 +15,8 @@ def _channelwise_sum(x: torch.Tensor):
     reduce_dims = tuple([0] + list(range(x.dim()))[2:])  # = (0, 2, 3, ...)
     return x.sum(dim=reduce_dims)
 
+def nldsc_loss(probs, target, weight=1., class_weight=1.):
+	return -(1 - dice_loss(probs, target, weight, class_weight) + 1e-10).log()
 
 # TODO: Dense weight support
 def dice_loss(probs, target, weight=1., class_weight=1.):
@@ -82,6 +84,41 @@ def dice_loss(probs, target, weight=1., class_weight=1.):
         IPython.embed()
 
     return weighted_loss  # ()
+
+
+class NLDSCLoss(torch.nn.Module):
+    """Generalized Dice Loss, as described in https://arxiv.org/abs/1707.03237.
+
+    Works for n-dimensional data. Assuming that the ``output`` tensor to be
+    compared to the ``target`` has the shape (N, C, D, H, W), the ``target``
+    can either have the same shape (N, C, D, H, W) (one-hot encoded) or
+    (N, D, H, W) (with dense class indices, as in
+    ``torch.nn.CrossEntropyLoss``). If the latter shape is detected, the
+    ``target`` is automatically internally converted to a one-hot tensor
+    for loss calculation.
+
+    Args:
+        apply_softmax: If ``True``, a softmax operation is applied to the
+            ``output`` tensor before loss calculation. This is necessary if
+            your model does not already apply softmax as the last layer.
+            If ``False``, ``output`` is assumed to already contain softmax
+            probabilities.
+        weight: Weight tensor for class-wise loss rescaling.
+            Has to be of shape (C,). If ``None``, classes are weighted equally.
+    """
+    def __init__(self, apply_softmax=True, weight=torch.tensor(1.), class_weight=torch.tensor(1.)):
+        super().__init__()
+        if apply_softmax:
+            self.softmax = torch.nn.Softmax(dim=1)
+        else:
+            self.softmax = lambda x: x  # Identity (no softmax)
+        self.dice = nldsc_loss
+        self.register_buffer('weight', weight)
+        self.register_buffer('class_weight', class_weight)
+
+    def forward(self, output, target):
+        probs = self.softmax(output)
+        return self.dice(probs, target, weight=self.weight, class_weight=self.class_weight)
 
 
 class DiceLoss(torch.nn.Module):
