@@ -89,12 +89,12 @@ elif args.jit == 'train':
             'Traced models with checkpointing currently don\'t '
             'work, so either run with --disable-trace or disable '
             'checkpointing.')
-    tracedmodel = torch.jit.trace(model, example_input.to(device))
+    tracedmodel = torch.jit.trace(model, example_input.to(devifce))
     model = tracedmodel
 
 
 # USER PATHS
-save_root = os.path.expanduser('~/e3training/')
+save_root = os.path.expanduser('~/e3training')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'

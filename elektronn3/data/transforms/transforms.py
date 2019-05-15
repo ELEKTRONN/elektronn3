@@ -553,7 +553,7 @@ class ElasticTransform:
     def __call__(
             self,
             inp: np.ndarray,
-            target: Optional[np.ndarray] = None 
+            target: Optional[np.ndarray] = None
 
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.rng.rand() > self.prob:
