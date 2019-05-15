@@ -32,7 +32,6 @@ from elektronn3.training import metrics
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
-
 logger = logging.getLogger('elektronn3log')
 
 
