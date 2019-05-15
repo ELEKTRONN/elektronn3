@@ -414,7 +414,6 @@ class AdditiveGaussianNoise:
             prob: probability (between 0 and 1) with which to perform this
                 augmentation. The input is returned unmodified with a probability
                 of ``1 - prob``.
-            rng: Optional random state for deterministic execution
     """
 
     def __init__(
@@ -422,11 +421,9 @@ class AdditiveGaussianNoise:
             sigma: float = 0.1,
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
-            rng: Optional[np.random.RandomState] = None
     ):
         self.channels = channels
         self.prob = prob
-        self.rng = np.random.RandomState() if rng is None else rng
         self.noise_generator = Normal(mean=0, sigma=sigma)
 
     def __call__(
@@ -435,7 +432,7 @@ class AdditiveGaussianNoise:
             target: Optional[np.ndarray] = None  # returned without modifications
             # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        if self.rng.rand() > self.prob:
+        if np.random.rand() > self.prob:
             return inp, target
         noise = np.empty_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
