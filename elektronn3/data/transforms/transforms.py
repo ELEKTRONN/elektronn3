@@ -20,6 +20,11 @@ from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
 import numpy as np
 import skimage.exposure
 
+import scipy
+import scipy.ndimage
+from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage.interpolation import map_coordinates
+
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 
@@ -282,10 +287,8 @@ class RandomGrayAugment:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
-
         nc = len(channels)
         aug = inp.copy()  # Copy so we don't overwrite inp
-
         # The calculations below have to be performed on inputs that have a
         #  value range of (0, 1), so they have to be rescaled.
         #  The augmented image will be re-rescaled to the original input value
@@ -308,33 +311,38 @@ class RandomGrayAugment:
         return aug, target
 
 
-# TODO: [Random]GaussianBlur
-
-
-class AdditiveGaussianNoise:
-    """Adds random gaussian noise to the input.
+class RandomGaussianBlur:
+    """Adds random gaussian blur to the input.
 
     Args:
-        sigma: Sigma parameter of the gaussian distribution to draw from
-        channels: If ``channels`` is ``None``, the noise is applied to
-            all channels of the input tensor.
-            If ``channels`` is a ``Sequence[int]``, noise is only applied
-            to the specified channels.
+        distsigma: Sigma parameter of the half-normal distribution from
+            which sigmas for the gaussian blurring are drawn.
+            To clear up possible confusion: The ``distsigma`` parameter does
+            **not** directly parametrize the gaussian blurring, but the
+            random distribution from which the blurring sigmas are drawn
+            from.
         prob: probability (between 0 and 1) with which to perform this
             augmentation. The input is returned unmodified with a probability
             of ``1 - prob``.
+        aniso_factor: a tuple or an array to apply the anisotropy, must
+            match the dimension of the input.
     """
+
     def __init__(
             self,
-            sigma: float = 0.1,
+            distsigma: float = 1,
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
+            aniso_factor: Optional = None,
     ):
         if not channels:  # Support empty sequences as an alias for None
             channels = None
         self.channels = channels
         self.prob = prob
-        self.noise_generator = Normal(mean=0, sigma=sigma)
+        self.gaussian_std = HalfNormal(sigma=distsigma)
+        if aniso_factor is None or aniso_factor == 1:
+            aniso_factor = np.array([1, 1, 1])
+        self.aniso_factor = aniso_factor
 
     def __call__(
             self,
@@ -344,12 +352,17 @@ class AdditiveGaussianNoise:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if np.random.rand() > self.prob:
             return inp, target
-        noise = np.empty_like(inp)
+
         channels = range(inp.shape[0]) if self.channels is None else self.channels
+        blurred_inp = np.empty_like(inp)
         for c in channels:
-            noise[c] = self.noise_generator(shape=inp[c].shape)
-        noisy_inp = inp + noise
-        return noisy_inp, target
+            self.aniso_factor = self.aniso_factor[:inp[c].ndim]
+            sigma = self.gaussian_std(shape=inp[c].ndim)
+            aniso_sigma = np.divide(sigma, self.aniso_factor)
+            blurred_inp[c] = gaussian_filter(inp[c], sigma=aniso_sigma)
+
+        return blurred_inp, target
+
 
 
 class RandomBlurring:  # Warning: This operates in-place!
@@ -390,6 +403,49 @@ class RandomBlurring:  # Warning: This operates in-place!
         return inp, target
 
 
+class AdditiveGaussianNoise:
+    """Adds random gaussian noise to the input.
+        Args:
+            sigma: Sigma parameter of the gaussian distribution to draw from
+            channels: If ``channels`` is ``None``, the noise is applied to
+                all channels of the input tensor.
+                If ``channels`` is a ``Sequence[int]``, noise is only applied
+                to the specified channels.
+            prob: probability (between 0 and 1) with which to perform this
+                augmentation. The input is returned unmodified with a probability
+                of ``1 - prob``.
+            rng: Optional random state for deterministic execution
+    """
+
+    def __init__(
+            self,
+            sigma: float = 0.1,
+            channels: Optional[Sequence[int]] = None,
+            prob: float = 1.0,
+            rng: Optional[np.random.RandomState] = None
+    ):
+        self.channels = channels
+        self.prob = prob
+        self.rng = np.random.RandomState() if rng is None else rng
+        self.noise_generator = Normal(mean=0, sigma=sigma)
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if self.rng.rand() > self.prob:
+            return inp, target
+        noise = np.empty_like(inp)
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        for c in channels:
+            noise[c] = self.noise_generator(shape=inp[c].shape)
+        noisy_inp = inp + noise
+        return noisy_inp, target
+
+
+
 class RandomCrop:
     def __init__(self, size: Sequence[int]):
         # TODO: support random state
@@ -426,6 +482,131 @@ class RandomCrop:
             full_slice = full_slice[1:]  # Remove C axis from slice because target doesn't have it
         target_cropped = target[full_slice]
         return inp_cropped, target_cropped
+
+
+class ElasticTransform:
+    """
+    Based on https://gist.github.com/fmder/e28813c1e8721830ff9c
+
+
+    Elastic deformation of images as described in [Simard2003]_.
+    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
+       Convolutional Neural Networks applied to Visual Document Analysis", in
+       Proc. of the International Conference on Document Analysis and
+       Recognition, 2003.
+
+        Args:
+            sigma: Sigma parameter of the gaussian distribution from which
+                the local displacements are drawn.
+            alpha: Factor by which all random displacements are multiplied.
+            channels: If ``channels`` is ``None``, the change is applied to
+                all channels of the input tensor.
+                If ``channels`` is a ``Sequence[int]``, change is only applied
+                to the specified channels.
+            prob: probability (between 0 and 1) with which to perform this
+                augmentation. The input is returned unmodified with a probability
+                of ``1 - prob``
+            target_discrete_ix: list
+                List of target channels that contain discrete values.
+                By default (``None``), every channel is is seen as discrete (this is
+                generally the case for classification tasks).
+                This information is used to decide what kind of interpolation should
+                be used for reading target data:
+
+                    - discrete targets are obtained by nearest-neighbor interpolation
+                    - non-discrete (continuous) targets are linearly interpolated.
+
+        The input image should be of dimensions (C, H, W) or (C, D, H, W).
+        C must be included.
+
+    """
+
+    def __init__(
+            self,
+            sigma: float = 4,
+            alpha: float = 10,
+            channels: Optional[Sequence[int]] = None,
+            prob: float = 0.25,
+            target_discrete_ix: Optional[list]= None,
+
+    ):
+        self.sigma = sigma
+        self.alpha = alpha
+        self.channels = channels
+        self.prob = prob
+        self.target_discrete_ix = target_discrete_ix
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None
+
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        if np.random.rand() > self.prob:
+            return inp, target
+
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+
+        # TODO (low priority): This could be written for n-d without explicit dimensions.
+        if inp.ndim == 4:
+            shape = inp[0].shape
+            if inp.shape[-3:] != target.shape[-3:]:
+                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
+            dz = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
+            indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+        elif inp.ndim == 3:
+            shape = inp[0].shape
+            if inp.shape[-2:] != target.shape[-2:]:
+                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
+            dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
+            indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
+        else:
+            raise ValueError("Input dimension not understood!")
+
+        deformed_img = np.empty_like(inp)
+        for c in channels:
+            deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
+
+        if target is None:
+            return deformed_img, target
+        else:
+            target_c = True  # True if the first dim of target is the number of channels
+            if target.ndim == 4:  # (C, D, H, W)
+                target_channels = target.shape[0]
+                target_shape = target[0].shape
+            elif target.ndim == 3:  # (C, H, W) or (D, H, W)
+                if inp.ndim == 3:  # (C, H, W)
+                    target_channels = target.shape[0]
+                    target_shape = target[0].shape
+                elif inp.ndim == 4:  # (D, H, W)
+                    target_c = False
+                    target_channels = 1
+                    target_shape = target.shape
+                else:
+                    raise ValueError("Input dimension not understood!")
+            else:
+                raise ValueError("Target dimension not understood!")
+
+            if self.target_discrete_ix is None:
+                self.target_discrete_ix = [True for i in range(target_channels)]
+            else:
+                self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
+
+            deformed_target = np.empty_like(target)
+            if target_c:
+                for tc in range(target_channels):
+                    target_order = 0 if self.target_discrete_ix[tc] is True else 1
+                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order).reshape(target_shape)
+            else:
+                target_order = 0 if self.target_discrete_ix[0] is True else 1
+                deformed_target = map_coordinates(target, indices, order=target_order).reshape(target_shape)
+
+            return deformed_img, deformed_target
 
 
 class SqueezeTarget:
