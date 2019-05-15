@@ -316,23 +316,27 @@ class RandomGrayAugment:
         return aug, target
 
 
-# TODO: [Random]GaussianBlur
 class RandomGaussianBlur:
     """Adds random gaussian blur to the input.
-        Args:
-            sigma:Sigma parameter of the HalfNormal distribution to draw from
-            prob: probability (between 0 and 1) with which to perform this
-                augmentation. The input is returned unmodified with a probability
-                of ``1 - prob``.
-            rng: Optional random state for deterministic execution
-            aniso_factor: a tuple or an array to apply the anisotropy, must
-                match the dimension of the input
 
-        """
+    Args:
+        distsigma: Sigma parameter of the half-normal distribution from
+            which sigmas for the gaussian blurring are drawn.
+            To clear up possible confusion: The ``distsigma`` parameter does
+            **not** directly parametrize the gaussian blurring, but the
+            random distribution from which the blurring sigmas are drawn
+            from.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``.
+        rng: Optional random state for deterministic execution.
+        aniso_factor: a tuple or an array to apply the anisotropy, must
+            match the dimension of the input.
+    """
 
     def __init__(
             self,
-            sigma: float = 1,
+            distsigma: float = 1,
             channels: Optional[Sequence[int]] = None,
             prob: float = 1.0,
             rng: Optional[np.random.RandomState] = None,
@@ -343,16 +347,10 @@ class RandomGaussianBlur:
         self.channels = channels
         self.prob = prob
         self.rng = np.random.RandomState() if rng is None else rng
-        self.gaussian_std= HalfNormal(sigma=sigma, rng=rng)
-        self.aniso_factor = (1,1,1) if aniso_factor is None or aniso_factor == 1.0 else aniso_factor
-
-        if aniso_factor  is not None:
-            if isinstance(aniso_factor, (list, tuple)):
-                self.aniso_factor = np.array(aniso_factor)
-            elif isinstance(aniso_factor, np.ndarray):
-                self.aniso_factor = aniso_factor
-            else:
-                raise ValueError("aniso_factor not understood")
+        self.gaussian_std = HalfNormal(sigma=distsigma, rng=rng)
+        if aniso_factor is None or aniso_factor == 1:
+            aniso_factor = np.array([1, 1, 1])
+        self.aniso_factor = aniso_factor
 
     def __call__(
             self,
@@ -366,9 +364,7 @@ class RandomGaussianBlur:
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         blurred_inp = np.empty_like(inp)
         for c in channels:
-            shape = inp[c].shape
-            if inp[c].ndim ==2:
-                self.aniso_factor = (self.aniso_factor[0], self.aniso_factor[1])
+            self.aniso_factor = self.aniso_factor[:inp[c].ndim]
             sigma = self.gaussian_std(shape=inp[c].ndim)
             aniso_sigma = np.divide(sigma, self.aniso_factor)
             blurred_inp[c] = gaussian_filter(inp[c], sigma=aniso_sigma)
@@ -508,8 +504,9 @@ class ElasticTransform:
        Recognition, 2003.
 
         Args:
-            sigma: Sigma parameter of the gaussian distribution to draw from
-            alpha: Strength of the elastic transform
+            sigma: Sigma parameter of the gaussian distribution from which
+                the local displacements are drawn.
+            alpha: Factor by which all random displacements are multiplied.
             rng: Optional random state for deterministic execution
             channels: If ``channels`` is ``None``, the change is applied to
                 all channels of the input tensor.
@@ -555,13 +552,13 @@ class ElasticTransform:
             inp: np.ndarray,
             target: Optional[np.ndarray] = None
 
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         if self.rng.rand() > self.prob:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
 
-
+        # TODO (low priority): This could be written for n-d without explicit dimensions.
         if inp.ndim == 4:
             shape = inp[0].shape
             if inp.shape[-3:] != target.shape[-3:]:
@@ -571,7 +568,6 @@ class ElasticTransform:
             dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
             z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
             indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
-
         elif inp.ndim == 3:
             shape = inp[0].shape
             if inp.shape[-2:] != target.shape[-2:]:
@@ -580,9 +576,8 @@ class ElasticTransform:
             dx = gaussian_filter((self.rng.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
             y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
             indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
-
         else:
-            raise ValueError("Image dimension not understood!")
+            raise ValueError("Input dimension not understood!")
 
         deformed_img = np.empty_like(inp)
         for c in channels:
@@ -603,6 +598,10 @@ class ElasticTransform:
                     target_c = False
                     target_channels = 1
                     target_shape = target.shape
+                else:
+                    raise ValueError("Input dimension not understood!")
+            else:
+                raise ValueError("Target dimension not understood!")
 
             if self.target_discrete_ix is None:
                 self.target_discrete_ix = [True for i in range(target_channels)]
@@ -613,7 +612,7 @@ class ElasticTransform:
             if target_c:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
-                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order ).reshape(target_shape)
+                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order).reshape(target_shape)
             else:
                 target_order = 0 if self.target_discrete_ix[0] is True else 1
                 deformed_target = map_coordinates(target, indices, order=target_order).reshape(target_shape)
