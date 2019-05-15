@@ -18,6 +18,7 @@ you can wrap it as follows to make it work with this module:
 
 This limitation might be lifted some day, but it's currently low priority.
 """
+# TODO: Revise the note above. Valid convolutions are supported now.
 
 import torch
 

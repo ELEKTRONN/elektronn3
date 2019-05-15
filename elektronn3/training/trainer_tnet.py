@@ -4,7 +4,8 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
 
-# NOTE: This module is currently not maintained. We should probably put this somewhere else.
+# TODO: This module needs to be adapted to recent Trainer changes.
+#       It might not work as intended in this current state.
 
 import os
 import traceback
@@ -20,6 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
+from .handlers import _get_batch2img_function, plot_image
 from PIL import Image
 import io
 
@@ -99,7 +101,7 @@ class TripletNetTrainer(Trainer):
                     target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
                     target = Variable(target)
                     loss = self.criterion(dA, dB, target)
-                    L_l2 = torch.mean(torch.cat((z0.norm(2, dim=1), z1.norm(2, dim=1), z2.norm(2, dim=1)), dim=0))
+                    L_l2 = torch.mean(torch.cat((z0.norm(1, dim=1), z1.norm(1, dim=1), z2.norm(1, dim=1)), dim=0))
                     misc['G_loss_l2'] += self.alpha * float(L_l2)
                     loss = loss + self.alpha * L_l2
                     misc['G_loss_tnet'] += (1 - self.alpha2) * float(loss)  # log actual loss
@@ -146,10 +148,10 @@ class TripletNetTrainer(Trainer):
 
 
                         # # clean and report
-                        L_discr.detach_()
-                        L_advreg.detach_()
-                        L_real_gauss.detach_()
-                        L_fake_gauss.detach_()
+                        L_discr.detach()
+                        L_advreg.detach()
+                        L_real_gauss.detach()
+                        L_fake_gauss.detach()
                         stats['tr_loss_D'] += float(L_discr)
                         misc['G_loss_advreg'] += self.alpha2 * float(L_advreg) # log actual part of advreg
                         misc['D_loss_real'] += float(L_real_gauss)
@@ -161,15 +163,15 @@ class TripletNetTrainer(Trainer):
 
                     latent_points_fake.append(z_fake_gauss.detach().cpu().numpy())
                     # # Prevent accidental autograd overheads after optimizer step
-                    inp.detach_()
-                    target.detach_()
-                    dA.detach_()
-                    dB.detach_()
-                    z0.detach_()
-                    z1.detach_()
-                    z2.detach_()
-                    loss.detach_()
-                    L_l2.detach_()
+                    inp.detach()
+                    target.detach()
+                    dA.detach()
+                    dB.detach()
+                    z0.detach()
+                    z1.detach()
+                    z2.detach()
+                    loss.detach()
+                    L_l2.detach()
 
                     # get training performance
                     stats['tr_loss_G'] += float(loss)
@@ -179,9 +181,9 @@ class TripletNetTrainer(Trainer):
                     self._tracker.update_timeline([self._timer.t_passed, float(loss), mean_target])
 
                     # Preserve training batch and network output for later visualization
-                    images['inp_ref'] = inp0
-                    images['inp_+'] = inp1
-                    images['inp_-'] = inp2
+                    images['inp_ref'] = inp0.cpu().numpy()
+                    images['inp_+'] = inp1.cpu().numpy()
+                    images['inp_-'] = inp2.cpu().numpy()
                     # this was changed to support ReduceLROnPlateau which does not implement get_lr
                     misc['learning_rate_G'] = self.optimizer.param_groups[0]["lr"] # .get_lr()[-1]
                     misc['learning_rate_D'] = self.optimizer_discr.param_groups[0]["lr"] # .get_lr()[-1]
@@ -214,7 +216,7 @@ class TripletNetTrainer(Trainer):
                 if (self.valid_dataset is None) or (1 != np.random.randint(0, 10)): # only validate 10% of the times
                     stats['val_loss_G'], stats['val_err_G'] = float('nan'), float('nan')
                 else:
-                    stats['val_loss_G'], stats['val_err_G'] = self.validate()
+                    stats['val_loss_G'], stats['val_err_G'] = self._validate()
                 # TODO: Report more metrics, e.g. dice error
 
                 # Update history tracker (kind of made obsolete by tensorboard)
@@ -241,12 +243,9 @@ class TripletNetTrainer(Trainer):
 
                 # Reporting to tensorboard logger
                 if self.tb:
-                    self.tb_log_scalars(stats, 'stats')
-                    self.tb_log_scalars(misc, 'misc')
-                    if self.previews_enabled:
-                        self.tb_log_preview()
+                    self._tb_log_scalars(stats, 'stats')
+                    self._tb_log_scalars(misc, 'misc')
                     self.tb_log_sample_images(images, group='tr_samples')
-                    self.tb.writer.flush()
 
                 # save histrograms
                 if len(latent_points_fake) > 0:
@@ -256,8 +255,8 @@ class TripletNetTrainer(Trainer):
                     #                          'latent_fake_{}.png'.format(self.step)))
                     fig.canvas.draw()
                     img_data = np.array(fig.canvas.renderer._renderer)
-                    self.tb.log_image(f'latent_distr/latent_fake', img_data,
-                                      step=self.step)
+                    self.tb.add_figure(f'latent_distr/latent_fake', plot_image(img_data),
+                                       global_step=self.step)
                     plt.close()
 
                 if len(latent_points_real) > 0:
@@ -267,15 +266,11 @@ class TripletNetTrainer(Trainer):
                     #                          'latent_real_{}.png'.format(self.step)))
                     fig.canvas.draw()
                     img_data = np.array(fig.canvas.renderer._renderer)
-                    self.tb.log_image(f'latent_distr/latent_real', img_data,
-                                      step=self.step)
+                    self.tb.add_figure(f'latent_distr/latent_real', plot_image(img_data),
+                                       global_step=self.step)
                     plt.close()
 
-
-
-
                     # grab the pixel buffer and dump it into a numpy array
-
 
                 # Save trained model state
                 torch.save(
@@ -297,7 +292,7 @@ class TripletNetTrainer(Trainer):
                     # Just print the traceback and try to carry on with training.
                     # This can go wrong in unexpected ways, so don't leave the training unattended.
                     pass
-                elif self.ipython_on_error:
+                elif self.ipython_shell:
                     print("\nEntering Command line such that Exception can be "
                           "further inspected by user.\n\n")
                     IPython.embed(header=self._shell_info)
@@ -309,6 +304,14 @@ class TripletNetTrainer(Trainer):
             self.model.state_dict(),
             os.path.join(self.save_path, f'model-final-{self.step:06d}.pth')
         )
+
+    def _tb_log_scalars(
+            self,
+            scalars: Dict[str, float],
+            tag: str = 'default'
+    ) -> None:
+        for key, value in scalars.items():
+            self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     def _validate(self) -> Tuple[float, float]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
@@ -328,7 +331,9 @@ class TripletNetTrainer(Trainer):
         val_loss /= len(self.valid_loader)  # loss function already averages over batch size
         val_err = incorrect / len(self.valid_loader)
         self.tb_log_sample_images(
-            {'inp_ref': inp0, 'inp_+': inp1, 'inp_-': inp2},
+            {'inp_ref': inp0.detach().cpu().numpy(),
+             'inp_+': inp1.detach().cpu().numpy(),
+             'inp_-': inp2.detach().cpu().numpy()},
             group='val_samples'
         )
 
@@ -340,7 +345,7 @@ class TripletNetTrainer(Trainer):
     # TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
     def tb_log_sample_images(
             self,
-            images: Dict[str, torch.Tensor],
+            images: Dict[str, np.ndarray],
             z_plane: Optional[int] = None,
             group: str = 'sample'
     ) -> None:
@@ -352,15 +357,18 @@ class TripletNetTrainer(Trainer):
         Note: Training images are possibly augmented, so the plots may look
             distorted/weirdly colored.
         """
-        batch2img_ref = self._get_batch2img_function(images['inp_ref'], z_plane)
-        batch2img_neg = self._get_batch2img_function(images['inp_-'], z_plane)
-        batch2img_pos = self._get_batch2img_function(images['inp_+'], z_plane)
+        batch2img_ref = _get_batch2img_function(images['inp_ref'], z_plane)
+        batch2img_neg = _get_batch2img_function(images['inp_-'], z_plane)
+        batch2img_pos = _get_batch2img_function(images['inp_+'], z_plane)
         inp_ref = batch2img_ref(images['inp_ref'])[0]
         inp_neg = batch2img_neg(images['inp_-'])[0]
         inp_pos = batch2img_pos(images['inp_+'])[0]
-        self.tb.log_image(f'{group}/inp_ref', inp_ref, step=self.step, cmap='gray')
-        self.tb.log_image(f'{group}/inp_-', inp_neg, step=self.step, cmap='gray')
-        self.tb.log_image(f'{group}/inp_+', inp_pos, step=self.step, cmap='gray')
+        self.tb.add_figure(f'{group}/inp_ref', plot_image(inp_ref, cmap='gray'),
+                           global_step=self.step)
+        self.tb.add_figure(f'{group}/inp_-', plot_image(inp_neg, cmap='gray'),
+                           global_step=self.step)
+        self.tb.add_figure(f'{group}/inp_+', plot_image(inp_pos, cmap='gray'),
+                           global_step=self.step)
 
 
 def calculate_error(dista, distb):

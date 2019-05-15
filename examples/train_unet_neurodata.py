@@ -8,13 +8,13 @@
 
 import argparse
 import os
+import random
 import _pickle
 
 import torch
 from torch import nn
 from torch import optim
-
-# TODO: Make torch and numpy RNG seed configurable
+import numpy as np
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -45,7 +45,23 @@ parser.add_argument(
 "onsave": Use regular Python model for training, but trace it on-demand for saving training state;
 "train": Use traced model for training and serialize it on disk"""
 )
+parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument(
+    '--deterministic', action='store_true',
+    help='Run in fully deterministic mode (at the cost of execution speed).'
+)
 args = parser.parse_args()
+
+# Set up all RNG seeds, set level of determinism
+random_seed = args.seed
+torch.manual_seed(random_seed)
+np.random.seed(random_seed)
+random.seed(random_seed)
+deterministic = args.deterministic
+if deterministic:
+    torch.backends.cudnn.deterministic = True
+else:
+    torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 if not args.disable_cuda and torch.cuda.is_available():
     device = torch.device('cuda')
@@ -59,12 +75,11 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
-from elektronn3.training import Trainer, Backup, metrics, Padam
-from elektronn3.modules import DiceLoss
+from elektronn3.training import Trainer, Backup, metrics
+from elektronn3.training import CosineAnnealingWarmRestarts, SWA
+from elektronn3.modules import DiceLoss, CombinedLoss
 from elektronn3.models.unet import UNet
 
-
-torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
 model = UNet(
     n_blocks=4,
@@ -125,12 +140,17 @@ else:  # Use publicly available neuro_data_cdhw dataset
     dataset_std = (42.599973,)
     class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
+# TODO: Recalculate above class_weights with mode='inverse'
+
 max_steps = args.max_steps
 max_runtime = args.max_runtime
 
+optimizer_state_dict = None  # If a state dict is available, this will be filled with it
 if args.resume is not None:  # Load pretrained network
     try:  # Assume it's a state_dict for the model
-        model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
+        state_dict = torch.load(os.path.expanduser(args.resume))
+        model.load_state_dict(state_dict['model_state_dict'])
+        optimizer_state_dict = state_dict['optimizer_state_dict']
     except _pickle.UnpicklingError as exc:
         # Assume it's a complete saved ScriptModule
         model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
@@ -188,12 +208,14 @@ preview_batch = get_preview_batch(
     transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
 
-optimizer = Padam(
+optimizer = optim.SGD(
     model.parameters(),
     lr=0.1,
     weight_decay=0.5e-4,
-    partial=1/4,
 )
+optimizer = SWA(optimizer)
+if optimizer_state_dict is not None:
+    optimizer.load_state_dict(optimizer_state_dict)
 
 # All these metrics assume a binary classification problem. If you have
 #  non-binary targets, remember to adapt the metrics!
@@ -208,8 +230,10 @@ valid_metrics = {
 }
 
 
-# criterion = nn.CrossEntropyLoss(weight=class_weights)
-criterion = DiceLoss(apply_softmax=True, weight=class_weights)
+# crossentropy = nn.CrossEntropyLoss(weight=class_weights)
+dice = DiceLoss(apply_softmax=True, weight=class_weights)
+# criterion = CombinedLoss([crossentropy, dice], weight=[1., 1.], device=device)
+criterion = dice
 
 # Create trainer
 trainer = Trainer(
@@ -225,11 +249,13 @@ trainer = Trainer(
     exp_name=args.exp_name,
     example_input=example_input,
     enable_save_trace=enable_save_trace,
-    # schedulers={"lr": optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)},
+    schedulers={'lr': CosineAnnealingWarmRestarts(
+        optimizer, T_0=10000, eta_min=1e-6, T_mult=1.5
+    )},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
-    # enable_videos=False,  # Uncomment to get rid of videos in tensorboard
+    # enable_videos=True,  # Uncomment to enable videos in tensorboard
     offset=train_dataset.offset,
     apply_softmax_for_prediction=True,
     num_classes=train_dataset.num_classes,

@@ -393,4 +393,4 @@ def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
 
     except ValueError:
         # When arrays are empty
-        logger.warning("An error occurred during plotting.")
+        logger.exception("An error occurred during plotting.")

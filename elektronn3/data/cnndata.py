@@ -186,10 +186,6 @@ class PatchCreator(data.Dataset):
         self.transform = transform
 
         # Setup internal stuff
-        # TODO: Support custom rng for better reproducibility
-        self.rng = np.random.RandomState(
-            np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
-        )
         self.pid = os.getpid()
 
         # The following fields will be filled when reading data
@@ -212,7 +208,6 @@ class PatchCreator(data.Dataset):
         #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
-        self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
         warp_prob = self.warp_prob
         while True:
@@ -235,7 +230,9 @@ class PatchCreator(data.Dataset):
                         'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
                     )
                 continue
-            # TODO: Actually find out what's causing those.
+            except coord_transforms.WarpingSanityError:
+                logger.exception('Invalid coordinate values encountered while warping. Retrying...')
+                continue
             except OSError:
                 if self.n_read_failures > self.n_successful_warp:
                     logger.error(
@@ -286,16 +283,6 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp, self.n_failed_warp,
             float(self.n_successful_warp)/(self.n_failed_warp+self.n_successful_warp))
 
-    def _reseed(self) -> None:
-        """Reseeds the rng if the process ID has changed!"""
-        current_pid = os.getpid()
-        if current_pid != self.pid:
-            logger.debug(f'New worker process started (PID {current_pid})')
-            self.pid = current_pid
-            self.rng.seed(
-                np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
-            )
-
     def warp_cut(
             self,
             inp_src: h5py.Dataset,
@@ -340,7 +327,7 @@ class PatchCreator(data.Dataset):
         if (warp_prob is True) or (warp_prob == 1):  # always warp
             do_warp = True
         elif 0 < warp_prob < 1:  # warp only a fraction of examples
-            do_warp = True if (self.rng.rand() < warp_prob) else False
+            do_warp = True if (np.random.rand() < warp_prob) else False
         else:  # never warp
             do_warp = False
 
@@ -354,7 +341,6 @@ class PatchCreator(data.Dataset):
             aniso_factor=self.aniso_factor,
             target_src_shape=target_src.shape,
             target_patch_shape=self.target_patch_size,
-            rng=self.rng,
             **warp_kwargs
         )
 
@@ -375,7 +361,7 @@ class PatchCreator(data.Dataset):
         or randomly on valid data
         """
         if self.train:
-            p = self.rng.rand()
+            p = np.random.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
             inp_source, target_source = self.inputs[i], self.targets[i]
         else:
@@ -383,7 +369,7 @@ class PatchCreator(data.Dataset):
                 raise ValueError("No validation set")
 
             # TODO: Sampling weight for validation data?
-            i = self.rng.randint(0, len(self.inputs))
+            i = np.random.randint(0, len(self.inputs))
             inp_source, target_source = self.inputs[i], self.targets[i]
 
         return inp_source, target_source
@@ -439,16 +425,23 @@ class PatchCreator(data.Dataset):
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]#[:, 50:-50, 100:-100, 100:-100]
-            target_h5 = h5py.File(target_fname, 'r')[target_key]
+            inp_h5_file = h5py.File(inp_fname, 'r')
+            inp_h5_data = inp_h5_file[inp_key]#[:, 50:-50, 100:-100, 100:-100]
+            target_h5_file = h5py.File(target_fname, 'r')
+            target_h5_data = target_h5_file[target_key]
             if self.in_memory:
-                inp_h5 = inp_h5.value
-                target_h5 = target_h5.value
+                # Get copies of the dataset contents as in-memory numpy arrays
+                inp_h5_val = inp_h5_data[()]
+                inp_h5_file.close()
+                inp_h5_data = inp_h5_val
+                target_h5_val = target_h5_data[()]
+                target_h5_file.close()
+                target_h5_data = target_h5_val
 
-            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
-            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
-            inp_h5sets.append(inp_h5)
-            target_h5sets.append(target_h5)
+            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
+            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
+            inp_h5sets.append(inp_h5_data)
+            target_h5sets.append(target_h5_data)
         print()
 
         return inp_h5sets, target_h5sets

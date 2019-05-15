@@ -13,16 +13,14 @@ class RandomSampler:
             rv: scipy.stats.rv_continuous,
             shape: Tuple[int, ...] = (),
             bounds: Optional[Tuple[float, float]] = None,
-            rng: Optional[np.random.RandomState] = None
     ):
         self.rv = rv
         self.shape = shape
         self.bounds = bounds
-        self.rng = np.random.RandomState() if rng is None else rng
 
     def __call__(self, shape=None):
         shape = self.shape if shape is None else shape
-        rand = self.rv.rvs(size=shape, random_state=self.rng)
+        rand = self.rv.rvs(size=shape)
         if self.bounds is not None:
             lo, hi = self.bounds
             rand = np.clip(rand, lo, hi)
@@ -37,10 +35,9 @@ class Normal(RandomSampler):
             sigma: float = 1,
             shape: Tuple[int, ...] = (),
             bounds: Optional[Tuple[float, float]] = None,
-            rng: Optional[np.random.RandomState] = None
     ):
         rv = scipy.stats.norm(loc=mean, scale=sigma)
-        super().__init__(rv=rv, shape=shape, bounds=bounds, rng=rng)
+        super().__init__(rv=rv, shape=shape, bounds=bounds)
 
 
 class HalfNormal(RandomSampler):
@@ -53,10 +50,9 @@ class HalfNormal(RandomSampler):
             sigma: float = 1,
             shape: Tuple[int, ...] = (),
             bounds: Optional[Tuple[float, float]] = None,
-            rng: Optional[np.random.RandomState] = None
     ):
         rv = scipy.stats.halfnorm(loc=0, scale=sigma)
-        super().__init__(rv=rv, shape=shape, bounds=bounds, rng=rng)
+        super().__init__(rv=rv, shape=shape, bounds=bounds)
 
 
 class RandInt(RandomSampler):
@@ -71,7 +67,6 @@ class RandInt(RandomSampler):
             low: int = 0,
             high: int = 2,
             shape: Tuple[int, ...] = (),
-            rng: Optional[np.random.RandomState] = None
     ):
         rv = scipy.stats.randint(low=low, high=high)
-        super().__init__(rv=rv, shape=shape, rng=rng, bounds=None)
+        super().__init__(rv=rv, shape=shape, bounds=None)

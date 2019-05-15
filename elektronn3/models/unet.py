@@ -200,33 +200,35 @@ class UNet(nn.Module):
 
 
     Modifications to the original paper (@jaxony):
-    (1) Padding is used in size-3-convolutions to prevent loss
-        of border pixels.
-    (2) Merging outputs does not require cropping due to (1).
-    (3) Residual connections can be used by specifying
-        UNet(merge_mode='add').
-    (4) If non-parametric upsampling is used in the decoder
-        pathway (specified by upmode='upsample'), then an
-        additional 1x1 convolution occurs after upsampling
-        to reduce channel dimensionality by a factor of 2.
-        This channel halving happens with the convolution in
-        the tranpose convolution (specified by upmode='transpose').
+
+    - Padding is used in size-3-convolutions to prevent loss
+      of border pixels.
+    - Merging outputs does not require cropping due to (1).
+    - Residual connections can be used by specifying
+      UNet(merge_mode='add').
+    - If non-parametric upsampling is used in the decoder
+      pathway (specified by upmode='upsample'), then an
+      additional 1x1 convolution occurs after upsampling
+      to reduce channel dimensionality by a factor of 2.
+      This channel halving happens with the convolution in
+      the tranpose convolution (specified by upmode='transpose').
 
     Additional modifications (@mdraw):
-    (5) Operates on 3D image data (5D tensors) instead of 2D data
-    (6) Uses 3D convolution, 3D pooling etc. by default
-    (7) Each network block pair (the two corresponding submodules in the
-        encoder and decoder pathways) can be configured to either work
-        in 3D or 2D mode (3D/2D convolution, pooling etc.)
-        with the `planar_blocks` parameter.
-        This is helpful for dealing with data anisotropy (commonly the
-        depth axis has lower resolution in SBEM data sets, so it is not
-        as important for convolution/pooling) and can reduce the complexity of
-        models (parameter counts, speed, memory usage etc.).
-        Note: If planar blocks are used, the input patch size should be
-        adapted by reducing depth and increasing height and width of inputs.
-    (8) Configurable activation function.
-    (9) Optional batch normalization
+
+    - Operates on 3D image data (5D tensors) instead of 2D data
+    - Uses 3D convolution, 3D pooling etc. by default
+    - Each network block pair (the two corresponding submodules in the
+      encoder and decoder pathways) can be configured to either work
+      in 3D or 2D mode (3D/2D convolution, pooling etc.)
+      with the `planar_blocks` parameter.
+      This is helpful for dealing with data anisotropy (commonly the
+      depth axis has lower resolution in SBEM data sets, so it is not
+      as important for convolution/pooling) and can reduce the complexity of
+      models (parameter counts, speed, memory usage etc.).
+      Note: If planar blocks are used, the input patch size should be
+      adapted by reducing depth and increasing height and width of inputs.
+    - Configurable activation function.
+    - Optional batch normalization
 
     Args:
         in_channels: Number of input channels
@@ -238,6 +240,7 @@ class UNet(nn.Module):
             in the encoder pathway. The decoder (upsampling/upconvolution)
             pathway will consist of `n_blocks - 1` blocks.
             Increasing `n_blocks` has two major effects:
+
             - The network will be deeper
               (n + 1 -> 4 additional convolution layers)
             - Since each block causes one additional downsampling, more
@@ -246,6 +249,7 @@ class UNet(nn.Module):
               (n + 1 -> receptive field is approximately doubled in each
                   dimension, except in planar blocks, in which it is only
                   doubled in the H and W image dimensions)
+
             **Important note**: Always make sure that the spatial shape of
             your input is divisible by the number of blocks, because
             else, concatenating downsampled features will fail.
@@ -254,6 +258,7 @@ class UNet(nn.Module):
             choice of `merge_mode`.
         up_mode: Upsampling method in the decoder pathway.
             Choices:
+
             - 'transpose' (default): Use transposed convolution
               ("Upconvolution")
             - 'resizeconv_nearest': Use resize-convolution with nearest-
@@ -268,10 +273,12 @@ class UNet(nn.Module):
         merge_mode: How the features from the encoder pathway should
             be combined with the decoder features.
             Choices:
+
             - 'concat' (default): Concatenate feature maps along the
               `C` axis, doubling the number of filters each block.
             - 'add': Directly add feature maps (like in ResNets).
               The number of filters thus stays constant in each block.
+
             Note: According to https://arxiv.org/abs/1701.03056, feature
             concatenation ('concat') generally leads to better model
             accuracy than 'add' in typical medical image segmentation
@@ -292,12 +299,13 @@ class UNet(nn.Module):
         activation: Name of the non-linear activation function that should be
             applied after each network layer.
             Choices (see https://arxiv.org/abs/1505.00853 for details):
+
             - 'relu' (default)
             - 'leaky': Leaky ReLU (slope 0.1)
             - 'prelu': Parametrized ReLU. Best for training accuracy, but
-                tends to increase overfitting.
+              tends to increase overfitting.
             - 'rrelu': Can improve generalization at the cost of training
-                accuracy.
+              accuracy.
             - Or you can pass an nn.Module instance directly, e.g.
               ``activation=torch.nn.ReLU()``
         batch_norm: If batch normalization should be applied at the end of
@@ -307,6 +315,7 @@ class UNet(nn.Module):
             but it delivers better results this way
             (see https://redd.it/67gonq).
         dim: Spatial dimensionality of the network. Choices:
+
             - 3 (default): 3D mode. Every block fully works in 3D unless
               it is excluded by the ``planar_blocks`` setting.
               The network expects and operates on 5D input tensors
@@ -314,6 +323,7 @@ class UNet(nn.Module):
             - 2: Every block and every operation works in 2D, expecting
               4D input tensors (N, C, H, W).
         conv_mode: Padding mode of convolutions. Choices:
+
             - 'same' (default): Use SAME-convolutions in every layer:
               zero-padding inputs so that all convolutions preserve spatial
               shapes and don't produce an offset at the boundaries.
@@ -323,13 +333,14 @@ class UNet(nn.Module):
               are automatically cropped to compatible shapes so they can be
               merged with decoder features.
               Advantages:
+
               - Less resource consumption than SAME because feature maps
                 have reduced sizes especially in deeper layers.
               - No "fake" data (that is, the zeros from the SAME-padding)
                 is fed into the network. The output regions that are influenced
                 by zero-padding naturally have worse quality, so they should
                 be removed in post-processing if possible (see
-                ``overlap_shape`` in `py:mod:`elektronn3.inference`).
+                ``overlap_shape`` in :py:mod:`elektronn3.inference`).
                 Using VALID convolutions prevents the unnecessary computation
                 of these regions that need to be cut away anyways for
                 high-quality tiled inference.
@@ -340,7 +351,9 @@ class UNet(nn.Module):
                 complexity of the learning task and allow the network to
                 specialize better on understanding the actual, unaltered
                 inputs (effectively requiring less parameters to fit).
+
               Disadvantages:
+
               - Using this mode poses some additional constraints on input
                 sizes and requires you to center-crop your targets,
                 so it's harder to use in practice than the 'same' mode.

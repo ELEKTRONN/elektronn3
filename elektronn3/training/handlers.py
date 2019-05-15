@@ -82,6 +82,8 @@ def _get_batch2img_function(
         return lambda x: x[0, :, z_plane]
     elif batch.ndim == 4:  # (N, C, H, W)
         return lambda x: x[0, :]
+    elif batch.ndim == 2:  # (N, C) -> img2scalar
+        return lambda x: x[None, ]  # (1, N, C)  -> Image will show N x C probabilities
     else:
         raise ValueError('Only 4D and 5D tensors are supported.')
 
@@ -111,7 +113,9 @@ def _tb_log_preview(
     #       spatial shape as the input if it comes out of
     #       elektronn3.inference.Predictor...
     #       We probably need to move the padding code to the Predictor itself.
-    if out_batch.shape[2:] != inp_batch.shape[2:]:
+
+    if (out_batch.shape[2:] != inp_batch.shape[2:]) \
+            and not (out_batch.ndim == 2):
         # Zero-pad output and target to match input shape
         # Create a central slice with the size of the output
         lo = (inp_sh - out_sh) // 2
@@ -190,11 +194,13 @@ def _tb_log_sample_images(
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
+    batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
 
-    inp_slice = batch2img(images['inp'])[0]
+    inp_slice = batch2img_inp(images['inp'])[0]
 
     # TODO: Support one-hot targets
-    # Check if the network is being trained for classification
+    # TODO: Support multi-label targets
+    # Check if the network is being trained for classification with class index target tensors
     is_classification = target_batch.ndim == out_batch.ndim - 1
     # If it's not classification, we assume a regression scenario
     is_regression = np.all(target_batch.shape == out_batch.shape)
@@ -209,7 +215,8 @@ def _tb_log_sample_images(
 
     inp_sh = np.array(inp_batch.shape[2:])
     out_sh = np.array(out_batch.shape[2:])
-    if out_batch.shape[2:] != inp_batch.shape[2:]:
+    if out_batch.shape[2:] != inp_batch.shape[2:] \
+            and not (out_batch.ndim == 2):
         # Zero-pad output and target to match input shape
         # Create a central slice with the size of the output
         lo = (inp_sh - out_sh) // 2
@@ -227,8 +234,6 @@ def _tb_log_sample_images(
         padded_target_batch = np.zeros(inp_batch.shape, dtype=target_batch.dtype)
         padded_target_batch[slc] = target_batch
         target_batch = padded_target_batch
-
-
 
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
@@ -256,6 +261,7 @@ def _tb_log_sample_images(
         inp_video = squash01(inp_batch)
         target_video = target_batch
         if target_video.ndim == 4:
+            # TODO: This fails with 2D multi-channel targets. Handle these reliably
             target_video = target_video[:, None]
         trainer.tb.add_video(
             f'{group}_vid/inp', inp_video, global_step=trainer.step
@@ -297,25 +303,28 @@ def _tb_log_sample_images(
             plot_image(pred_slice, num_classes=trainer.num_classes),
             global_step=trainer.step
         )
-
-        inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-        target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
-        pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
-        trainer.tb.add_figure(
-            f'{group}/target_overlay',
-            plot_image(target_slice_ov, colorbar=False),
-            global_step=trainer.step
-        )
-        trainer.tb.add_figure(
-            f'{group}/pred_overlay',
-            plot_image(pred_slice_ov, colorbar=False),
-            global_step=trainer.step
-        )
-        # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
-        # TODO: What's up with the colorbar in overlay plots?
-        # TODO: When plotting overlay images, they appear darker than they should.
-        #       This normalization issue gets worse with higher alpha values
-        #       (i.e. with more contribution of the overlayed label map).
-        #       Don't know how to fix this currently.
+        if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
+            inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
+            target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+            pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+            # Ensure the value range remains [0, 1]
+            target_slice_ov = np.clip(target_slice_ov, 0, 1)
+            pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
+            trainer.tb.add_figure(
+                f'{group}/target_overlay',
+                plot_image(target_slice_ov, colorbar=False),
+                global_step=trainer.step
+            )
+            trainer.tb.add_figure(
+                f'{group}/pred_overlay',
+                plot_image(pred_slice_ov, colorbar=False),
+                global_step=trainer.step
+            )
+            # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
+            # TODO: What's up with the colorbar in overlay plots?
+            # TODO: When plotting overlay images, they appear darker than they should.
+            #       This normalization issue gets worse with higher alpha values
+            #       (i.e. with more contribution of the overlayed label map).
+            #       Don't know how to fix this currently.
     elif is_regression:
         trainer.tb.add_figure(f'{group}/out', plot_image(out_slice), global_step=trainer.step)
