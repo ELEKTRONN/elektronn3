@@ -366,6 +366,8 @@ class Trainer:
         visualizations are computed and logged to tensorboard."""
         self.start_time = datetime.datetime.now()
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
+        self._lr_nhood.clear()
+        self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:
             try:
                 stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
@@ -425,8 +427,6 @@ class Trainer:
         images: Dict[str, np.ndarray] = {}
 
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
-        self._lr_nhood.clear()
-        self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target) in pbar:
@@ -439,8 +439,6 @@ class Trainer:
             dloss = self.criterion(dout, dtarget)
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
-                import IPython; IPython.embed(); raise SystemExit
-
                 raise NaNException
 
             # update step
