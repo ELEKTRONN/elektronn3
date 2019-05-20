@@ -1,4 +1,4 @@
-# This file is copied from https://github.com/pytorch/contrib/blob/c8319c6/torchcontrib/optim/swa.py
+# This file is copied from https://github.com/mdraw/contrib/blob/bdf4da5/torchcontrib/optim/swa.py
 # (C) torchcontrib authors
 # Vendored here because torchcontrib was not conda-installable as of the time of including this.
 
@@ -114,6 +114,7 @@ class SWA(Optimizer):
 
         self.optimizer = optimizer
 
+        self.defaults = self.optimizer.defaults
         self.param_groups = self.optimizer.param_groups
         self.state = defaultdict(dict)
         self.opt_state = self.optimizer.state
