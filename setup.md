@@ -42,13 +42,13 @@ following lines into it:
       - defaults
     pinned_packages:
       - python >=3.6
-      - cudatoolkit =9.*  # 10.0 might also work, but use at your own risk
+      - cudatoolkit =9.*  # Pin to a version that your GPU driver supports
       - blas >1.0  # Prevent conda from switching to mkl-blas 1.0
-      - pytorch >=1.0.1
+      - pytorch >=1.1.0
 
 The restrictive pinned_packages configuration was at least necessary for me
 because `conda update` sometimes does weird things and downgrades essential
-packages.
+packages. `pinned_packages` may not be required on your system.
 
 Creating a conda environment for elektronn3
 -------------------------------------------
