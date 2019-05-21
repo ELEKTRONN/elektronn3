@@ -210,10 +210,23 @@ preview_batch = get_preview_batch(
 
 optimizer = optim.SGD(
     model.parameters(),
-    lr=0.1,
+    lr=0,  # Learning rate is set by the lr_sched below
+    momentum=0.9,
     weight_decay=0.5e-4,
 )
-optimizer = SWA(optimizer)
+lr_sched = torch.optim.lr_scheduler.CyclicLR(
+    optimizer,
+    base_lr=1e-6,
+    max_lr=0.1,
+    step_size_up=10000,
+    step_size_down=10000,
+    cycle_momentum=True
+)
+
+# Uncomment this line for an LR range test run (-> https://arxiv.org/abs/1506.01186, sec. 3.3)
+# lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
+
+optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
 if optimizer_state_dict is not None:
     optimizer.load_state_dict(optimizer_state_dict)
 
@@ -230,10 +243,9 @@ valid_metrics = {
 }
 
 
-# crossentropy = nn.CrossEntropyLoss(weight=class_weights)
+crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
-# criterion = CombinedLoss([crossentropy, dice], weight=[1., 1.], device=device)
-criterion = dice
+criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
 
 # Create trainer
 trainer = Trainer(
@@ -249,9 +261,7 @@ trainer = Trainer(
     exp_name=args.exp_name,
     example_input=example_input,
     enable_save_trace=enable_save_trace,
-    schedulers={'lr': CosineAnnealingWarmRestarts(
-        optimizer, T_0=10000, eta_min=1e-6, T_mult=1.5
-    )},
+    schedulers={'lr': lr_sched},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
