@@ -152,31 +152,52 @@ def norpf_dice_loss(probs, target, weight=1., class_weight=1.):
     # if ignore_index is not None:
     #     weight[:, ignore_index] = 0.
 
+    if weight.sum() == 0:
+        return probs.sum() * 0
+
     ignore_mask = (1 - onehot_target[0][-1]).view(1,1,*probs.shape[2:]) # inverse ignore
 
     bg_probs = 1 - probs
     bg_target = 1 - onehot_target
     dense_weight = weight.view(1,-1,1,1,1)
-    positive_target_mask = onehot_target[0][1:-1].sum(dim=0).view(1,1,*probs.shape[2:]) # targets w\ background and ignore
+    positive_target_mask = (dense_weight * onehot_target)[0][1:-1].sum(dim=0).view(1,1,*probs.shape[2:]) # targets w\ background (0) and ignore (-1)
     target_mask_empty = ((positive_target_mask * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
     target_empty = ((onehot_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
-    # complete background for weighted classes and all class target filtered background for unweighted classes
-    bg_mask = torch.ones_like(probs) * dense_weight + positive_target_mask * (1 - dense_weight)
-
-    bg_weight = 1 - class_weight
+    bg_target_empty = ((bg_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
+    # complete background for weighted classes and target of weighted classes as background for unweighted classes
+    bg_mask = torch.ones_like(bg_probs) * dense_weight# + positive_target_mask * (1 - dense_weight)
 
     # make num/denom 1 for unweighted classes and classes with no target
     intersection = probs * onehot_target * ignore_mask * dense_weight  # (N, C, ...)
     intersection2 = bg_probs * bg_target * ignore_mask * bg_mask  # (N, C, ...)
     denominator = (probs + onehot_target) * ignore_mask * dense_weight  # (N, C, ...)
     denominator2 = (bg_probs + bg_target) * ignore_mask * bg_mask  # (N, C, ...)
-    numerator = 2 * class_weight * _channelwise_sum(intersection) + (1 - weight) + target_empty * weight  # (C,)
-    numerator2 = 2 * bg_weight * _channelwise_sum(intersection2)  # (C,)
-    denominator = class_weight * _channelwise_sum(denominator) + (1 - weight) + target_empty * weight  # (C,)
-    denominator2 = bg_weight * _channelwise_sum(denominator2)  # (C,)
-    numerator2 += (numerator2 == 0).type(numerator2.dtype) # no tp background
-    denominator2 += (denominator2 == 0).type(denominator2.dtype) # 100% tp foreground
-    denominator += (denominator == 0).type(denominator.dtype) # ???¿¿¿
+    numerator = 2 * class_weight * _channelwise_sum(intersection)  # (C,)
+    numerator2 = 2 * _channelwise_sum(intersection2)  # (C,)
+    denominator = class_weight * _channelwise_sum(denominator)  # (C,)
+    denominator2 = _channelwise_sum(denominator2)  # (C,)
+
+    # workarounds for divide by zero
+    # unweighted classes get DSC=1
+    numerator += (1 - weight)
+    denominator += (1 - weight)
+    bg_mask_empty =  ((bg_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
+    numerator2 += bg_mask_empty
+    denominator2 +=  bg_mask_empty
+    # when there is no target, DSC has no meaning and is therefore set to 1 as well
+    numerator += target_empty
+    denominator += target_empty
+    numerator2 += bg_target_empty
+    denominator2 += bg_target_empty
+
+    if (denominator == 0).sum() > 0 or (denominator2 == 0).sum() > 0:
+        print(denominator, denominator2)
+        import IPython
+        IPython.embed()
+
+    #numerator2 += (numerator2 == 0).type(numerator2.dtype) # no tp background
+    #denominator2 += (denominator2 == 0).type(denominator2.dtype) # 100% tp foreground
+    #denominator += (denominator == 0).type(denominator.dtype) # ???¿¿¿
 
     #loss_per_channel = 1 - numerator / denominator  # (C,)
     #loss_per_channel = 1 - ((numerator * denominator2 + denominator * numerator2) / (2 * denominator * denominator2))  # (C,)
@@ -190,10 +211,11 @@ def norpf_dice_loss(probs, target, weight=1., class_weight=1.):
     #weighted_loss = (weight[:-1] * loss_per_channel[:-1]).sum() / weight[:-1].sum()  # (C,)
 
     # normalize loss to [0, 1]
-    weighted_loss = loss_per_channel[1:-1].sum() / ((loss_per_channel[1:-1] > 0).sum() + (loss_per_channel[1:-1].sum() == 0))  # (C,)
-    weighted_loss *= 2
+    #weighted_loss = loss_per_channel[1:-1].sum() / ((loss_per_channel[1:-1] > 0).sum() + (loss_per_channel[1:-1].sum() == 0))  # (C,)
+    #weighted_loss *= 2
+    weighted_loss = loss_per_channel[1:-1].sum() / (class_weight[1:-1] > 0).sum()
 
-    if torch.isnan(weighted_loss):
+    if torch.isnan(weighted_loss) or  weighted_loss > 1:
         print(loss_per_channel)
         import IPython
         IPython.embed()
