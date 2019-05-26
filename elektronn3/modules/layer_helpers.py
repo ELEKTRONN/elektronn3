@@ -10,7 +10,7 @@ import copy
 
 from torch import nn
 
-from elektronn3.modules.layers import AdaptiveConv3d, AdaptiveConvTranspose3d, Identity, ResizeConv
+from elektronn3.modules.layers import AdaptiveConv3d, AdaptiveConvTranspose3d, ResizeConv
 
 
 def get_conv(dim=3, adaptive=False):
@@ -138,7 +138,7 @@ def get_activation(activation):
         elif activation == 'rrelu':
             return nn.RReLU()
         elif activation == 'lin':
-            return Identity()
+            return nn.Identity()
     else:
         # Deep copy is necessary in case of paremtrized activations
         return copy.deepcopy(activation)
