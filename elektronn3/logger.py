@@ -9,6 +9,7 @@ import logging
 import os
 import getpass
 import sys
+import uuid
 
 import colorlog
 
@@ -34,7 +35,9 @@ def logger_setup():
         lfile_formatter = logging.Formatter(
             '[%(asctime)s] [%(levelname)s]\t%(message)s',
             datefmt='%Y-%m-%d %H:%M:%S')
-        lfile_path = os.path.abspath('/tmp/{}_elektronn3.log'.format(user_name))
+        uu = uuid.uuid4()
+        # Temporary log file path, to be changed later.
+        lfile_path = os.path.abspath(f'/tmp/{user_name}_{uu}_elektronn3.log')
         lfile_level = logging.DEBUG
         lfile_handler = logging.FileHandler(lfile_path)
         lfile_handler.setLevel(lfile_level)

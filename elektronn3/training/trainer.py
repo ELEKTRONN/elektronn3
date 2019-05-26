@@ -56,6 +56,33 @@ def _worker_init_fn(worker_id: int) -> None:
     np.random.seed(worker_seed)
 
 
+# Be careful from where you call this! Not sure if this is concurrency-safe.
+def _change_log_file_to(
+        new_path: str,
+        transfer_old_logs: bool = True,
+        delete_old_file: bool = True
+) -> None:
+    """Transfer the current log file to a new location and redirect logs."""
+
+    def _get_first_file_handler() -> logging.FileHandler:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                return handler
+        return RuntimeError('logger has no FileHandler.')
+
+    # Getting the first (and presumably only) file handler
+    file_handler = _get_first_file_handler()
+    if transfer_old_logs:
+        with open(file_handler.baseFilename) as f:
+            old_logs = f.read()
+        with open(new_path, 'w') as f:
+            f.write(old_logs)
+    file_handler.close()
+    if delete_old_file:
+        os.remove(file_handler.baseFilename)
+    file_handler.baseFilename = new_path
+
+
 class Trainer:
     """ Training loop abstraction with IPython and tensorboard integration.
 
@@ -303,6 +330,7 @@ class Trainer:
                 'different combination of save_root and exp_name.'
             )
         os.makedirs(self.save_path)
+        _change_log_file_to(f'{self.save_path}/elektronn3.log')
         logger.info(f'Writing files to save_path {self.save_path}/\n')
 
         self.terminate = False
