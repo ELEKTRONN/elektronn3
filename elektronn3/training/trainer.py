@@ -368,6 +368,7 @@ class Trainer:
         visualizations are computed and logged to tensorboard."""
         self.start_time = datetime.datetime.now()
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
+        self._save_model(suffix='_initial', verbose=False)
         self._lr_nhood.clear()
         self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:

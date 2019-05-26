@@ -76,7 +76,7 @@ elektronn3.select_mpl_backend('Agg')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics
-from elektronn3.training import CosineAnnealingWarmRestarts, SWA
+from elektronn3.training import SWA
 from elektronn3.modules import DiceLoss, CombinedLoss
 from elektronn3.models.unet import UNet
 
