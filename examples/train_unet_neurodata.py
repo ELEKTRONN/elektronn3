@@ -92,7 +92,7 @@ model = UNet(
     adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
 # Example for a model-compatible input.
-example_input = torch.randn(1, 1, 32, 64, 64)
+example_input = torch.ones(1, 1, 32, 64, 64)
 
 enable_save_trace = False if args.jit == 'disabled' else True
 if args.jit == 'onsave':
