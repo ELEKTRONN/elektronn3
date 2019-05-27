@@ -679,9 +679,15 @@ class Trainer:
         state_dict_path = os.path.join(self.save_path, f'state_dict{suffix}.pth')
         model_path = os.path.join(self.save_path, f'model{suffix}.pt')
 
+        try:
+            lr_sched_state = self.schedulers['lr'].state_dict()
+        except:  # No valid scheduler in use
+            lr_sched_state = None
+
         torch.save({
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
+            'lr_sched_state_dict': lr_sched_state,
             'global_step': self.step,
             'epoch': self.epoch,
             'best_val_loss': self.best_val_loss
