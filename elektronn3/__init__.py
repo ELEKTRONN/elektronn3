@@ -19,7 +19,7 @@ def select_mpl_backend(mpl_backend):
     import matplotlib
     if mpl_backend.lower() == 'agg':
         matplotlib.use('AGG')
-        print('Using the AGG backend for matplotlib. No support for X11 windows.')
+        logger.info('Using the AGG backend for matplotlib. No support for X11 windows.')
     else:
         if mpl_backend.startswith('force-'):
             matplotlib.use(mpl_backend.partition('force-')[-1])

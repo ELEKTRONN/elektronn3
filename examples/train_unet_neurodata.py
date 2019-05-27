@@ -7,9 +7,10 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 
 import argparse
+import logging
 import os
 import random
-import _pickle
+import zipfile
 
 import torch
 from torch import nn
@@ -63,16 +64,10 @@ if deterministic:
 else:
     torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
-if not args.disable_cuda and torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
-
-print(f'Running on device: {device}')
-
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
+logger = logging.getLogger('elektronn3log')
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics
@@ -80,6 +75,12 @@ from elektronn3.training import SWA
 from elektronn3.modules import DiceLoss, CombinedLoss
 from elektronn3.models.unet import UNet
 
+
+if not args.disable_cuda and torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+logger.info(f'Running on device: {device}')
 
 model = UNet(
     n_blocks=4,
@@ -145,15 +146,29 @@ else:  # Use publicly available neuro_data_cdhw dataset
 max_steps = args.max_steps
 max_runtime = args.max_runtime
 
-optimizer_state_dict = None  # If a state dict is available, this will be filled with it
+optimizer_state_dict = None
+lr_sched_state_dict = None
 if args.resume is not None:  # Load pretrained network
-    try:  # Assume it's a state_dict for the model
-        state_dict = torch.load(os.path.expanduser(args.resume))
-        model.load_state_dict(state_dict['model_state_dict'])
-        optimizer_state_dict = state_dict['optimizer_state_dict']
-    except _pickle.UnpicklingError as exc:
-        # Assume it's a complete saved ScriptModule
-        model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
+    pretrained = os.path.expanduser(args.resume)
+    _warning_str = 'Loading model without optimizer state. Prefer state dicts'
+    if zipfile.is_zipfile(pretrained):  # Zip file indicates saved ScriptModule
+        logger.warning(_warning_str)
+        model = torch.jit.load(pretrained, map_location=device)
+    else:  # Either state dict or pickled model
+        state = torch.load(pretrained)
+        if isinstance(state, dict):
+            model.load_state_dict(state['model_state_dict'])
+            optimizer_state_dict = state.get('optimizer_state_dict')
+            lr_sched_state_dict = state.get('lr_sched_state_dict')
+            if optimizer_state_dict is None:
+                logger.warning('optimizer_state_dict not found.')
+            if lr_sched_state_dict is None:
+                logger.warning('lr_sched_state_dict not found.')
+        elif isinstance(state, nn.Module):
+            logger.warning(_warning_str)
+            model = state
+        else:
+            raise ValueError(f'Can\'t load {pretrained}.')
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
@@ -164,7 +179,6 @@ train_transform = transforms.Compose(common_transforms + [
     # transforms.RandomGrayAugment(channels=[0], prob=0.3),
     # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
     # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
-    # transforms.RandomBlurring({'probability': 0.5})
 ])
 valid_transform = transforms.Compose(common_transforms + [])
 
@@ -214,32 +228,39 @@ optimizer = optim.SGD(
     momentum=0.9,
     weight_decay=0.5e-4,
 )
-lr_sched = torch.optim.lr_scheduler.CyclicLR(
-    optimizer,
-    base_lr=1e-6,
-    max_lr=0.1,
-    step_size_up=10000,
-    step_size_down=10000,
-    cycle_momentum=True
-)
-
-# Uncomment this line for an LR range test run (-> https://arxiv.org/abs/1506.01186, sec. 3.3)
-# lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
-
 optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
-if optimizer_state_dict is not None:
-    optimizer.load_state_dict(optimizer_state_dict)
+
+# Set to True to perform Cyclical LR range test instead of normal training
+#  (see https://arxiv.org/abs/1506.01186, sec. 3.3).
+do_lr_range_test = False
+if do_lr_range_test:
+    # Begin with a very small lr and double it every 1000 steps.
+    for grp in optimizer.param_groups:
+        grp['lr'] = 1e-7  # Note: lr will be > 1.0 after 24k steps.
+    lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
+else:
+    lr_sched = torch.optim.lr_scheduler.CyclicLR(
+        optimizer,
+        base_lr=1e-6,
+        max_lr=0.1,
+        step_size_up=10000,
+        step_size_down=10000,
+        cycle_momentum=True
+    )
+    if optimizer_state_dict is not None:
+        optimizer.load_state_dict(optimizer_state_dict)
+    if lr_sched_state_dict is not None:
+        lr_sched.load_state_dict(lr_sched_state_dict)
 
 # All these metrics assume a binary classification problem. If you have
 #  non-binary targets, remember to adapt the metrics!
+# TODO: Default to mean metrics instead of binary versions?
 valid_metrics = {
     'val_accuracy': metrics.bin_accuracy,
     'val_precision': metrics.bin_precision,
     'val_recall': metrics.bin_recall,
     'val_DSC': metrics.bin_dice_coefficient,
     'val_IoU': metrics.bin_iou,
-    # 'val_AP': metrics.bin_average_precision,  # expensive
-    # 'val_AUROC': metrics.bin_auroc,  # expensive
 }
 
 
