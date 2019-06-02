@@ -577,15 +577,19 @@ class ElasticTransform:
                 target_channels = target.shape[0]
                 target_shape = target[0].shape
             elif target.ndim == 3:  # (C, H, W) or (D, H, W)
-                if inp.ndim == 3:  # (C, H, W)
+                if inp.ndim == 3:  # (C, H, W) target, (C, H, W) input
                     target_channels = target.shape[0]
                     target_shape = target[0].shape
-                elif inp.ndim == 4:  # (D, H, W)
+                elif inp.ndim == 4:  # (D, H, W) target, (C, D, H, W) input
                     target_c = False
                     target_channels = 1
                     target_shape = target.shape
                 else:
                     raise ValueError("Input dimension not understood!")
+            elif target.ndim == 2:  # (H, W)
+                target_c = False
+                target_channels = 1
+                target_shape = target.shape
             else:
                 raise ValueError("Target dimension not understood!")
 
