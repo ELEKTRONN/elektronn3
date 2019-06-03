@@ -4,7 +4,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 
-__all__ = ['PatchCreator', 'SimpleNeuroData2d']
+__all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d']
 
 import logging
 import os
@@ -15,6 +15,7 @@ from os.path import expanduser
 from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 
 import h5py
+import imageio
 import numpy as np
 import torch
 from torch.utils import data
@@ -547,3 +548,52 @@ class SimpleNeuroData2d(data.Dataset):
         self.inp_file.close()
         self.target_file.close()
 
+
+# TODO: docs, types
+class Segmentation2d(data.Dataset):
+    """Simple dataset for 2d segmentation.
+
+    Expects a list of ``input_paths`` and ``target_paths`` where
+    ``target_paths[i]`` is the target of ``input_paths[i]`` for all i.
+    """
+    def __init__(
+            self,
+            inp_paths,
+            target_paths,
+            transform=transforms.Identity(),
+            in_memory=True,
+            inp_dtype=np.float32,
+            target_dtype=np.int64,
+    ):
+        super().__init__()
+        self.inp_paths = inp_paths
+        self.target_paths = target_paths
+        self.transform = transform
+        self.in_memory = in_memory
+        self.inp_dtype = inp_dtype
+        self.target_dtype = target_dtype
+
+        if self.in_memory:
+            self.inps = [
+                np.array(imageio.imread(fname)).astype(np.float32)[None]
+                for fname in self.inp_paths
+            ]
+            self.targets = [
+                np.array(imageio.imread(fname)).astype(np.int64)
+                for fname in self.target_paths
+            ]
+
+    def __getitem__(self, index):
+        if self.in_memory:
+            inp = self.inps[index]
+            target = self.targets[index]
+        else:
+            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
+            if inp.ndim == 2:  # (H, W)
+                inp = inp[None]  # (C=1, H, W)
+            target = np.array(imageio.imread(self.target_paths[index]), dtype=self.target_dtype)
+        inp, target = self.transform(inp, target)
+        return inp, target
+
+    def __len__(self):
+        return len(self.target_paths)
