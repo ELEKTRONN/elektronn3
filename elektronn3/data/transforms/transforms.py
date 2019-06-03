@@ -687,6 +687,36 @@ class RandomRotate2d:
         return rinp, rtarget
 
 
+# TODO: Support other image shapes
+class AlbuSeg2d:
+    """Wrapper for albumentations' segmentation-compatible 2d augmentations.
+
+    Wraps an augmentation so it can be used within elektronn3's transform pipeline.
+    See https://github.com/albu/albumentations.
+
+    Args:
+        albu: albumentation object of type `DualTransform`.
+
+    Example::
+
+        >>> import albumentations
+        >>> transform = AlbuSeg2d(albumentations.ShiftScaleRotate(
+        ...     p=0.98, rotate_limit=180, scale_limit=0.1, interpolation=3
+        ... ))
+    """
+
+    def __init__(self, albu: 'albumentations.core.transforms_interface.DualTransform'):
+        self.albu = albu
+
+    def __call__(self, inp, target):
+        assert inp.ndim == 3 and inp.shape[0] == 1
+        assert target.ndim == 2 and target.shape == inp.shape[1:]
+        augmented = self.albu(image=inp[0], mask=target)  # Strip C dimension
+        ainp = np.array(augmented['image'], dtype=inp.dtype)[None]  # Re-attach C dimension
+        atarget = np.array(augmented['mask'], dtype=target.dtype)
+        return ainp, atarget
+
+
 # TODO: Functional API (transforms.functional).
 #       The current object-oriented interface should be rewritten as a wrapper
 #       for the functional API (see implementation in torchvision).
@@ -695,3 +725,5 @@ class RandomRotate2d:
 #       E.g. RandomGammaCorrection should wrap GammaCorrection, which takes
 #       the actual gamma value as an argument instead of a parametrization
 #       of the random distribution from which gamma is sampled.
+
+# TODO: Albumentations wrapper for img-to-scalar scenarios like classification
