@@ -19,6 +19,7 @@ from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
 
 import numpy as np
 import skimage.exposure
+import skimage.transform
 
 import scipy
 import scipy.ndimage
@@ -665,6 +666,25 @@ class RandomFlip:
         else:
             target_flipped = None
         return inp_flipped, target_flipped
+
+
+# TODO: Support other image shapes
+class RandomRotate2d:
+    """Random rotations, based on scikit-image"""
+    def __init__(self, angle_range=(-180, 180), prob=1):
+        self.angle_range = angle_range
+        self.prob = prob
+
+    def __call__(self, inp, target):
+        assert inp.ndim == 3 and inp.shape[0] == 1
+        assert target.ndim == 2 and target.shape == inp.shape[1:]
+        if np.random.rand() > self.prob:
+            return inp, target
+        angle = np.random.uniform(*self.angle_range)
+        rot_opts = {'angle': angle, 'preserve_range': True, 'mode': 'reflect'}
+        rinp = skimage.transform.rotate(inp[0], **rot_opts).astype(inp.dtype)[None]  # Hack: Assume 1 channel
+        rtarget = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)  # Hack: Assume no channel dimension
+        return rinp, rtarget
 
 
 # TODO: Functional API (transforms.functional).
