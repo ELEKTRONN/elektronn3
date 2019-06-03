@@ -358,11 +358,16 @@ class Predictor:
         with torch.no_grad():
             return self.model(inp)
 
-    def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
+    def _tiled_predict(
+            self,
+            inp: torch.Tensor,
+            out_shape: Optional[Tuple[int]] = None
+    ) -> torch.Tensor:
         """Tiled inference with overlapping input tiles.
 
         Tiling is not used if ``tile_shape`` and ``overlap_shape`` are
         undefined."""
+        out_shape = (inp.shape[0], *out_shape)
         if self.enable_tiling:
             return tiled_apply(
                 self._predict,
@@ -370,7 +375,7 @@ class Predictor:
                 tile_shape=self.tile_shape,
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
-                out_shape=(inp.shape[0], *self.out_shape),
+                out_shape=out_shape,
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
@@ -380,6 +385,7 @@ class Predictor:
             self,
             inp: torch.Tensor,
             num_batches: int,
+            out_shape: Optional[Tuple[int]] = None
     ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
@@ -389,7 +395,7 @@ class Predictor:
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
-            out[low:high] = self._tiled_predict(inp[low:high])
+            out[low:high] = self._tiled_predict(inp[low:high], out_shape=out_shape)
         return out
 
     def predict(
@@ -411,7 +417,7 @@ class Predictor:
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
-        inp, relevant_slice = self._ensure_matching_shapes(inp)
+        inp, out_shape, relevant_slice = self._ensure_matching_shapes(inp)
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         if self.device.type == 'cuda':
             inp.pin_memory()
@@ -430,9 +436,9 @@ class Predictor:
             self.batch_size = inp_batch_size
         num_batches = int(np.ceil(inp_batch_size / self.batch_size))
         if num_batches == 1:  # Predict everything in one step
-            out = self._tiled_predict(inp=inp)
+            out = self._tiled_predict(inp=inp, out_shape=out_shape)
         else:  # Split input batch into smaller batches and predict separately
-            out = self._splitbatch_predict(inp=inp, num_batches=num_batches)
+            out = self._splitbatch_predict(inp=inp, num_batches=num_batches, out_shape=out_shape)
 
         # Explicit synchronization so the next GPU operation won't be
         #  mysteriously slow. If we don't synchronize manually here, profilers
@@ -449,7 +455,7 @@ class Predictor:
         return out
 
     # TODO: Make this work with input shape != output shape
-    def _ensure_matching_shapes(self, inp: np.ndarray) -> Tuple[np.ndarray, Optional[slice]]:
+    def _ensure_matching_shapes(self, inp: np.ndarray) -> Tuple[np.ndarray, Optional[Tuple[int]], Optional[slice]]:
         if self.out_shape is not None and np.any(self.out_shape[1:] % self.tile_shape):
             if self.strict_shapes:
                 raise ValueError(
@@ -470,7 +476,6 @@ class Predictor:
                 # Define the relevant region (that is: without the padding that was just added)
                 relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
                 padded_inp[relevant_slice] = inp
-                inp = padded_inp
                 padded_out_shape = (self.out_shape[0], *padded_shape[2:])
                 if np.any(padded_out_shape != self.out_shape):
                     sh_diff = np.subtract(padded_out_shape, self.out_shape)
@@ -488,10 +493,11 @@ class Predictor:
                     # TODO: Calculate exact compute waste by looking at increased tile overlaps
                     #  (the current estimation omits the (potentially high-impact) added per-tile
                     #  padding/overlaps via overlap_shape.
-                    self.out_shape = padded_out_shape
         else:
+            padded_inp = inp
+            padded_out_shape = self.out_shape
             relevant_slice = None
-        return inp, relevant_slice
+        return padded_inp, padded_out_shape, relevant_slice
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
