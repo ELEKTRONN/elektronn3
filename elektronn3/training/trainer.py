@@ -752,6 +752,7 @@ class Trainer:
                 self.sample_plotting_handler(self, tr_images, group='tr_samples')
                 if val_images is not None:
                     self.sample_plotting_handler(self, val_images, group='val_samples')
+                self._tb_log_histograms()
             except Exception:
                 logger.exception('Error occured while logging to tensorboard:')
 
@@ -787,6 +788,16 @@ class Trainer:
             else:
                 if not np.isnan(value):
                     self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+
+    def _tb_log_histograms(self) -> None:
+        """Log histograms of model parameters and their current gradients.
+
+        Make sure to run this between ``backward()`` and ``zero_grad()``,
+        because otherwise gradient histograms will only consist of zeros.
+        """
+        for name, param in self.model.named_parameters():
+            self.tb.add_histogram(f'param/{name}', param, self.step)
+            self.tb.add_histogram(f'grad/{name}', param.grad, self.step)
 
     # TODO: Make more configurable
     # TODO: Inference on secondary GPU

@@ -189,6 +189,7 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'patch_shape': (48, 96, 96),
     # 'offset': (8, 20, 20),
     'num_classes': 2,
+    # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
 train_dataset = PatchCreator(
     input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
