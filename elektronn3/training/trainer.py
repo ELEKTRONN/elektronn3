@@ -364,10 +364,11 @@ class Trainer:
 
                 # Update history tracker (kind of made obsolete by tensorboard)
                 # TODO: Decide what to do with this, now that most things are already in tensorboard.
-                if self.step // len(self.train_dataset) > 1:
-                    tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
-                else:
-                    tr_loss_gain = 0
+                # if self.step // len(self.train_dataset) > 1:
+                #     tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
+                # else:
+                #     
+                tr_loss_gain = 0
                 self._tracker.update_history([
                     self.step, self._timer.t_passed, np.mean(stats['tr_loss']), np.mean(stats['val_loss']),
                     tr_loss_gain, np.nanmean(stats['tr_accuracy']), stats['val_accuracy'], misc['learning_rate'], 0, 0
