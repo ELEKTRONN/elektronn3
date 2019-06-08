@@ -797,7 +797,8 @@ class Trainer:
         """
         for name, param in self.model.named_parameters():
             self.tb.add_histogram(f'param/{name}', param, self.step)
-            self.tb.add_histogram(f'grad/{name}', param.grad, self.step)
+            grad = param.grad if param.grad is not None else torch.tensor(0)
+            self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
     # TODO: Make more configurable
     # TODO: Inference on secondary GPU
