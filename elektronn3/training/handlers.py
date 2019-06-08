@@ -235,6 +235,7 @@ def _tb_log_sample_images(
         padded_target_batch[slc] = target_batch
         target_batch = padded_target_batch
 
+    target_cmap = None
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
     if is_classification:
@@ -243,6 +244,10 @@ def _tb_log_sample_images(
         # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
         target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
         out_slice = np.moveaxis(out_slice, 0, -1)
+    elif target_slice.shape[0] == 1:
+        target_slice = target_slice[0]
+        out_slice = out_slice[0]
+        target_cmap = 'gray'
     else:
         raise RuntimeError(
             f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
@@ -283,7 +288,7 @@ def _tb_log_sample_images(
     )
     trainer.tb.add_figure(
         f'{group}/target',
-        plot_image(target_slice, num_classes=trainer.num_classes),
+        plot_image(target_slice, num_classes=trainer.num_classes, cmap=target_cmap),
         global_step=trainer.step
     )
 
@@ -327,4 +332,4 @@ def _tb_log_sample_images(
             #       (i.e. with more contribution of the overlayed label map).
             #       Don't know how to fix this currently.
     elif is_regression:
-        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice), global_step=trainer.step)
+        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap), global_step=trainer.step)
