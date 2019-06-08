@@ -548,7 +548,7 @@ class ElasticTransform:
         # TODO (low priority): This could be written for n-d without explicit dimensions.
         if inp.ndim == 4:
             shape = inp[0].shape
-            if inp.shape[-3:] != target.shape[-3:]:
+            if target is not None and inp.shape[-3:] != target.shape[-3:]:
                 raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
             dz = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
             dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
@@ -557,7 +557,7 @@ class ElasticTransform:
             indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
         elif inp.ndim == 3:
             shape = inp[0].shape
-            if inp.shape[-2:] != target.shape[-2:]:
+            if target is not None and inp.shape[-2:] != target.shape[-2:]:
                 raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
             dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
             dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
@@ -688,6 +688,7 @@ class RandomRotate2d:
 
 
 # TODO: Support other image shapes
+# TODO: Document target is None
 class AlbuSeg2d:
     """Wrapper for albumentations' segmentation-compatible 2d augmentations.
 
@@ -710,10 +711,14 @@ class AlbuSeg2d:
 
     def __call__(self, inp, target):
         assert inp.ndim == 3 and inp.shape[0] == 1
-        assert target.ndim == 2 and target.shape == inp.shape[1:]
-        augmented = self.albu(image=inp[0], mask=target)  # Strip C dimension
+        if target is not None:
+            assert target.ndim == 2 and target.shape == inp.shape[1:]
+            augmented = self.albu(image=inp[0], mask=target)  # Strip C dimension
+            atarget = np.array(augmented['mask'], dtype=target.dtype)
+        else:
+            augmented = self.albu(image=inp[0])  # Strip C dimension
+            atarget = None
         ainp = np.array(augmented['image'], dtype=inp.dtype)[None]  # Re-attach C dimension
-        atarget = np.array(augmented['mask'], dtype=target.dtype)
         return ainp, atarget
 
 
