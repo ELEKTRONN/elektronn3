@@ -314,6 +314,7 @@ class UNet(nn.Module):
             original batch normalization paper and the BN scheme of 3D U-Net,
             but it delivers better results this way
             (see https://redd.it/67gonq).
+        ae: Enable autoencoder mode
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -387,6 +388,7 @@ class UNet(nn.Module):
             planar_blocks: Sequence = (),
             activation: Union[str, nn.Module] = 'relu',
             batch_norm: bool = True,
+            ae: bool = False,
             dim: int = 3,
             conv_mode: str = 'same',
             adaptive: bool = False,
@@ -446,6 +448,7 @@ class UNet(nn.Module):
         self.dim = dim
         self.adaptive = adaptive
         self.checkpointing = checkpointing
+        self.ae = ae
 
         self.down_convs = []
         self.up_convs = []
@@ -500,6 +503,11 @@ class UNet(nn.Module):
             self.up_convs.append(up_conv)
 
         self.conv_final = em.conv1(outs, self.out_channels, dim=dim)
+        if self.ae:
+            # Dedicated final layer for autoencoder training.
+            # self.conv_final is left untouched for autoencoder training,
+            # so switching to ae=False won't require layer re-initialization.
+            self.conv_ae_final = em.conv1(outs, self.in_channels, dim=dim)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
@@ -518,6 +526,9 @@ class UNet(nn.Module):
             self.weight_init(m)
 
     def forward(self, x):
+        if self.ae:
+            # Don't do usual forward, do autoencoder forward pass instead
+            return self.autoencode(x)
         sh = x.shape[2:]
         encoder_outs = []
 
@@ -543,6 +554,27 @@ class UNet(nn.Module):
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
         return x
+
+    def _ae_encode(self, x):
+        for i, module in enumerate(self.down_convs):
+            x, _ = module(x)
+        return x
+
+    def _ae_decode(self, x):
+        # TODO: How should we mock before_pool best? zeros? randn?
+        for i, module in enumerate(self.up_convs):
+            # Calculate expected shape for mock feature
+            sh = (x.shape[0], x.shape[1] // 2) + tuple(d * 2 for d in x.shape[2:])
+            before_pool = torch.zeros(sh, dtype=x.dtype, device=x.device)  # Mock encoder outputs
+            x = module(before_pool, x)
+        return x
+
+    def autoencode(self, x):
+        # Encode, decode and reconstruct
+        enc = self._ae_encode(x)
+        dec = self._ae_decode(enc)
+        rec = self.conv_ae_final(dec)
+        return rec
 
 
 class UNet3dLite(UNet):
