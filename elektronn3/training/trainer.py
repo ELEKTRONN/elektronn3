@@ -463,6 +463,8 @@ class Trainer:
         self.optimizer.zero_grad()
         running_vx_size = 0
         timer = Timer()
+        import gc
+        gc.collect()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target, multi_class_target, cube_meta, fname) in pbar:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
