@@ -564,6 +564,7 @@ class Segmentation2d(data.Dataset):
             in_memory=True,
             inp_dtype=np.float32,
             target_dtype=np.int64,
+            epoch_multiplier=1,  # Pretend to have more data in one epoch
     ):
         super().__init__()
         self.inp_paths = inp_paths
@@ -572,6 +573,7 @@ class Segmentation2d(data.Dataset):
         self.in_memory = in_memory
         self.inp_dtype = inp_dtype
         self.target_dtype = target_dtype
+        self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
             self.inps = [
@@ -584,6 +586,7 @@ class Segmentation2d(data.Dataset):
             ]
 
     def __getitem__(self, index):
+        index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         if self.in_memory:
             inp = self.inps[index]
             target = self.targets[index]
@@ -592,11 +595,16 @@ class Segmentation2d(data.Dataset):
             if inp.ndim == 2:  # (H, W)
                 inp = inp[None]  # (C=1, H, W)
             target = np.array(imageio.imread(self.target_paths[index]), dtype=self.target_dtype)
-        inp, target = self.transform(inp, target)
+        while True:  # Only makes sense if RandomCrop is used
+            try:
+                inp, target = self.transform(inp, target)
+                break
+            except transforms._DropSample:
+                pass
         return inp, target
 
     def __len__(self):
-        return len(self.target_paths)
+        return len(self.target_paths) * self.epoch_multiplier
 
 
 # TODO: Document
@@ -609,12 +617,14 @@ class Reconstruction2d(data.Dataset):
             transform=transforms.Identity(),
             in_memory=True,
             inp_dtype=np.float32,
+            epoch_multiplier=1,  # Pretend to have more data in one epoch
     ):
         super().__init__()
         self.inp_paths = inp_paths
         self.transform = transform
         self.in_memory = in_memory
         self.inp_dtype = inp_dtype
+        self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
             self.inps = [
@@ -623,14 +633,20 @@ class Reconstruction2d(data.Dataset):
             ]
 
     def __getitem__(self, index):
+        index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         if self.in_memory:
             inp = self.inps[index]
         else:
             inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
             if inp.ndim == 2:  # (H, W)
                 inp = inp[None]  # (C=1, H, W)
-        inp, _ = self.transform(inp, None)
+        while True:  # Only makes sense if RandomCrop is used
+            try:
+                inp, _ = self.transform(inp, None)
+                break
+            except transforms._DropSample:
+                pass
         return inp, inp
 
     def __len__(self):
-        return len(self.inp_paths)
+        return len(self.inp_paths) * self.epoch_multiplier
