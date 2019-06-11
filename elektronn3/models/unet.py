@@ -39,6 +39,7 @@ from typing import Sequence, Union, Tuple
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
+from torch.nn import functional as F
 
 import elektronn3.modules as em
 
@@ -186,6 +187,47 @@ class UpConv(nn.Module):
         return y
 
 
+# class EncoderBottleneck(nn.Module):
+#     def __init__(self, in_channels, out_channels, dim=3):
+#         super().__init__()
+#         self.in_channels = in_channels
+#         self.out_channels = out_channels
+#         self.dim = dim
+#
+#         self.conv = em.conv1(in_channels, 4, dim=dim)
+#         self.aap = nn.AdaptiveAvgPool2d((8, 8))
+#         self.fc = nn.Linear(4 * 8*8, 32)
+#
+#     def forward(self, x):
+#         x = self.conv(x)
+#         x = F.relu(x)
+#         x = self.aap(x)
+#         x = x.view(x.shape[0], -1)
+#         x = self.fc(x)
+#         x = F.relu(x)
+#         return x
+#
+#
+# class DecoderBottleneck(nn.Module):
+#     def __init__(self, in_channels, out_channels, dim=3):
+#         super().__init__()
+#         self.in_channels = in_channels
+#         self.out_channels = out_channels
+#         self.dim = dim
+#
+#         self.fc = nn.Linear(32, 4 * 8*8)
+#         self.conv = em.conv1(in_channels, out_channels, dim=dim)
+#
+#     def forward(self, x):
+#         x = self.fc(x)
+#         x = F.relu(x)
+#         x = x.view(x.shape[0], 4, 8, 8)
+#         x = self.conv(x)
+#         x = F.relu(x)
+#         x = F.interpolate(x, (SIZE))  # TODO
+#         return x
+
+
 # TODO: Pre-calculate output sizes when using valid convolutions
 class UNet(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
@@ -314,7 +356,9 @@ class UNet(nn.Module):
             original batch normalization paper and the BN scheme of 3D U-Net,
             but it delivers better results this way
             (see https://redd.it/67gonq).
-        ae: Enable autoencoder mode
+        ae: Enable autoencoder mode. ``out_channels`` is ignored; outputs always
+            have the same channels as inputs.
+            Experimental. May not work well with other non-default options.
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -508,6 +552,9 @@ class UNet(nn.Module):
             # self.conv_final is left untouched for autoencoder training,
             # so switching to ae=False won't require layer re-initialization.
             self.conv_ae_final = em.conv1(outs, self.in_channels, dim=dim)
+            self.encoder_bottleneck = em.conv1(self.down_convs[-1].out_channels, 1, dim=dim)
+            # self.encoder_bottleneck = EncoderBottleneck(self.down_convs[-1].out_channels, 1, dim=dim)
+            self.decoder_bottleneck = em.conv1(self.encoder_bottleneck.out_channels, self.up_convs[0].in_channels, dim=dim)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
@@ -558,14 +605,17 @@ class UNet(nn.Module):
     def _ae_encode(self, x):
         for i, module in enumerate(self.down_convs):
             x, _ = module(x)
+        x = self.encoder_bottleneck(x)
         return x
 
     def _ae_decode(self, x):
-        # TODO: How should we mock before_pool best? zeros? randn?
+        x = self.decoder_bottleneck(x)
         for i, module in enumerate(self.up_convs):
             # Calculate expected shape for mock feature
             sh = (x.shape[0], x.shape[1] // 2) + tuple(d * 2 for d in x.shape[2:])
             before_pool = torch.zeros(sh, dtype=x.dtype, device=x.device)  # Mock encoder outputs
+            # TODO: For auto-encoder with throwaway decoder, we should use custom upconv blocks
+            #       without (mock) feature merging. Merging with zeros is a waste of computation.
             x = module(before_pool, x)
         return x
 
