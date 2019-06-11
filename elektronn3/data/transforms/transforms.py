@@ -21,8 +21,6 @@ import numpy as np
 import skimage.exposure
 import skimage.transform
 
-import scipy
-import scipy.ndimage
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
 
@@ -562,7 +560,7 @@ class ElasticTransform:
             dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
             dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
             y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
-            indices = np.reshape(x + dx, (-1, 1)), np.reshape(y + dy, (-1, 1))
+            indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
         else:
             raise ValueError("Input dimension not understood!")
 
