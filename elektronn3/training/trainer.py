@@ -427,8 +427,29 @@ class Trainer:
 
     def _train(self, max_steps, max_runtime):
 
+        def channel_metric(metric, c, num_classes):
+            """Returns an evaluator that calculates the ``metric``
+            and selects its value for channel ``c``."""
+
+            def evaluator(target, out):
+                #pred = metrics._argmax(out)
+                m = metric(target, out, num_classes=num_classes)
+                return m[c]
+
+            return evaluator
+
+        num_classes = self.num_classes
+        tr_evaluators = {
+            f'tr_DSC_c{c}': channel_metric(
+                metrics.dice_coefficient,
+                c=c, num_classes=num_classes
+            )
+            for c in range(num_classes)
+        }
+
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, list] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
+        stats.update({name: [] for name in tr_evaluators.keys()})
         # Other scalars to be logged
         misc: Dict[str, float] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
@@ -486,6 +507,8 @@ class Trainer:
                 if i % self.optimizer_iterations == self.optimizer_iterations - 1:
                     stats['tr_loss_mean'] += [np.mean(stats['tr_loss'][-self.optimizer_iterations:])]
                 stats['tr_accuracy'].append(acc)
+                for name, evaluator in tr_evaluators.items():
+                    stats[name].append(evaluator(multi_class_target, out_class))
 
                 #if stats['tr_DSC_c3'][-1] < 5:
                 #    IPython.embed()
