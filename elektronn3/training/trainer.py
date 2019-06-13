@@ -506,6 +506,14 @@ class Trainer:
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
 
+                # import h5py
+                # dsc5 = channel_metric(metrics.dice_coefficient, c=5, num_classes=num_classes)(multi_class_target, out_class)
+                # after_step = '+' if i % self.optimizer_iterations == 0 else ''
+                # with h5py.File(os.path.join(self.save_path, f'batch {self.step}{after_step} loss={float(dloss)} dsc5={dsc5}.h5'), "w") as f:
+                #     f.create_dataset('raw', data=inp.squeeze(dim=0), compression="gzip")
+                #     f.create_dataset('labels', data=multi_class_target.numpy().astype(np.uint16), compression="gzip")
+                #     f.create_dataset('pred', data=dout.squeeze(dim=0).detach().cpu().numpy(), compression="gzip")
+
                 if fname[0] not in file_stats:
                     file_stats[fname[0]] = []
                 file_stats[fname[0]] += [float('nan')] * (i - len(file_stats[fname[0]])) + [loss]
