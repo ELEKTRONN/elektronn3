@@ -417,11 +417,11 @@ class Trainer:
                 self._log_to_history_tracker(stats, misc)
 
                 # Save trained model state
-                self._save_model(verbose=False)  # Not verbose because it can get spammy.
+                self._save_model(loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best')
+                    self._save_model(suffix='_best', loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -679,11 +679,14 @@ class Trainer:
 
         return stats, images
 
+# TODO: Instead of using specific keys like val_loss, enable passing info as an
+#       extra dict whose contents will be added to the state_dict
     def _save_model(
             self,
             suffix: str = '',
             unwrap_parallel: bool = True,
-            verbose: bool = True
+            verbose: bool = True,
+            val_loss=np.nan
     ) -> None:
         """Save/serialize trained model state to files.
 
@@ -719,6 +722,8 @@ class Trainer:
             verbose: If ``True`` (default), log infos about saved models at
                 log-level "INFO" (which appears in stdout). Else, only silently
                 log with log-level "DEBUG".
+            val_loss: Stores the validation loss
+                (default value if not supplied: NaN)
         """
         log = logger.info if verbose else logger.debug
 
@@ -755,7 +760,8 @@ class Trainer:
             'lr_sched_state_dict': lr_sched_state,
             'global_step': self.step,
             'epoch': self.epoch,
-            'best_val_loss': self.best_val_loss
+            'best_val_loss': self.best_val_loss,
+            'val_loss': val_loss,
         }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}.')
         try:
