@@ -221,17 +221,18 @@ class PatchCreator(data.Dataset):
             try:
                 inp, target = self.warp_cut(input_src, target_src, warp_prob, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
-            except coord_transforms.WarpingOOBError:
+            except coord_transforms.WarpingOOBError as e:
                 # Temporarily set warp_prob to 1 to make sure that the next attempt
                 #  will also try to use warping. Otherwise, self.warp_prob would not
                 #  reflect the actual probability of a sample being obtained by warping.
-                warp_prob = 1
+                warp_prob = 1 if warp_prob > 0 else 0
                 self.n_failed_warp += 1
                 if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
                     fail_percentage = int(round(100 * fail_ratio))
                     # Note that this warning will be spammed once the conditions are met.
                     # Better than logging it once and risking that it stays unnoticed IMO.
+                    print(e)
                     logger.warning(
                         f'{fail_percentage}% of warping attempts are failing.\n'
                         'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
