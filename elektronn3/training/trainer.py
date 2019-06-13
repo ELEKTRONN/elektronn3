@@ -445,7 +445,11 @@ class Trainer:
 
             # forward pass
             dout = self.model(dinp)
+
             dloss = self.criterion(dout, dtarget)
+            #dcumloss = dloss if i == 0 else dcumloss + dloss
+            #print(dloss, dloss.size())
+            #dloss = (dloss * prev_weight * weight).mean()
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
