@@ -471,6 +471,7 @@ class Trainer:
             # forward pass
             dout = self.model(dinp)
 
+            #print(dout.dtype, dout.shape, dtarget.dtype, dtarget.shape, dout.min(), dout.max())
             dloss = self.criterion(dout, dtarget)
             #dcumloss = dloss if i == 0 else dcumloss + dloss
             #print(dloss, dloss.size())
@@ -496,8 +497,17 @@ class Trainer:
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
+                stats['tr_accuracy'].append(acc)
                 misc['mean_target'].append(mean_target)
+                # if loss-loss2 == 0 and not torch.any(out_class != multi_class_target):
+                #     print('grad', self.model.up_convs[0].conv2.weight.grad)
+                #     IPython.embed()
+                #if loss - 0.99 < 1e-3:
+                #    print('asd', loss, loss2)
+                #    IPython.embed()
                 pbar.set_description(f'Training (loss {loss})')
+                #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
+                #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             self.criterion.weight = prev_weight
