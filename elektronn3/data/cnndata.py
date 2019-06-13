@@ -150,6 +150,7 @@ class PatchCreator(data.Dataset):
             transform: Callable = transforms.Identity(),
             num_classes: Optional[int] = None,
             in_memory: bool = False,
+            cube_meta = 1,
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
@@ -170,6 +171,7 @@ class PatchCreator(data.Dataset):
         target_h5data = [(expanduser(fn), key) for (fn, key) in target_h5data]
         self.input_h5data = input_h5data
         self.target_h5data = target_h5data
+        self.cube_meta = cube_meta
         self.cube_prios = cube_prios
         self.aniso_factor = aniso_factor
         self.target_discrete_ix = target_discrete_ix
@@ -266,7 +268,8 @@ class PatchCreator(data.Dataset):
 
         # inp, target are still numpy arrays here. Relying on auto-conversion to
         #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
-        return inp, target
+        multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target
+        return inp, target, multi_class_target, self.cube_meta[i], os.path.basename(self.input_h5data[i][0])
 
     def __len__(self) -> int:
         return self.epoch_size
@@ -437,7 +440,7 @@ class PatchCreator(data.Dataset):
         modestr = 'Training' if self.train else 'Validation'
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
-        for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
+        for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_h5data, self.target_h5data, self.cube_meta):
             inp_h5 = h5py.File(inp_fname, 'r')[inp_key]#[:, 50:-50, 100:-100, 100:-100]
             target_h5 = h5py.File(target_fname, 'r')[target_key]
             if self.in_memory:
@@ -446,6 +449,7 @@ class PatchCreator(data.Dataset):
 
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
+            logger.info(f'  cube_meta:   {cube_meta}')
             inp_h5sets.append(inp_h5)
             target_h5sets.append(target_h5)
         print()
