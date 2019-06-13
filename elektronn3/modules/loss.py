@@ -99,8 +99,10 @@ def dice_loss(probs, target, weight=1., class_weight=1.):
     #weighted_loss = loss_per_channel[1:-1].sum() / ((loss_per_channel[1:-1] > 0).sum() + (loss_per_channel[1:-1].sum() == 0))  # (C,)
     #weighted_loss *= 2
     weighted_loss = loss_per_channel[1:-1].sum() / (class_weight[1:-1] > 0).sum()
+    #weighted_loss = loss_per_channel[1:-1].sum() 
 
-    if torch.isnan(weighted_loss) or  weighted_loss > 1:
+    if torch.isnan(weighted_loss).sum() or (weighted_loss > 1).sum():
+    #if torch.isnan(weighted_loss):
         print(loss_per_channel)
         import IPython
         IPython.embed()
