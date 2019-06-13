@@ -479,7 +479,7 @@ class Trainer:
                 stats['tr_loss'].append(loss)
                 stats['tr_accuracy'].append(acc)
                 misc['mean_target'].append(mean_target)
-                pbar.set_description(f'Training (loss {loss:.4f})')
+                pbar.set_description(f'Training (loss {loss})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             self.criterion.weight = prev_weight
