@@ -383,6 +383,7 @@ class Trainer:
                 worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
+        self.best_tr_loss = np.inf
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -564,6 +565,10 @@ class Trainer:
             self._handle_lr()
 
             running_vx_size += inp.numel()
+
+            #if stats['tr_loss_mean'][-1] < self.best_tr_loss:
+            #   self.best_tr_loss = stats['tr_loss'][-1]
+            #   self._save_model(suffix='_best_train', loss=stats['tr_loss'][-1])
 
             self.step += 1
             if self.step >= max_steps:
