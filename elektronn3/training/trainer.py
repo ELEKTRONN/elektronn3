@@ -490,12 +490,14 @@ class Trainer:
             self.optimizer.step()
             # End of core training loop on self.device
 
-            # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
-            out = dout.detach().cpu()  # Copy model output to host memory for metrics, visualization
-
             with torch.no_grad():
                 loss = float(dloss)
-                mean_target = float(target.to(torch.float32).mean())
+            	# TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
+                out_class = dout.argmax(dim=1).detach().cpu()
+                acc = metrics.accuracy(multi_class_target, out_class, num_classes)
+                acc = np.average(acc[~np.isnan(acc)])#, weights=)
+                mean_target = float(multi_class_target.to(torch.float32).mean())
+
                 stats['tr_loss'].append(loss)
                 stats['tr_accuracy'].append(acc)
                 misc['mean_target'].append(mean_target)
@@ -539,8 +541,8 @@ class Trainer:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
                 images['inp'] = inp.numpy()
-                images['target'] = target.numpy()
-                images['out'] = out.numpy()
+                images['target'] = multi_class_target.numpy()
+                images['out'] = dout.detach().cpu().numpy()
 
             if self.terminate:
                 break
@@ -622,14 +624,15 @@ class Trainer:
                 dout = self.model(dinp)
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
+                out_class = out.argmax(dim=1)
                 self.criterion.weight = prev_weight
                 for name, evaluator in self.valid_metrics.items():
-                    stats[name].append(evaluator(target, out))
+                    stats[name].append(evaluator(multi_class_target, out_class))
 
         images = {
             'inp': inp.numpy(),
             'out': out.numpy(),
-            'target': target.numpy()
+            'target': multi_class_target.numpy()
         }
 
         stats['val_loss'] = np.mean(val_loss)
