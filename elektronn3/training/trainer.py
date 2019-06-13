@@ -497,7 +497,7 @@ class Trainer:
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
                 misc['mean_target'].append(mean_target)
-                pbar.set_description(f'Training (loss {loss:.4f})')
+                pbar.set_description(f'Training (loss {loss})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             self.criterion.weight = prev_weight
