@@ -439,6 +439,9 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
+            weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
+            prev_weight = self.criterion.weight.clone()
+            self.criterion.weight *= weight
 
             # forward pass
             dout = self.model(dinp)
@@ -469,6 +472,8 @@ class Trainer:
                 misc['mean_target'].append(mean_target)
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
+
+            self.criterion.weight = prev_weight
 
             # this was changed to support ReduceLROnPlateau which does not implement get_lr
             misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
@@ -515,10 +520,15 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
+            weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
+            prev_weight = self.criterion.weight.clone()
+            self.criterion.weight *= weight
+
             with torch.no_grad():
                 dout = self.model(dinp)
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
+                self.criterion.weight = prev_weight
                 for name, evaluator in self.valid_metrics.items():
                     stats[name].append(evaluator(target, out))
 
