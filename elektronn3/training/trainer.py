@@ -478,6 +478,11 @@ class Trainer:
             #self.criterion.pos_weight = self.criterion.weight
             #self.criterion.pos_weight = self.criterion.pos_weight.view(-1,1,1,1)
 
+            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                ignore_mask = (1 - target[0][-1]).view(1,1,*target.shape[2:])
+                positive_target_mask = target[0][1:-1].sum(dim=0).view(1,1,*target.shape[2:]) # targets w\ background and ignore
+                self.criterion.weight = ignore_mask.to(self.device) * self.criterion.weight.view(1,-1,1,1,1) + positive_target_mask.to(self.device) * (weight == 0).type(target.dtype).view(1,-1,1,1,1)
+
             # forward pass
             dout = self.model(dinp)
 
@@ -597,6 +602,11 @@ class Trainer:
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight *= weight
             #self.criterion.pos_weight = self.criterion.weight
+
+            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                ignore_mask = (1 - target[0][-1]).view(1,1,*target.shape[2:])
+                positive_target_mask = target[0][1:-1].sum(dim=0).view(1,1,*target.shape[2:]) # targets w\ background and ignore
+                self.criterion.weight = ignore_mask.to(self.device) * self.criterion.weight.view(1,-1,1,1,1) + positive_target_mask.to(self.device) * (weight == 0).type(target.dtype).view(1,-1,1,1,1)
 
             with torch.no_grad():
                 dout = self.model(dinp)
