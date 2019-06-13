@@ -177,6 +177,7 @@ def norpf_dice_loss(probs, target, weight=1., class_weight=1.):
     denominator = class_weight * _channelwise_sum(denominator)  # (C,)
     denominator2 = _channelwise_sum(denominator2)  # (C,)
 
+    no_tp = (numerator == 0).type(positive_target_mask.dtype)
     # workarounds for divide by zero
     # unweighted classes get DSC=1
     numerator += (1 - weight)
@@ -208,7 +209,8 @@ def norpf_dice_loss(probs, target, weight=1., class_weight=1.):
     #loss_per_channel = 1 - numerator / denominator  # (C,)
     #loss_per_channel = 1 - ((numerator * denominator2 + denominator * numerator2) / (2 * denominator * denominator2))  # (C,)
 
-    loss_per_channel = 1 - (numerator * denominator2 + denominator * numerator2) / (2 * denominator * denominator2) # (C,)
+    #loss_per_channel = 1 - (numerator * denominator2 + denominator * numerator2) / (2 * denominator * denominator2) # (C,)
+    loss_per_channel = 1 + no_tp - (numerator/denominator + no_tp * numerator2/denominator2) # (C,)
 
     #loss_per_channel = 1 - (numerator + numerator2 + target_mask_empty * (1 - weight)) / (denominator + denominator2 + target_mask_empty * (1 - weight)) # (C,)
     #weighted_loss = 1 - (numerator.sum() + numerator2.sum())/(denominator.sum() + denominator2.sum())
