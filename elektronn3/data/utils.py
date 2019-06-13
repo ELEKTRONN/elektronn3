@@ -80,13 +80,13 @@ def calculate_class_weights(
         using weight[i] = 1 / n[i], as proposed in
         https://arxiv.org/abs/1707.03237, but we multiply by N to prevent
         very small values that could lead to numerical issues."""
-        classes = np.unique(targets)
+        classes = np.arange(0, targets.max() + 1)
         # Count total number of labeled elements per class
         num_labeled = np.array([
             np.sum(np.equal(targets, c))
             for c in classes
-        ], dtype=np.float32) + eps
-        class_weights = (targets.size / num_labeled).astype(np.float32)
+        ], dtype=np.float32)
+        class_weights = (num_labeled / targets.size).astype(np.float32)
         return class_weights
 
     def __binmean(targets):
