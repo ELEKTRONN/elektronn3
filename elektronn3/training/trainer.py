@@ -398,11 +398,11 @@ class Trainer:
                         logger.exception('Error occured while logging to tensorboard:')
 
                 # Save trained model state
-                self._save_model()
+                self._save_model(loss=stats['val_loss'])
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best')
+                    self._save_model(suffix='_best', loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -424,7 +424,7 @@ class Trainer:
                         break
                 else:
                     raise e
-        self._save_model(suffix='_final')
+        self._save_model(suffix='_final', loss=stats['tr_loss'][-1])
 
     def _train(self, max_steps, max_runtime):
 
@@ -615,7 +615,7 @@ class Trainer:
         # TODO: Refactor: Remove side effects (plotting)
         return stats
 
-    def _save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
+    def _save_model(self, suffix: str = '', unwrap_parallel: bool = True, loss='nan') -> None:
         """Save/serialize trained model state to files.
 
         If the model uses a parallel wrapper like ``torch.nn.DataParallel``,
@@ -659,8 +659,15 @@ class Trainer:
 
         state_dict_path = os.path.join(self.save_path, f'state_dict{suffix}.pth')
         model_path = os.path.join(self.save_path, f'model{suffix}.pt')
+        checkpoint_path = os.path.join(self.save_path, f'model{suffix}.tar')
 
         torch.save(model.state_dict(), state_dict_path)
+        torch.save({
+            'epoch': self.epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'loss': loss,
+        }, checkpoint_path)
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
