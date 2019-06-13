@@ -442,6 +442,11 @@ class Trainer:
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight *= weight
+            #self.criterion.weight = None
+            #self.criterion.pos_weight = prev_weight * weight
+            #self.criterion.pos_weight = self.criterion.pos_weight.view(-1,1,1,1)
+            #self.criterion.weight = self.criterion.weight.view(-1,1,1,1)
+            #self.criterion.pos_weight = self.criterion.weight
 
             # forward pass
             dout = self.model(dinp)
@@ -527,6 +532,7 @@ class Trainer:
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight *= weight
+            #self.criterion.pos_weight = self.criterion.weight
 
             with torch.no_grad():
                 dout = self.model(dinp)
