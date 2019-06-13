@@ -475,7 +475,7 @@ class Trainer:
             #dcumloss = dloss if i == 0 else dcumloss + dloss
             #print(dloss, dloss.size())
             #dloss = (dloss * prev_weight * weight).mean()
-            if torch.isnan(dloss):
+            if torch.isnan(dloss).sum():
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
 
