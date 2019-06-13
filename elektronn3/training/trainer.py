@@ -317,7 +317,7 @@ class Trainer:
 
         if self.mixed_precision:
             from apex import amp
-            self.amp_handle = amp.init()
+            self.model, self.optimizer = amp.initialize(self.model, self.optimizer, opt_level='O1')
 
         if exp_name is None:  # Auto-generate a name based on model name and ISO timestamp
             timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
@@ -513,8 +513,14 @@ class Trainer:
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
 
-            # update step
-            dloss.backward()
+            if self.mixed_precision:
+                from apex import amp
+                with amp.scale_loss(dloss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                # update step
+                dloss.backward()
+
             if i % self.optimizer_iterations == self.optimizer_iterations - 1:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
