@@ -399,7 +399,7 @@ class Trainer:
         self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:
             try:
-                stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
+                stats, file_stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
                 if self.valid_dataset is None:
@@ -412,7 +412,7 @@ class Trainer:
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
-                self._log_to_tensorboard(stats, misc, tr_sample_images, val_sample_images)
+                self._log_to_tensorboard(stats, file_stats, misc, tr_sample_images, val_sample_images)
                 # Legacy non-tensorboard logging to files
                 self._log_to_history_tracker(stats, misc)
 
@@ -470,6 +470,7 @@ class Trainer:
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
         stats.update({name: [] for name in tr_evaluators.keys()})
+        file_stats = {}
         # Other scalars to be logged
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
@@ -521,6 +522,10 @@ class Trainer:
                 acc = metrics.accuracy(multi_class_target, out_class, num_classes)
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
+
+                if fname[0] not in file_stats:
+                    file_stats[fname[0]] = []
+                file_stats[fname[0]] += [float('nan')] * (i - len(file_stats[fname[0]])) + [loss]
 
                 stats['tr_loss'].append(loss)
                 stats['tr_loss_mean'] += [float('nan')] * (i - len(stats['tr_loss_mean']))
@@ -581,7 +586,7 @@ class Trainer:
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
-        return stats, misc, images
+        return stats, file_stats, misc, images
 
     def _handle_lr(self) -> None:
         r"""Handle quasi-periodic learning rate schedulers that lower the
@@ -796,6 +801,7 @@ class Trainer:
     def _log_to_tensorboard(
             self,
             stats: Dict,
+            file_stats: Dict,
             misc: Dict,
             tr_images: Dict,
             val_images: Optional[Dict]
@@ -804,6 +810,7 @@ class Trainer:
         if self.tb:
             try:
                 self._tb_log_scalars(stats, 'stats')
+                self._tb_log_scalars(file_stats, 'file_stats')
                 self._tb_log_scalars(misc, 'misc')
                 if self.preview_batch is not None:
                     if self.epoch % self.preview_interval == 0 or self.epoch == 1:
