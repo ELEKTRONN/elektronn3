@@ -475,9 +475,8 @@ class Trainer:
             self.criterion.weight *= weight
             #self.criterion.weight = None
             #self.criterion.pos_weight = prev_weight * weight
-            #self.criterion.pos_weight = self.criterion.pos_weight.view(-1,1,1,1)
-            #self.criterion.weight = self.criterion.weight.view(-1,1,1,1)
             #self.criterion.pos_weight = self.criterion.weight
+            #self.criterion.pos_weight = self.criterion.pos_weight.view(-1,1,1,1)
 
             # forward pass
             dout = self.model(dinp)
