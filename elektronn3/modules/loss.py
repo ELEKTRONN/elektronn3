@@ -10,7 +10,6 @@ import torch
 
 from elektronn3.modules.lovasz_losses import lovasz_softmax
 
-
 def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
     reduce_dims = tuple([0] + list(range(x.dim()))[2:])  # = (0, 2, 3, ...)
@@ -18,7 +17,7 @@ def _channelwise_sum(x: torch.Tensor):
 
 
 # TODO: Dense weight support
-def dice_loss(probs, target, weight=1., eps=0.0001):
+def dice_loss(probs, target, weight=1., class_weight=1.):
     # Probs need to be softmax probabilities, not raw network outputs
     tsh, psh = target.shape, probs.shape
 
@@ -36,13 +35,53 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
     # if ignore_index is not None:
     #     weight[:, ignore_index] = 0.
 
-    intersection = probs * onehot_target  # (N, C, ...)
-    numerator = 2 * _channelwise_sum(intersection)  # (C,)
-    denominator = probs + onehot_target  # (N, C, ...)
-    denominator = _channelwise_sum(denominator) + eps  # (C,)
-    loss_per_channel = 1 - (numerator / denominator)  # (C,)
-    weighted_loss_per_channel = weight * loss_per_channel  # (C,)
-    return weighted_loss_per_channel.mean()  # ()
+    ignore_mask = (1 - onehot_target[0][-1]).view(1,1,*probs.shape[2:]) # inverse ignore
+
+    bg_probs = 1 - probs
+    bg_target = 1 - onehot_target
+    dense_weight = weight.view(1,-1,1,1,1)
+    positive_target_mask = onehot_target[0][1:-1].sum(dim=0).view(1,1,*probs.shape[2:]) # targets w\ background and ignore
+    target_mask_empty = ((positive_target_mask * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
+    target_empty = ((onehot_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
+    # complete background for weighted classes and all class target filtered background for unweighted classes
+    bg_mask = torch.ones_like(probs) * dense_weight + positive_target_mask * (1 - dense_weight)
+
+    bg_weight = 1 - class_weight
+
+    # make num/denom 1 for unweighted classes and classes with no target
+    intersection = probs * onehot_target * ignore_mask * dense_weight  # (N, C, ...)
+    intersection2 = bg_probs * bg_target * ignore_mask * bg_mask  # (N, C, ...)
+    denominator = (probs + onehot_target) * ignore_mask * dense_weight  # (N, C, ...)
+    denominator2 = (bg_probs + bg_target) * ignore_mask * bg_mask  # (N, C, ...)
+    numerator = 2 * class_weight * _channelwise_sum(intersection) + (1 - weight) + target_empty * weight  # (C,)
+    numerator2 = 2 * bg_weight * _channelwise_sum(intersection2)  # (C,)
+    denominator = class_weight * _channelwise_sum(denominator) + (1 - weight) + target_empty * weight  # (C,)
+    denominator2 = bg_weight * _channelwise_sum(denominator2)  # (C,)
+    numerator2 += (numerator2 == 0).type(numerator2.dtype) # no tp background
+    denominator2 += (denominator2 == 0).type(denominator2.dtype) # 100% tp foreground
+    denominator += (denominator == 0).type(denominator.dtype) # ???¿¿¿
+
+    #loss_per_channel = 1 - numerator / denominator  # (C,)
+    #loss_per_channel = 1 - ((numerator * denominator2 + denominator * numerator2) / (2 * denominator * denominator2))  # (C,)
+
+    loss_per_channel = 1 - (numerator * denominator2 + denominator * numerator2) / (2 * denominator * denominator2) # (C,)
+
+    #loss_per_channel = 1 - (numerator + numerator2 + target_mask_empty * (1 - weight)) / (denominator + denominator2 + target_mask_empty * (1 - weight)) # (C,)
+    #weighted_loss = 1 - (numerator.sum() + numerator2.sum())/(denominator.sum() + denominator2.sum())
+    #weighted_loss = 1 - (numerator[1:-1].sum() + numerator2[1:-1].sum()) / (denominator[1:-1].sum() + denominator2[1:-1].sum()) # (C,)
+
+    #weighted_loss = (weight[:-1] * loss_per_channel[:-1]).sum() / weight[:-1].sum()  # (C,)
+
+    # normalize loss to [0, 1]
+    weighted_loss = loss_per_channel[1:-1].sum() / ((loss_per_channel[1:-1] > 0).sum() + (loss_per_channel[1:-1].sum() == 0))  # (C,)
+    weighted_loss *= 2
+
+    if torch.isnan(weighted_loss):
+        print(loss_per_channel)
+        import IPython
+        IPython.embed()
+
+    return weighted_loss  # ()
 
 
 class DiceLoss(torch.nn.Module):
@@ -65,7 +104,7 @@ class DiceLoss(torch.nn.Module):
         weight: Weight tensor for class-wise loss rescaling.
             Has to be of shape (C,). If ``None``, classes are weighted equally.
     """
-    def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
+    def __init__(self, apply_softmax=True, weight=torch.tensor(1.), class_weight=torch.tensor(1.)):
         super().__init__()
         if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
@@ -73,10 +112,11 @@ class DiceLoss(torch.nn.Module):
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
         self.register_buffer('weight', weight)
+        self.register_buffer('class_weight', class_weight)
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.dice(probs, target, weight=self.weight)
+        return self.dice(probs, target, weight=self.weight, class_weight=self.class_weight)
 
 
 class LovaszLoss(torch.nn.Module):
