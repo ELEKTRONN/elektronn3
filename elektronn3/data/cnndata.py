@@ -362,8 +362,7 @@ class PatchCreator(data.Dataset):
         or randomly on valid data
         """
         if self.train:
-            p = np.random.rand()
-            i = np.flatnonzero(self._sampling_weight <= p)[-1]
+            i = np.random.choice(np.arange(self._sampling_weight.size), p=self._sampling_weight)
             inp_source, target_source = self.inputs[i], self.targets[i]
         else:
             if len(self.inputs) == 0:
@@ -391,8 +390,8 @@ class PatchCreator(data.Dataset):
         else:  # If priorities are given: sample irrespective of cube size
             prios = np.array(self.cube_prios, dtype=np.float)
 
-        # sample example i if: batch_prob[i] < p
-        self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
+        self._sampling_weight = prios / prios.sum()
+        logger.debug(f'prios = {prios}, sampling_weight = {self._sampling_weight}')
 
     def check_files(self) -> None:  # TODO: Update for cdhw version
         """
