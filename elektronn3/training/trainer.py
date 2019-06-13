@@ -209,6 +209,7 @@ class Trainer:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
+            optimizer_iterations: int = 1,
     ):
         if preview_batch is not None and\
                 (preview_tile_shape is None or preview_overlap_shape is None):
@@ -261,6 +262,8 @@ class Trainer:
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
+        self.optimizer_iterations = optimizer_iterations
+        assert(optimizer_iterations > 0)
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -423,15 +426,16 @@ class Trainer:
         self._save_model(suffix='_final')
 
     def _train(self, max_steps, max_runtime):
-        self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, list] = {stat: [] for stat in ['tr_loss', 'tr_accuracy']}
+        stats: Dict[str, list] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
         # Other scalars to be logged
         misc: Dict[str, float] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
         images: Dict[str, np.ndarray] = {}
 
+        self.model.train()
+        self.optimizer.zero_grad()
         running_vx_size = 0
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
@@ -461,13 +465,12 @@ class Trainer:
                 raise NaNException
 
             # update step
-            self.optimizer.zero_grad()
-            if self.mixed_precision:
-                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                dloss.backward()
-            self.optimizer.step()
+            dloss.backward()
+            if i % self.optimizer_iterations == self.optimizer_iterations - 1:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                #loss2 = float(self.criterion(self.model(dinp), dtarget))
+                #print(f'loss gain factor {np.divide(float(dloss), (float(dloss)-loss2))})')
             # End of core training loop on self.device
 
             with torch.no_grad():
@@ -479,6 +482,9 @@ class Trainer:
                 mean_target = float(multi_class_target.to(torch.float32).mean())
 
                 stats['tr_loss'].append(loss)
+                stats['tr_loss_mean'] += [float('nan')] * (i - len(stats['tr_loss_mean']))
+                if i % self.optimizer_iterations == self.optimizer_iterations - 1:
+                    stats['tr_loss_mean'] += [np.mean(stats['tr_loss'][-self.optimizer_iterations:])]
                 stats['tr_accuracy'].append(acc)
 
                 #if stats['tr_DSC_c3'][-1] < 5:
