@@ -213,7 +213,7 @@ class PatchCreator(data.Dataset):
         # use index just as counter, subvolumes will be chosen randomly
 
         self._reseed()
-        input_src, target_src = self._getcube()  # get cube randomly
+        input_src, target_src, i = self._getcube()  # get cube randomly
         warp_prob = self.warp_prob
         while True:
             try:
@@ -385,7 +385,7 @@ class PatchCreator(data.Dataset):
             i = self.rng.randint(0, len(self.inputs))
             inp_source, target_source = self.inputs[i], self.targets[i]
 
-        return inp_source, target_source
+        return inp_source, target_source, i
 
     def load_data(self) -> None:
         inp_files, target_files = self.open_files()
