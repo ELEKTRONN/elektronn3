@@ -19,4 +19,4 @@ torchvision
 
 # For hosting a tensorboard server (not strictly required):
 tensorboard>=1.8.0
-tesnroflow
+tensorboard

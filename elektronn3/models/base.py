@@ -65,44 +65,48 @@ class InferenceModel(object):
             start = time.time()
         if self.normalize_func is not None:
             inp = self.normalize_func(inp)
-        with torch.no_grad():
-            # get output shape shape
-            if type(inp) is tuple:
+        # get output shape shape
+        if type(inp) is tuple:
+            with torch.no_grad():
                 out = self.model(*(torch.Tensor(ii[:2]).to(torch.float32).to(self.device) for ii in inp))
-                n_samples = len(inp[0])
-            else:
+            n_samples = len(inp[0])
+        else:
+            with torch.no_grad():
                 out = self.model(torch.Tensor(inp[:2]).to(torch.float32).to(self.device))
-                n_samples = len(inp)
-            # change sample number according to input
-            if type(out) is tuple:
-                out = tuple(np.zeros([n_samples] + list(out[ii].shape)[1:],
-                               dtype=np.float32) for ii in range(len(out)))
-            else:
-                out = np.zeros([n_samples] + list(out.shape)[1:], dtype=np.float32)
-            for ii in range(0, int(np.ceil(n_samples / bs))):
-                low = bs * ii
-                high = bs * (ii + 1)
-                if type(inp) is tuple:
-                    inp_stride = tuple(torch.Tensor(ii[low:high]).to(torch.float32).to(self.device) for ii in inp)
+            n_samples = len(inp)
+        # change sample number according to input
+        if type(out) is tuple:
+            out = tuple(np.zeros([n_samples] + list(out[ii].shape)[1:],
+                           dtype=np.float32) for ii in range(len(out)))
+        else:
+            out = np.zeros([n_samples] + list(out.shape)[1:], dtype=np.float32)
+        for ii in range(0, int(np.ceil(n_samples / bs))):
+            low = bs * ii
+            high = bs * (ii + 1)
+            if type(inp) is tuple:
+                inp_stride = tuple(torch.Tensor(ii[low:high]).to(torch.float32).to(self.device) for ii in inp)
+                with torch.no_grad():
                     res = self.model(*inp_stride)
-                else:
-                    inp_stride = torch.Tensor(inp[low:high]).to(torch.float32).to(self.device)
+            else:
+                inp_stride = torch.Tensor(inp[low:high]).to(torch.float32).to(self.device)
+                with torch.no_grad():
                     res = self.model(inp_stride)
-                if type(res) is tuple:
-                    for ii in range(len(res)):
-                        out[ii][low:high] = res[ii].detach().cpu()
-                else:
-                    out[low:high] = res.detach().cpu()
-                if type(inp_stride) is tuple:
-                    for el in inp_stride:
-                        el.detach_()
-                else:
-                    inp_stride.detach_()
-                del inp_stride
-                del res
-                torch.cuda.empty_cache()
-            assert high >= n_samples, "Prediction less samples then given" \
-                                     " in input."
+            if type(res) is tuple:
+                for ii in range(len(res)):
+                    out[ii][low:high] = res[ii].detach().cpu()
+            else:
+                out[low:high] = res.detach().cpu()
+            if type(inp_stride) is tuple:
+                for el in inp_stride:
+                    el.detach_()
+            else:
+                inp_stride.detach_()
+            res.detach_()
+            del inp_stride
+            del res
+            torch.cuda.empty_cache()
+        assert high >= n_samples, "Prediction less samples then given" \
+                                 " in input."
         if verbose:
             dtime = time.time() - start
             if type(inp) is tuple:
