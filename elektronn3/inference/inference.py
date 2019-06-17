@@ -117,7 +117,7 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=inp.dtype)
+    out = torch.empty(out_shape, dtype=torch.uint8, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
@@ -180,7 +180,7 @@ Tensor
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
-        out[out_slice] = out_tile
+        out[out_slice] = (out_tile > 0.5).argmax(dim=1).to(torch.uint8)
 
     return out
 
