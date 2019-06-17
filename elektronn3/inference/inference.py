@@ -406,7 +406,7 @@ class Predictor:
 
         orig_shape = inp.shape
         new_shape = np.array(inp.shape)
-        new_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+        new_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
         foo = np.zeros(new_shape.tolist())
         foo[0:1,0:1,0:orig_shape[2],0:orig_shape[3],0:orig_shape[4]] = inp
         inp = foo
