@@ -733,7 +733,7 @@ class Trainer:
                 for i in range(len(value)):
                     if not np.isnan(value[i]):
                         self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
-            else:
+            elif not np.isnan(value):
                 self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     # TODO: Make more configurable
