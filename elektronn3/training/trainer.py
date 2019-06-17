@@ -888,9 +888,8 @@ class Trainer:
                 for i in range(len(value)):
                     if not np.isnan(value[i]):
                         self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
-            else:
-                if not np.isnan(value):
-                    self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+            elif not np.isnan(value):
+                self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     def _tb_log_histograms(self) -> None:
         """Log histograms of model parameters and their current gradients.
