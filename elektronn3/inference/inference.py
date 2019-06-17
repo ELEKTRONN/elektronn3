@@ -33,6 +33,8 @@ def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
 def tiled_apply(
         func: Callable[[torch.Tensor], torch.Tensor],
         inp: torch.Tensor,
+        device,
+        dtype,
         tile_shape: Sequence[int],
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
@@ -117,15 +119,14 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=inp.dtype, device='cpu')
+    out = torch.empty(out_shape, dtype=dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
-    device=inp.device
 
     # Create padded input with overlap
     padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
-    inp_padded = torch.empty(tuple(padded_shape), dtype=inp.dtype, device='cpu')
+    inp_padded = torch.empty(tuple(padded_shape), dtype=dtype, device='cpu')
 
     padslice = _extend_nc(
         [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
@@ -174,7 +175,7 @@ Tensor
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
-        inp_tile = inp_padded[inp_slice].clone().detach().to(device, non_blocking=True)
+        inp_tile = inp_padded[inp_slice].clone().detach().to(device, dtype, non_blocking=True)
         out_tile = func(inp_tile)
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
@@ -354,6 +355,8 @@ class Predictor:
             return tiled_apply(
                 self._predict,
                 inp=inp,
+                device=self.device,
+                dtype=self.dtype,
                 tile_shape=self.tile_shape,
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
@@ -361,6 +364,9 @@ class Predictor:
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
+        inp = inp.to(self.device, dtype=self.dtype, non_blocking=True)
+        if self.device.type == 'cuda':
+            inp.pin_memory()
         return self._predict(inp)
 
     def _splitbatch_predict(
@@ -406,10 +412,9 @@ class Predictor:
         inp = foo
         self.out_shape = (self.out_shape[0], *new_shape[2:])
 
-        inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
-        if self.device.type == 'cuda':
-            inp.pin_memory()
-        inp = inp.to(self.device, non_blocking=True)
+        print(self.out_shape, orig_shape)
+        inp = torch.as_tensor(inp)
+
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         # Lazily figure out these Predictor options based on the input it
@@ -433,14 +438,14 @@ class Predictor:
         #  will misleadingly report a huge amount of time spent in out.cpu()
         if self.device.type == 'cuda':
             torch.cuda.synchronize()
-        out = out.cpu()
+        out = out[0:1,0:self.out_shape[0],0:orig_shape[2],0:orig_shape[3],0:orig_shape[4]].cpu()
         if self.verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
             # TODO: Report speed in terms of output, not input (This is not as easy as replacing
             #       inp by out because out may contain padding that we don't want to count)
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
-        return out[0:1,0:self.out_shape[0],0:orig_shape[2],0:orig_shape[3],0:orig_shape[4]]
+        return out
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
