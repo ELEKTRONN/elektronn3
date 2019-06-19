@@ -226,6 +226,57 @@ class Normalize:
         return normalized, target
 
 
+# TODO: Support uniform distribution (or any distribution in general)
+class RandomBrightnessContrast:
+    """Randomly changes brightness and contrast of the input image.
+
+    Args:
+        brightness_std: Standard deviation of contrast change strength (bias)
+        contrast_std: Standard deviation of brightness change strength (scale)
+        channels: If ``channels`` is ``None``, the change is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, change is only applied
+            to the specified channels.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``.
+    """
+
+
+    def __init__(
+            self,
+            brightness_std: float = 0.5,
+            contrast_std: float = 0.5,
+            channels: Optional[Sequence[int]] = None,
+            prob: float = 1.0,
+    ):
+        if not channels:  # Support empty sequences as an alias for None
+            channels = None
+        self.channels = channels
+        self.prob = prob
+        self.brightness_gen = Normal(mean=0.0, sigma=brightness_std)
+        self.contrast_gen = Normal(mean=1.0, sigma=contrast_std)
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None  # returned without modifications
+            # TODO: fast in-place version
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if np.random.rand() > self.prob:
+            return inp, target
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
+        augmented = inp.copy()
+        for c in channels:
+            a = self.contrast_gen()
+            b = self.brightness_gen()
+            # Formula based on tf.image.{adjust_contrast,adjust_brightness}
+            # See https://www.tensorflow.org/api_docs/python/tf/image
+            m = np.mean(inp[c])
+            augmented[c] = a * (inp[c] - m) + m + b
+        return augmented, target
+
+
 # TODO: Per-channel gamma_std, infer channels from gamma_std shape? Same with AdditiveGaussianNoise
 # TODO: Sample from a more suitable distribution. Due to clipping to gamma_min,
 #       there is currently a strong bias towards this value.
