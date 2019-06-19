@@ -99,6 +99,46 @@ class Lambda:
         return self.func(inp, target)
 
 
+class RandomSlicewiseTransform:
+    """Wraps any 2D transform and applies it per 2D slice independently in a 3D
+    input-target pair.
+
+    Works with any (..., D, H, W) memory layout given that if the ``target``
+    is not ``None``, the last three dimensions of target and input tensors
+    match.
+
+    Args:
+        transform:
+        prob:
+    """
+    def __init__(self, transform, prob=0.1, inplace=True):
+        self.transform = transform
+        self.prob = prob
+        assert inplace, 'Only inplace operation is supported currently'
+
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        assert inp.ndim == 4, 'Input must be of shape (C, D, H, W)'
+        if target is not None:
+            assert inp.shape[-3:] == target.shape[-3:], 'Spatial shape of target must match input'
+        D = inp.shape[-3]  # Extent in z dimension
+        for z in range(D):
+            # TODO: rand can be vectorized
+            if np.random.rand() < self.prob:  # Only apply to this z slice with p=prob
+                if target is None:
+                    # For support of (..., D, H, W) memory layout:
+                    # Indexing with [..., z, :, :] is necessary to stay agnostic
+                    # to the number of pre-depth dimensions (we only know for
+                    # certain that depth is the third from last dimension).
+                    inp[..., z, :, :], _ = self.transform(inp[..., z, :, :], None)
+                else:
+                    inp[..., z, :, :], target[..., z, :, :] = self.transform(inp[..., z, :, :], target[..., z, :, :])
+        return inp, target
+
+
 class DropIfTooMuchBG:
     """Filter transform that skips a sample if the background class is too
     dominant in the target."""
