@@ -266,7 +266,7 @@ class RandomGammaCorrection:
         if np.random.rand() > self.prob:
             return inp, target
         channels = range(inp.shape[0]) if self.channels is None else self.channels
-        gcorr = np.empty_like(inp)
+        gcorr = inp.copy()
         for c in channels:
             gamma = self.gamma_generator()
             # adjust_gamma() requires inputs in the (0, 1) range, so the
