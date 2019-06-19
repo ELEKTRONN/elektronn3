@@ -101,7 +101,6 @@ class InferenceModel(object):
                     el.detach_()
             else:
                 inp_stride.detach_()
-            res.detach_()
             del inp_stride
             del res
             torch.cuda.empty_cache()
