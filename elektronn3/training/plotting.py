@@ -382,7 +382,10 @@ def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
             plt.plot(history['steps'], sma(history['valid_err'], 8), 'r-',
                      label='Smooth valid Error', linewidth=3)
         if autoscale:
-            plt.ylim(err_floor, err_cap)
+            try:
+                plt.ylim(err_floor, err_cap)
+            except ValueError:  # NaN errors can't be used for auto-scaling.
+                pass
             plt.xlim(0, history['steps'][-1])
 
         plt.grid()
@@ -393,4 +396,4 @@ def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
 
     except ValueError:
         # When arrays are empty
-        logger.warning("An error occurred during plotting.")
+        logger.exception("An error occurred during plotting.")

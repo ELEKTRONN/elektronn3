@@ -4,7 +4,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 
-__all__ = ['PatchCreator', 'SimpleNeuroData2d']
+__all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
 
 import logging
 import os
@@ -15,6 +15,7 @@ from os.path import expanduser
 from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 
 import h5py
+import imageio
 import numpy as np
 import torch
 from torch.utils import data
@@ -186,10 +187,6 @@ class PatchCreator(data.Dataset):
         self.transform = transform
 
         # Setup internal stuff
-        # TODO: Support custom rng for better reproducibility
-        self.rng = np.random.RandomState(
-            np.uint32((time.time() * 0.0001 - int(time.time() * 0.0001)) * 4294967295)
-        )
         self.pid = os.getpid()
 
         # The following fields will be filled when reading data
@@ -212,7 +209,6 @@ class PatchCreator(data.Dataset):
         #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
-        self._reseed()
         input_src, target_src = self._getcube()  # get cube randomly
         warp_prob = self.warp_prob
         while True:
@@ -235,7 +231,9 @@ class PatchCreator(data.Dataset):
                         'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
                     )
                 continue
-            # TODO: Actually find out what's causing those.
+            except coord_transforms.WarpingSanityError:
+                logger.exception('Invalid coordinate values encountered while warping. Retrying...')
+                continue
             except OSError:
                 if self.n_read_failures > self.n_successful_warp:
                     logger.error(
@@ -286,16 +284,6 @@ class PatchCreator(data.Dataset):
             self.n_successful_warp, self.n_failed_warp,
             float(self.n_successful_warp)/(self.n_failed_warp+self.n_successful_warp))
 
-    def _reseed(self) -> None:
-        """Reseeds the rng if the process ID has changed!"""
-        current_pid = os.getpid()
-        if current_pid != self.pid:
-            logger.debug(f'New worker process started (PID {current_pid})')
-            self.pid = current_pid
-            self.rng.seed(
-                np.uint32((time.time()*0.0001 - int(time.time()*0.0001))*4294967295+self.pid)
-            )
-
     def warp_cut(
             self,
             inp_src: h5py.Dataset,
@@ -340,7 +328,7 @@ class PatchCreator(data.Dataset):
         if (warp_prob is True) or (warp_prob == 1):  # always warp
             do_warp = True
         elif 0 < warp_prob < 1:  # warp only a fraction of examples
-            do_warp = True if (self.rng.rand() < warp_prob) else False
+            do_warp = True if (np.random.rand() < warp_prob) else False
         else:  # never warp
             do_warp = False
 
@@ -354,7 +342,6 @@ class PatchCreator(data.Dataset):
             aniso_factor=self.aniso_factor,
             target_src_shape=target_src.shape,
             target_patch_shape=self.target_patch_size,
-            rng=self.rng,
             **warp_kwargs
         )
 
@@ -375,7 +362,7 @@ class PatchCreator(data.Dataset):
         or randomly on valid data
         """
         if self.train:
-            p = self.rng.rand()
+            p = np.random.rand()
             i = np.flatnonzero(self._sampling_weight <= p)[-1]
             inp_source, target_source = self.inputs[i], self.targets[i]
         else:
@@ -383,7 +370,7 @@ class PatchCreator(data.Dataset):
                 raise ValueError("No validation set")
 
             # TODO: Sampling weight for validation data?
-            i = self.rng.randint(0, len(self.inputs))
+            i = np.random.randint(0, len(self.inputs))
             inp_source, target_source = self.inputs[i], self.targets[i]
 
         return inp_source, target_source
@@ -439,16 +426,23 @@ class PatchCreator(data.Dataset):
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
-            inp_h5 = h5py.File(inp_fname, 'r')[inp_key]#[:, 50:-50, 100:-100, 100:-100]
-            target_h5 = h5py.File(target_fname, 'r')[target_key]
+            inp_h5_file = h5py.File(inp_fname, 'r')
+            inp_h5_data = inp_h5_file[inp_key]#[:, 50:-50, 100:-100, 100:-100]
+            target_h5_file = h5py.File(target_fname, 'r')
+            target_h5_data = target_h5_file[target_key]
             if self.in_memory:
-                inp_h5 = inp_h5.value
-                target_h5 = target_h5.value
+                # Get copies of the dataset contents as in-memory numpy arrays
+                inp_h5_val = inp_h5_data[()]
+                inp_h5_file.close()
+                inp_h5_data = inp_h5_val
+                target_h5_val = target_h5_data[()]
+                target_h5_file.close()
+                target_h5_data = target_h5_val
 
-            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5.shape} ({inp_h5.dtype})')
-            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5.shape} ({target_h5.dtype})')
-            inp_h5sets.append(inp_h5)
-            target_h5sets.append(target_h5)
+            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
+            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
+            inp_h5sets.append(inp_h5_data)
+            target_h5sets.append(target_h5_data)
         print()
 
         return inp_h5sets, target_h5sets
@@ -554,3 +548,105 @@ class SimpleNeuroData2d(data.Dataset):
         self.inp_file.close()
         self.target_file.close()
 
+
+# TODO: docs, types
+class Segmentation2d(data.Dataset):
+    """Simple dataset for 2d segmentation.
+
+    Expects a list of ``input_paths`` and ``target_paths`` where
+    ``target_paths[i]`` is the target of ``input_paths[i]`` for all i.
+    """
+    def __init__(
+            self,
+            inp_paths,
+            target_paths,
+            transform=transforms.Identity(),
+            in_memory=True,
+            inp_dtype=np.float32,
+            target_dtype=np.int64,
+            epoch_multiplier=1,  # Pretend to have more data in one epoch
+    ):
+        super().__init__()
+        self.inp_paths = inp_paths
+        self.target_paths = target_paths
+        self.transform = transform
+        self.in_memory = in_memory
+        self.inp_dtype = inp_dtype
+        self.target_dtype = target_dtype
+        self.epoch_multiplier = epoch_multiplier
+
+        if self.in_memory:
+            self.inps = [
+                np.array(imageio.imread(fname)).astype(np.float32)[None]
+                for fname in self.inp_paths
+            ]
+            self.targets = [
+                np.array(imageio.imread(fname)).astype(np.int64)
+                for fname in self.target_paths
+            ]
+
+    def __getitem__(self, index):
+        index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
+        if self.in_memory:
+            inp = self.inps[index]
+            target = self.targets[index]
+        else:
+            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
+            if inp.ndim == 2:  # (H, W)
+                inp = inp[None]  # (C=1, H, W)
+            target = np.array(imageio.imread(self.target_paths[index]), dtype=self.target_dtype)
+        while True:  # Only makes sense if RandomCrop is used
+            try:
+                inp, target = self.transform(inp, target)
+                break
+            except transforms._DropSample:
+                pass
+        return inp, target
+
+    def __len__(self):
+        return len(self.target_paths) * self.epoch_multiplier
+
+
+# TODO: Document
+class Reconstruction2d(data.Dataset):
+    """Simple dataset for 2d reconstruction for auto-encoders etc..
+    """
+    def __init__(
+            self,
+            inp_paths,
+            transform=transforms.Identity(),
+            in_memory=True,
+            inp_dtype=np.float32,
+            epoch_multiplier=1,  # Pretend to have more data in one epoch
+    ):
+        super().__init__()
+        self.inp_paths = inp_paths
+        self.transform = transform
+        self.in_memory = in_memory
+        self.inp_dtype = inp_dtype
+        self.epoch_multiplier = epoch_multiplier
+
+        if self.in_memory:
+            self.inps = [
+                np.array(imageio.imread(fname)).astype(np.float32)[None]
+                for fname in self.inp_paths
+            ]
+
+    def __getitem__(self, index):
+        index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
+        if self.in_memory:
+            inp = self.inps[index]
+        else:
+            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
+            if inp.ndim == 2:  # (H, W)
+                inp = inp[None]  # (C=1, H, W)
+        while True:  # Only makes sense if RandomCrop is used
+            try:
+                inp, _ = self.transform(inp, None)
+                break
+            except transforms._DropSample:
+                pass
+        return inp, inp
+
+    def __len__(self):
+        return len(self.inp_paths) * self.epoch_multiplier

@@ -1,11 +1,12 @@
+version: 2
+
 build:
-  image: latest
+  image: stable
 
 python:
   version: 3.6
-  pip_install: true
-  use_system_site_packages: true
-
-requirements_file: docs/sphinx-requirements.txt
-
-formats: []  # Disable htmlzip, pdf and epub builds to save resources
+  install:
+    - requirements: docs/sphinx-requirements.txt
+    - method: pip
+      path: .
+  system_packages: true

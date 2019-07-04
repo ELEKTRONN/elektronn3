@@ -199,7 +199,8 @@ def _tb_log_sample_images(
     inp_slice = batch2img_inp(images['inp'])[0]
 
     # TODO: Support one-hot targets
-    # Check if the network is being trained for classification
+    # TODO: Support multi-label targets
+    # Check if the network is being trained for classification with class index target tensors
     is_classification = target_batch.ndim == out_batch.ndim - 1
     # If it's not classification, we assume a regression scenario
     is_regression = np.all(target_batch.shape == out_batch.shape)
@@ -234,6 +235,7 @@ def _tb_log_sample_images(
         padded_target_batch[slc] = target_batch
         target_batch = padded_target_batch
 
+    target_cmap = None
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
     if is_classification:
@@ -242,13 +244,17 @@ def _tb_log_sample_images(
         # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
         target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
         out_slice = np.moveaxis(out_slice, 0, -1)
+    elif target_slice.shape[0] == 1:
+        target_slice = target_slice[0]
+        out_slice = out_slice[0]
+        target_cmap = 'gray'
     else:
         raise RuntimeError(
             f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
         )
 
-    if (inp_batch.ndim == 5) and (target_batch.ndim == 5) and \
-            trainer.enable_videos:  # 5D tensors -> 3D images -> We can make 2D videos out of them
+    if inp_batch.ndim == 5 and trainer.enable_videos:
+        # 5D tensors -> 3D images -> We can make 2D videos out of them
         # We re-interpret the D dimension as the temporal dimension T of the video
         #  -> (N, C, T, H, W)
         # Inputs and outputs need to be squashed to the (0, 1) intensity range
@@ -260,6 +266,7 @@ def _tb_log_sample_images(
         inp_video = squash01(inp_batch)
         target_video = target_batch
         if target_video.ndim == 4:
+            # TODO: This fails with 2D multi-channel targets. Handle these reliably
             target_video = target_video[:, None]
         trainer.tb.add_video(
             f'{group}_vid/inp', inp_video, global_step=trainer.step
@@ -281,7 +288,7 @@ def _tb_log_sample_images(
     )
     trainer.tb.add_figure(
         f'{group}/target',
-        plot_image(target_slice, num_classes=trainer.num_classes),
+        plot_image(target_slice, num_classes=trainer.num_classes, cmap=target_cmap),
         global_step=trainer.step
     )
 
@@ -301,10 +308,13 @@ def _tb_log_sample_images(
             plot_image(pred_slice, num_classes=trainer.num_classes),
             global_step=trainer.step
         )
-        if not target_batch.ndim == 2:
+        if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
             inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
             target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
             pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+            # Ensure the value range remains [0, 1]
+            target_slice_ov = np.clip(target_slice_ov, 0, 1)
+            pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
                 plot_image(target_slice_ov, colorbar=False),
@@ -322,4 +332,4 @@ def _tb_log_sample_images(
             #       (i.e. with more contribution of the overlayed label map).
             #       Don't know how to fix this currently.
     elif is_regression:
-        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice), global_step=trainer.step)
+        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap), global_step=trainer.step)

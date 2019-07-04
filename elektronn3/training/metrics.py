@@ -7,6 +7,7 @@
 """Metrics and tools for evaluating neural network predictions
 
 References:
+
 - https://en.wikipedia.org/wiki/Confusion_matrix
 - https://stats.stackexchange.com/questions/273537/f1-dice-score-vs-iou
 - http://scikit-learn.org/stable/modules/model_evaluation.html
@@ -53,7 +54,8 @@ def confusion_matrix(
         pred: torch.LongTensor,
         num_classes: int = 2,
         dtype: torch.dtype = torch.float32,
-        device: torch.device = torch.device('cpu')
+        device: torch.device = torch.device('cpu'),
+        nan_when_empty: bool = True
 ) -> torch.Tensor:
     """ Calculate per-class confusion matrix.
 
@@ -71,6 +73,9 @@ def confusion_matrix(
             against overflows and can be used directly in true divisions
             without re-casting.
         device: PyTorch device on which to store the confusion matrix
+        nan_when_empty: If ``True`` (default), the confusion matrix will
+            be filled with NaN values for each channel of which there are
+            no positive entries in the ``target`` tensor.
 
     Returns:
         Confusion matrix ``cm``, with shape ``(num_classes, 4)``, where
@@ -83,6 +88,9 @@ def confusion_matrix(
 
         E.g. ``cm[1][2]`` contains the number of false positive predictions
         of class ``1``.
+        If ``nan_when_empty`` is enabled and there are no positive elements
+        of class ``1`` in ``target``, ``cm[1]`` will instead be filled with
+        NaN values.
     """
     cm = torch.empty(num_classes, 4, dtype=dtype, device=device)
     for c in range(num_classes):
@@ -98,10 +106,13 @@ def confusion_matrix(
 
         cm[c] = torch.tensor([true_pos, true_neg, false_pos, false_neg])
 
+        if nan_when_empty and pos_target.sum(dtype=dtype) == 0:
+            cm[c] = torch.tensor([float('nan')] * 4)
+
     return cm
 
 
-def precision(target, pred, num_classes=2, mean=False):
+def precision(target, pred, num_classes=2, mean=True):
     """Precision metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -112,7 +123,7 @@ def precision(target, pred, num_classes=2, mean=False):
     return prec * 100
 
 
-def recall(target, pred, num_classes=2, mean=False):
+def recall(target, pred, num_classes=2, mean=True):
     """Recall metric a.k.a. sensitivity a.k.a. hit rate (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -122,7 +133,7 @@ def recall(target, pred, num_classes=2, mean=False):
     return rec * 100
 
 
-def accuracy(target, pred, num_classes=2, mean=False):
+def accuracy(target, pred, num_classes=2, mean=True):
     """Accuracy metric (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -132,7 +143,7 @@ def accuracy(target, pred, num_classes=2, mean=False):
     return acc * 100
 
 
-def dice_coefficient(target, pred, num_classes=2, mean=False):
+def dice_coefficient(target, pred, num_classes=2, mean=True):
     """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -142,7 +153,7 @@ def dice_coefficient(target, pred, num_classes=2, mean=False):
     return dsc * 100
 
 
-def iou(target, pred, num_classes=2, mean=False):
+def iou(target, pred, num_classes=2, mean=True):
     """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index (in %)"""
     cm = confusion_matrix(target, pred, num_classes=num_classes)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
@@ -152,7 +163,7 @@ def iou(target, pred, num_classes=2, mean=False):
     return iu * 100
 
 
-def auroc(target, probs, mean=False):
+def auroc(target, probs, mean=True):
     """ Area under Curve (AuC) of the ROC curve (in %).
 
     .. note::
@@ -179,7 +190,7 @@ def auroc(target, probs, mean=False):
     return auc * 100
 
 
-def average_precision(target, probs, mean=False):
+def average_precision(target, probs, mean=True):
     """Average precision (AP) metric based on PR curves (in %).
 
     .. note::
@@ -260,9 +271,8 @@ def bin_recall(target, out):
     )[1]  # Take only the score for class 1
 
 
-def bin_accuracy(target, out, fast=False):
+def bin_accuracy(target, out):
     pred = _argmax(out)
-    # return torch.sum(target == pred).item() / target.numel() * 100
     return accuracy(
         target, pred, num_classes=2, mean=False
     )[1]  # Take only the score for class 1

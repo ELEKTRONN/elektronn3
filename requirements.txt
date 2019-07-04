@@ -1,6 +1,6 @@
 # python>=3.6
 
-torch>=1.0.0
+torch>=1.1.0
 numpy
 scipy
 h5py
@@ -17,6 +17,6 @@ colorlog
 tensorboardX
 torchvision
 
-# For hosting a tensorboard server (not strictly required):
-tensorboard>=1.8.0
-tensorboard
+# Only required for running a tensorboard server:
+tensorboard>=1.13
+tensorflow

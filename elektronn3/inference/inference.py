@@ -117,14 +117,15 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=inp.dtype, device=inp.device)
+    out = torch.empty(out_shape, dtype=inp.dtype)
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
+    device = inp.device
 
     # Create padded input with overlap
     padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
-    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype, device=inp.device)
+    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
 
     padslice = _extend_nc(
         [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
@@ -173,8 +174,9 @@ Tensor
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
-        inp_tile = inp_padded[inp_slice]
+        inp_tile = inp_padded[inp_slice].contiguous().to(device)
         out_tile = func(inp_tile)
+
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
@@ -250,6 +252,7 @@ class Predictor:
             (``num_classes``, ``num_out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
             yourself as follows:
+
             >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
             >>> out_shape = (num_out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
@@ -257,6 +260,12 @@ class Predictor:
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        strict_shapes: If ``False`` (default), force the ``output_shape`` to be
+            a multiple of the ``tile_shape`` by padding the input. This allows
+            for greater flexibility of the ``tile_shape`` but potentially wastes
+            more computation (the padded region will be passed into the model
+            but will later be discarded from the output tensor).
+            If ``True``, incompatible shapes will result in an error.
         verbose: If ``True``, report inference speed.
 
     Examples:
@@ -280,6 +289,7 @@ class Predictor:
             offset: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
+            strict_shapes: bool = False,
             verbose: bool = False,
     ):
         if device is None:
@@ -297,6 +307,8 @@ class Predictor:
             offset = np.array(offset)
         self.overlap_shape = overlap_shape
         self.offset = offset
+        if out_shape is not None:
+            out_shape = np.array(out_shape)
         self.out_shape = out_shape
         self.float16 = float16
         if float16 and not isinstance(model, str):
@@ -305,6 +317,7 @@ class Predictor:
                 'that are passed as file paths (strings).'
             )
         self.dtype = torch.float16 if float16 else torch.float32
+        self.strict_shapes = strict_shapes
         self.verbose = verbose
         if isinstance(model, str):
             if os.path.isfile(model):
@@ -320,6 +333,8 @@ class Predictor:
         self.model = model
         if isinstance(state_dict_src, str):
             state_dict = torch.load(state_dict_src)
+            if 'model_state_dict' in state_dict:  # Handle nested dicts
+                state_dict = state_dict['model_state_dict']
         elif isinstance(state_dict_src, dict) or state_dict_src is None:
             state_dict = state_dict_src
         else:
@@ -343,11 +358,16 @@ class Predictor:
         with torch.no_grad():
             return self.model(inp)
 
-    def _tiled_predict(self, inp: torch.Tensor) -> torch.Tensor:
+    def _tiled_predict(
+            self,
+            inp: torch.Tensor,
+            out_shape: Optional[Tuple[int]] = None
+    ) -> torch.Tensor:
         """Tiled inference with overlapping input tiles.
 
         Tiling is not used if ``tile_shape`` and ``overlap_shape`` are
         undefined."""
+        out_shape = (inp.shape[0], *out_shape)
         if self.enable_tiling:
             return tiled_apply(
                 self._predict,
@@ -355,7 +375,7 @@ class Predictor:
                 tile_shape=self.tile_shape,
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
-                out_shape=(inp.shape[0], *self.out_shape),
+                out_shape=out_shape,
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
@@ -365,6 +385,7 @@ class Predictor:
             self,
             inp: torch.Tensor,
             num_batches: int,
+            out_shape: Optional[Tuple[int]] = None
     ) -> torch.Tensor:
         """Split the input batch into smaller batches of the specified
         ``batch_size`` and perform inference on each of them separately."""
@@ -374,7 +395,7 @@ class Predictor:
         for k in range(0, num_batches):
             low = self.batch_size * k
             high = self.batch_size * (k + 1)
-            out[low:high] = self._tiled_predict(inp[low:high])
+            out[low:high] = self._tiled_predict(inp[low:high], out_shape=out_shape)
         return out
 
     def predict(
@@ -395,6 +416,8 @@ class Predictor:
         """
         if self.verbose:
             start = time.time()
+        # Check/change out_shape for divisibility by tile_shape
+        inp, out_shape, relevant_slice = self._ensure_matching_shapes(inp)
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         if self.device.type == 'cuda':
             inp.pin_memory()
@@ -413,16 +436,16 @@ class Predictor:
             self.batch_size = inp_batch_size
         num_batches = int(np.ceil(inp_batch_size / self.batch_size))
         if num_batches == 1:  # Predict everything in one step
-            out = self._tiled_predict(inp=inp)
+            out = self._tiled_predict(inp=inp, out_shape=out_shape)
         else:  # Split input batch into smaller batches and predict separately
-            out = self._splitbatch_predict(inp=inp, num_batches=num_batches)
+            out = self._splitbatch_predict(inp=inp, num_batches=num_batches, out_shape=out_shape)
 
         # Explicit synchronization so the next GPU operation won't be
         #  mysteriously slow. If we don't synchronize manually here, profilers
         #  will misleadingly report a huge amount of time spent in out.cpu()
         if self.device.type == 'cuda':
             torch.cuda.synchronize()
-        out = out.cpu()
+        out = out.cpu() if relevant_slice is None else out[relevant_slice].cpu()
         if self.verbose:
             dtime = time.time() - start
             speed = inp.numel() / dtime / 1e6
@@ -430,6 +453,51 @@ class Predictor:
             #       inp by out because out may contain padding that we don't want to count)
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
+
+    # TODO: Make this work with input shape != output shape
+    def _ensure_matching_shapes(self, inp: np.ndarray) -> Tuple[np.ndarray, Optional[Tuple[int]], Optional[slice]]:
+        if self.out_shape is not None and np.any(self.out_shape[1:] % self.tile_shape):
+            if self.strict_shapes:
+                raise ValueError(
+                    'Make sure that out_shape is divisible by tile_shape or '
+                    'relax this constraint by setting strict_shapes=False.'
+                )
+            elif np.any(inp.shape[2:] != self.out_shape[1:]):
+                raise NotImplementedError(
+                    'Automatic padding for out_shape that is not divisible '
+                    'by tile_shape is not (yet) implemented. Please change '
+                    'your input shape or tile_shape accordingly.'
+                )
+            else:
+                orig_shape = inp.shape
+                padded_shape = np.array(inp.shape)
+                padded_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+                padded_inp = np.zeros(padded_shape)
+                # Define the relevant region (that is: without the padding that was just added)
+                relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
+                padded_inp[relevant_slice] = inp
+                padded_out_shape = (self.out_shape[0], *padded_shape[2:])
+                if np.any(padded_out_shape != self.out_shape):
+                    sh_diff = np.subtract(padded_out_shape, self.out_shape)
+                    # Only nonzero elements are multiplied, otherwise it will be 0.
+                    wasted_pix = np.prod(sh_diff[sh_diff != 0])
+                    total_pix = np.prod(padded_out_shape)
+                    wasted_percentage = 100 * wasted_pix / total_pix
+                    logger.info(
+                        f'Adapting out_shape {tuple(self.out_shape[1:])} to '
+                        f'tile_shape {tuple(self.tile_shape)} '
+                        f'by padding out_shape to {tuple(padded_out_shape[1:])}.\n'
+                        f'At least {wasted_percentage:.2f}% of total compute will be '
+                        f'wasted by this padding.'
+                    )
+                    # TODO: Calculate exact compute waste by looking at increased tile overlaps
+                    #  (the current estimation omits the (potentially high-impact) added per-tile
+                    #  padding/overlaps via overlap_shape.
+        else:
+            padded_inp = inp
+            padded_out_shape = self.out_shape
+            relevant_slice = None
+        return padded_inp, padded_out_shape, relevant_slice
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')

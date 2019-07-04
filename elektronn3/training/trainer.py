@@ -4,14 +4,18 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
+from collections import deque
+
 import gc
 import logging
 import os
 import shutil
 
+from itertools import islice
+from math import nan
 from pickle import PickleError
 from textwrap import dedent
-from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List
+from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List, Union
 
 import inspect
 import IPython
@@ -23,9 +27,9 @@ from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from elektronn3.training import handlers
-from elektronn3.training.train_utils import Timer, pretty_string_time
-from elektronn3.training.train_utils import DelayedDataLoader
-from elektronn3.training.train_utils import HistoryTracker
+from elektronn3.training.swa import SWA
+from elektronn3.training.train_utils import pretty_string_time
+from elektronn3.training.train_utils import Timer, DelayedDataLoader, HistoryTracker
 
 from torch.utils import collect_env
 from elektronn3.training import metrics
@@ -38,6 +42,45 @@ logger = logging.getLogger('elektronn3log')
 class NaNException(RuntimeError):
     """When a NaN value is detected"""
     pass
+
+
+def _worker_init_fn(worker_id: int) -> None:
+    """Sets a unique but deterministic random seed for background workers.
+
+    Only sets the seed for NumPy because PyTorch and Python's own RNGs
+    take care of reseeding on their own.
+    See https://github.com/numpy/numpy/issues/9650."""
+    # Modulo 2**32 because np.random.seed() only accepts values up to 2**32 - 1
+    initial_seed = torch.initial_seed() % 2**32
+    worker_seed = initial_seed + worker_id
+    np.random.seed(worker_seed)
+
+
+# Be careful from where you call this! Not sure if this is concurrency-safe.
+def _change_log_file_to(
+        new_path: str,
+        transfer_old_logs: bool = True,
+        delete_old_file: bool = True
+) -> None:
+    """Transfer the current log file to a new location and redirect logs."""
+
+    def _get_first_file_handler() -> logging.FileHandler:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                return handler
+        return RuntimeError('logger has no FileHandler.')
+
+    # Getting the first (and presumably only) file handler
+    file_handler = _get_first_file_handler()
+    if transfer_old_logs:
+        with open(file_handler.baseFilename) as f:
+            old_logs = f.read()
+        with open(new_path, 'w') as f:
+            f.write(old_logs)
+    file_handler.close()
+    if delete_old_file:
+        os.remove(file_handler.baseFilename)
+    file_handler.baseFilename = new_path
 
 
 class Trainer:
@@ -199,7 +242,7 @@ class Trainer:
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.2,
-            enable_videos: bool = True,
+            enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
@@ -216,13 +259,15 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'preview_tile_shape and preview_overlap_shape!'
             )
-        if num_workers > 1 and 'PatchCreator' in str(type(train_dataset)):
+        if num_workers > 1 and 'PatchCreator' in str(type(train_dataset)) \
+                and not getattr(train_dataset, 'in_memory'):
             logger.warning(
                 'Training with num_workers > 1 can cause instabilities if '
-                'you are using PatchCreator.\nBe advised that PatchCreator '
+                'you are using PatchCreator without in_memory=True.\nBe advised that PatchCreator '
                 'might randomly deliver broken batches in your training and '
-                'can crash it at any point of time.\n'
-                'Please set num_workers to 1 or 0.\n'
+                'can crash it at any point of time because HDF5 is not fork-safe.\n'
+                'Please set num_workers to 1 or 0 or consider enabling '
+                'in_memory=True for PatchCreator.\n'
             )
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
@@ -285,6 +330,7 @@ class Trainer:
                 'different combination of save_root and exp_name.'
             )
         os.makedirs(self.save_path)
+        _change_log_file_to(f'{self.save_path}/elektronn3.log')
         logger.info(f'Writing files to save_path {self.save_path}/\n')
 
         self.terminate = False
@@ -293,6 +339,8 @@ class Trainer:
         if schedulers is None:
             schedulers = {'lr': StepLR(optimizer, 1000, 1)}  # No-op scheduler
         self.schedulers = schedulers
+        self.__lr_closetozero_alreadytriggered = False  # Used in periodic scheduler handling
+        self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
         self.num_classes = num_classes
         if enable_videos:
@@ -315,13 +363,12 @@ class Trainer:
                 tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
-            # TODO: Make always_flush user-configurable here:
-            self.tb = tensorboardX.SummaryWriter(log_dir=tb_path)
+            self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
 
         self.train_loader = DelayedDataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60
+            timeout=60, worker_init_fn=_worker_init_fn
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
@@ -331,8 +378,8 @@ class Trainer:
         # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DelayedDataLoader(
-                self.valid_dataset, self.batchsize, num_workers=0, pin_memory=True,
-                timeout=60
+                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
+                timeout=60, worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
 
@@ -346,57 +393,30 @@ class Trainer:
         visualizations are computed and logged to tensorboard."""
         self.start_time = datetime.datetime.now()
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
+        self._save_model(suffix='_initial', verbose=False)
+        self._lr_nhood.clear()
+        self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:
             try:
-                stats, misc, images = self._train(max_steps, max_runtime)
+                stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
                 if self.valid_dataset is None:
-                    stats['val_loss'] = float('nan')
+                    stats['val_loss'] = nan
+                    val_sample_images = None
                 else:
-                    valid_stats = self._validate()
+                    valid_stats, val_sample_images = self._validate()
                     stats.update(valid_stats)
 
-                if not 'val_accuracy' in stats:
-                    stats['val_accuracy'] = float('nan')
-
-                # Update history tracker (kind of made obsolete by tensorboard)
-                # TODO: Decide what to do with this, now that most things are already in tensorboard.
-                if self.step // len(self.train_dataset) > 1:
-                    tr_loss_gain = self._tracker.history[-1][2] - stats['tr_loss']
-                else:
-                    tr_loss_gain = 0
-                self._tracker.update_history([
-                    self.step, self._timer.t_passed, stats['tr_loss'], stats['val_loss'],
-                    tr_loss_gain, stats['tr_accuracy'], stats['val_accuracy'], misc['learning_rate'], 0, 0
-                ])  # 0's correspond to mom and gradnet (?)
-                t = pretty_string_time(self._timer.t_passed)
-                loss_smooth = self._tracker.loss._ema
-
-                # Logging to stdout, text log file
-                text = "%05i L_m=%.3f, L=%.2f, tr_acc=%05.2f%%, " % (self.step, loss_smooth, stats['tr_loss'], stats['tr_accuracy'])
-                text += "val_acc=%05.2f%s, prev=%04.1f, L_diff=%+.1e, " % (stats['val_accuracy'], "%", misc['mean_target'] * 100, tr_loss_gain)
-                text += "LR=%.2e, %.2f it/s, %.2f MVx/s, %s" % (misc['learning_rate'], misc['tr_speed'], misc['tr_speed_vx'], t)
-                logger.info(text)
-
-                # Plot tracker stats to pngs in save_path
-                self._tracker.plot(self.save_path)
-
-                # Reporting to tensorboard logger
-                if self.tb:
-                    try:
-                        self._tb_log_scalars(stats, 'stats')
-                        self._tb_log_scalars(misc, 'misc')
-                        if self.preview_batch is not None:
-                            if self.epoch % self.preview_interval == 0 or self.epoch == 1:
-                                # TODO: Also save preview inference results in a (3D) HDF5 file
-                                self.preview_plotting_handler(self)
-                        self.sample_plotting_handler(self, images, group='tr_samples')
-                    except Exception:
-                        logger.exception('Error occured while logging to tensorboard:')
+                # Log to stdout and text log file
+                self._log_basic(stats, misc)
+                # Render visualizations and log to tensorboard
+                self._log_to_tensorboard(stats, misc, tr_sample_images, val_sample_images)
+                # Legacy non-tensorboard logging to files
+                self._log_to_history_tracker(stats, misc)
 
                 # Save trained model state
-                self._save_model()
+                self._save_model(verbose=False)  # Not verbose because it can get spammy.
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
@@ -428,15 +448,13 @@ class Trainer:
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, float] = {'tr_loss': 0.0}
+        stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
-        misc: Dict[str, float] = {}
+        misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
         images: Dict[str, np.ndarray] = {}
 
-        running_acc = 0
-        running_mean_target = 0
-        running_vx_size = 0
+        running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, (inp, target) in pbar:
@@ -466,14 +484,14 @@ class Trainer:
 
             with torch.no_grad():
                 loss = float(dloss)
-                stats['tr_loss'] += loss
-                acc = float(metrics.bin_accuracy(target, out))
                 mean_target = float(target.to(torch.float32).mean())
+                stats['tr_loss'].append(loss)
+                misc['mean_target'].append(mean_target)
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
-            # this was changed to support ReduceLROnPlateau which does not implement get_lr
-            misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
+            # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
+            misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
             # update schedules
             for sched in self.schedulers.values():
                 # support ReduceLROnPlateau; doc. uses validation loss instead
@@ -482,9 +500,10 @@ class Trainer:
                     sched.step(metrics=loss)
                 else:
                     sched.step()
+            # Append LR of the next iteration (after sched.step()) for local LR minima detection
+            self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
+            self._handle_lr()
 
-            running_acc += acc
-            running_mean_target += mean_target
             running_vx_size += inp.numel()
 
             self.step += 1
@@ -504,19 +523,70 @@ class Trainer:
             if self.terminate:
                 break
 
-        stats['tr_accuracy'] = running_acc / len(self.train_loader)
-        stats['tr_loss'] /= len(self.train_loader)
+        stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
-        misc['mean_target'] = running_mean_target / len(self.train_loader)
 
         return stats, misc, images
 
-    def _validate(self) -> Dict[str, float]:
+    def _handle_lr(self) -> None:
+        r"""Handle quasi-periodic learning rate schedulers that lower the
+        learning rate to local minima but then ramp it up again
+        (Cosine Annealing, SGDR, Cyclical LRs etc.).
+
+        Model saving is triggered when a local minimum of learning rates is
+        detected. For the motivation of this behavior, see
+        https://arxiv.org/abs/1704.00109. The saved models can be used to build
+        an ensemble.
+
+        Local minima are found by checking for the simple criterion
+        :math:`\lr_{t-1}` > \lr{t} < lr{t+1}`.
+
+        If an SWA (Stochastic Weight Averaging) optimizer is detected, the SWA
+        algorithm is performed (see https://arxiv.org/abs/1803.05407) and the
+        resulting model is also saved, marked by the "_swa" file name suffix.
+
+        .. note::
+            The saved SWA model performs batch norm statistics correction
+            only on a limited number of batches from the ``self.train_loader``
+            (currently hardcoded to 10),
+            so if the model uses batch normalization with running statistics and
+            you suspect that this amount of batches won't be representative
+            enough for your input data distribution, you might want to ensure a
+            good estimate yourself by running
+            :py:meth:`elektronn3.trainer.SWA.bn_update()` on the model with a
+            larger number of input batches after loading the model for
+            inference.
+        """
+        if len(self._lr_nhood) < 3:
+            return  # Can't get lrs, but at this early stage it's also not relevant
+        last_lr = self._lr_nhood[-3]
+        curr_lr = self._lr_nhood[-2]
+        next_lr = self._lr_nhood[-1]
+        if last_lr > curr_lr < next_lr:
+            logger.info(
+                f'Local learning rate minimum {curr_lr:.2e} detected at step '
+                f'{self.step}. Saving model...')
+            self._save_model(suffix=f'_minlr_step{self.step}')
+            # Handle Stochastic Weight Averaging optimizer if SWA is used
+            if isinstance(self.optimizer, SWA):
+                # TODO: Make bn_update configurable (esp. number of batches)
+                self.optimizer.update_swa()  # Put current model params into SWA buffer
+                self.optimizer.swap_swa_sgd()  # Perform SWA and write results into model params
+                max_bn_corr_batches = 10  # Batches to use to correct SWA batchnorm stats
+                # We're assuming here that len(self.train_loader), which is an upper bound for
+                #  len(swa_loader), is sufficient for a good stat estimation
+                swa_loader = islice(self.train_loader, max_bn_corr_batches)
+                # This may be expensive (comparable to validation computations)
+                SWA.bn_update(swa_loader, self.model, device=self.device)
+                self._save_model(suffix='_swa', verbose=False)
+                self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
+
+    def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
-        val_loss = 0
-        stats = {name: 0 for name in self.valid_metrics.keys()}
+        val_loss = []
+        stats = {name: [] for name in self.valid_metrics.keys()}
         # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
         for inp, target in tqdm(self.valid_loader, 'Validating'):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
@@ -524,59 +594,73 @@ class Trainer:
             dtarget = target.to(self.device, non_blocking=True)
             with torch.no_grad():
                 dout = self.model(dinp)
-                val_loss += self.criterion(dout, dtarget).item() / len(self.valid_loader)
+                val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
                 for name, evaluator in self.valid_metrics.items():
-                    stats[name] += evaluator(target, out) / len(self.valid_loader)
+                    stats[name].append(evaluator(target, out))
 
-        if self.tb:
-            try:
-                self.sample_plotting_handler(
-                    self,
-                    {
-                        'inp': inp.numpy(),
-                        'out': out.numpy(),
-                        'target': target.numpy()
-                    },
-                    group='val_samples'
-                )
-            except Exception:
-                logger.exception('Error occured while logging to tensorboard:')
+        images = {
+            'inp': inp.numpy(),
+            'out': out.numpy(),
+            'target': target.numpy()
+        }
 
-        stats['val_loss'] = val_loss
+        stats['val_loss'] = np.mean(val_loss)
+        stats['val_loss_std'] = np.std(val_loss)
+        for name in self.valid_metrics.keys():
+            stats[name] = np.nanmean(stats[name])
 
         self.model.train()  # Reset model to training mode
 
-        # TODO: Refactor: Remove side effects (plotting)
-        return stats
+        return stats, images
 
-    def _save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
+    def _save_model(
+            self,
+            suffix: str = '',
+            unwrap_parallel: bool = True,
+            verbose: bool = True
+    ) -> None:
         """Save/serialize trained model state to files.
 
-        If the model uses a parallel wrapper like ``torch.nn.DataParallel``,
-        this is automatically detected and the wrapped model is saved directly
-        to make later deserialization easier. This can be disabled by setting
-        ``unwrap_parallel=False``.
+        Writes the following files in the ``self.save_path``:
 
-        Writes to two files in the ``self.save_path``:
-
-        - ``state_dict.pth`` contains the ``state_dict`` of the trained model.
+        - ``state_dicts.pth`` contains the a dict that holds the ``state_dict``
+          of the trained model, the ``state_dict`` of the optimizer and
+          some meta information (global step, epoch, best validation loss)
           The included parameters can be read and used to overwrite another
           model's ``state_dict``. The model code (architecture) itself is not
           included in this file.
-        - ``model.pt`` contains a pickled version of the complete model, including
-          the trained weights. You can simply
+        - ``model.pt`` contains a pickled version of the complete model,
+          including the trained weights. You can simply
           ``model = torch.load('model.pt')`` to obtain the full model and its
           training state. This will not work if the source code relevant to de-
           serializing the model object has changed! If this is is the case,
           you will need to use the ``state_dict.pth`` to extract parameters and
           manually load them into a model.
+        - ``model.pts`` contains the model in the ``torch.jit`` ScriptModule
+          serialization format. If ``model`` is not already a ``ScriptModule``
+          and ``self.enable_save_trace`` is ``True``, a ScriptModule form of the
+          ``model`` will be created on demand by jit-tracing it with
+          ``self.example_input``.
 
-        If ``suffix`` is defined, it will be added before the file extension.
+        Args:
+            suffix: If defined, this string will be added before the file
+                extensions of the respective files mentioned above.
+            unwrap_parallel: If ``True`` (default) and the model uses a parallel
+                module wrapper like ``torch.nn.DataParallel``, this is
+                automatically detected and the wrapped model is saved directly
+                to make later deserialization easier. This can be disabled by
+                setting ``unwrap_parallel=False``.
+            verbose: If ``True`` (default), log infos about saved models at
+                log-level "INFO" (which appears in stdout). Else, only silently
+                log with log-level "DEBUG".
         """
-        # TODO: Document ScriptModule saving special cases
-        # TODO: Logging
+        log = logger.info if verbose else logger.debug
+
         model = self.model
+
+        model_trainmode = model.training
+
         # We do this awkard check because there are too many different
         # parallel wrappers in PyTorch and some of them have changed names
         # in different releases (DataParallel, DistributedDataParallel{,CPU}).
@@ -595,21 +679,33 @@ class Trainer:
         state_dict_path = os.path.join(self.save_path, f'state_dict{suffix}.pth')
         model_path = os.path.join(self.save_path, f'model{suffix}.pt')
 
-        torch.save(model.state_dict(), state_dict_path)
+        try:
+            lr_sched_state = self.schedulers['lr'].state_dict()
+        except:  # No valid scheduler in use
+            lr_sched_state = None
+
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'lr_sched_state_dict': lr_sched_state,
+            'global_step': self.step,
+            'epoch': self.epoch,
+            'best_val_loss': self.best_val_loss
+        }, state_dict_path)
+        log(f'Saved state_dict as {state_dict_path}.')
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
+            log(f'Saved model as {model_path}.')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
                 model_path += 's'
                 traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
                 traced.save(model_path)
+                log(f'Saved jit-traced model as {model_path}.')
                 # Uncomment these lines if separate traces for train/eval are required:
-                # traced_eval = torch.jit.trace(model.eval(), self.example_input.to(self.device))
-                # traced_eval.save('eval_' + model_path)
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
-
         except (TypeError, PickleError) as exc:
             # If model is already a ScriptModule, it can't be saved with torch.save()
             # Use ScriptModule.save() instead in this case.
@@ -617,8 +713,67 @@ class Trainer:
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
                 model.save(model_path)
+                log(f'Saved jitted model as {model_path}.')
             else:
                 raise exc
+        finally:
+            # Reset training state to the one it had before this function call,
+            # because it could have changed with the model.eval() call above.
+            model.training = model_trainmode
+
+    def _log_basic(self, stats, misc):
+        """Log to stdout and text log file"""
+        tr_loss = np.mean(stats['tr_loss'])
+        val_loss = np.mean(stats['val_loss'])
+        lr = misc['learning_rate']
+        tr_speed = misc['tr_speed']
+        tr_speed_vx = misc['tr_speed_vx']
+        t = pretty_string_time(self._timer.t_passed)
+        text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
+        text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
+        logger.info(text)
+
+    def _log_to_tensorboard(
+            self,
+            stats: Dict,
+            misc: Dict,
+            tr_images: Dict,
+            val_images: Optional[Dict]
+    ) -> None:
+        """Create visualizations, make preview predictions, log and plot to tensorboard"""
+        if self.tb:
+            try:
+                self._tb_log_scalars(stats, 'stats')
+                self._tb_log_scalars(misc, 'misc')
+                if self.preview_batch is not None:
+                    if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                        # TODO: Also save preview inference results in a (3D) HDF5 file
+                        self.preview_plotting_handler(self)
+                self.sample_plotting_handler(self, tr_images, group='tr_samples')
+                if val_images is not None:
+                    self.sample_plotting_handler(self, val_images, group='val_samples')
+                self._tb_log_histograms()
+            except Exception:
+                logger.exception('Error occured while logging to tensorboard:')
+
+    def _log_to_history_tracker(self, stats: Dict, misc: Dict) -> None:
+        """Update history tracker and plot stats (kind of made obsolete by tensorboard)"""
+        # TODO: Decide what to do with this, now that most things are already in tensorboard.
+        if self.step // len(self.train_dataset) > 1:
+            tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
+        else:
+            tr_loss_gain = 0
+        if not stats.get('tr_accuracy'):
+            tr_accuracy = nan
+        else:
+            tr_accuracy = np.nanmean(stats['tr_accuracy'])
+        val_accuracy = stats.get('val_accuracy', nan)
+        self._tracker.update_history([
+            self.step, self._timer.t_passed, np.mean(stats['tr_loss']), np.mean(stats['val_loss']),
+            tr_loss_gain, tr_accuracy, val_accuracy, misc['learning_rate'], 0, 0
+        ])
+        # Plot tracker stats to pngs in save_path
+        self._tracker.plot(self.save_path)
 
     def _tb_log_scalars(
             self,
@@ -626,7 +781,24 @@ class Trainer:
             tag: str = 'default'
     ) -> None:
         for key, value in scalars.items():
-            self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+            if isinstance(value, (list, tuple, np.ndarray)):
+                for i in range(len(value)):
+                    if not np.isnan(value[i]):
+                        self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
+            else:
+                if not np.isnan(value):
+                    self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+
+    def _tb_log_histograms(self) -> None:
+        """Log histograms of model parameters and their current gradients.
+
+        Make sure to run this between ``backward()`` and ``zero_grad()``,
+        because otherwise gradient histograms will only consist of zeros.
+        """
+        for name, param in self.model.named_parameters():
+            self.tb.add_histogram(f'param/{name}', param, self.step)
+            grad = param.grad if param.grad is not None else torch.tensor(0)
+            self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
     # TODO: Make more configurable
     # TODO: Inference on secondary GPU
@@ -685,21 +857,9 @@ class Backup:
     def archive_backup(self):
         """Archiving the source folder, the training script and environment info.
 
-        The training script is saved with the prefix '0-' to distinguish from regular scripts.
-        Some of the information saved in the env info is:
-        PyTorch version: 0.4.0
-        Is debug build: No
-        CUDA used to build PyTorch: 8.0.61
-        OS: CentOS Linux release 7.3.1611 (Core)
-        GCC version: (GCC) 5.2.0
-        CMake version: Could not collect
-        Python version: 3.6
-        Is CUDA available: Yes
-        CUDA runtime version: 8.0.44
-        GPU models and configuration:
-        GPU 0: GeForce GTX 980 Ti
-        GPU 1: GeForce GTX 980 Ti
-        .
+        The training script is saved with the prefix "0-" to distinguish from regular scripts.
+        Environment information equivalent to the output of ``python -m torch.utils.collect_env``
+        is saved in a file named "env_info.txt".
         """
 
         # Archiving the Training script
@@ -725,6 +885,7 @@ def findcudatensors() -> Tuple[int, List[torch.Tensor]]:
     ``print([x.shape for x in findcudatensors()[1])``.
 
     Returns a tuple of
+
     - total memory usage of found tensors in MiB
     - a list of all of those tensors, ordered by size."""
     tensors = []

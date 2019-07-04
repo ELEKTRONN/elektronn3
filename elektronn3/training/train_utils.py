@@ -7,6 +7,7 @@
 
 import signal
 import time
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -150,10 +151,11 @@ class AccumulationArray:
                 self._ema = self._ema * f + self._buffer[self.length] * fc
 
         self.length += 1
-
-        self._min = np.minimum(data, self._min)
-        self._max = np.maximum(data, self._max)
-        self._sum = self._sum + np.asanyarray(data)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)
+            self._min = np.minimum(data, self._min)
+            self._max = np.maximum(data, self._max)
+            self._sum = self._sum + np.asanyarray(data)
 
     def add_offset(self, off):
         self.data[:] += off

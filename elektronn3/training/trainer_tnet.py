@@ -4,7 +4,8 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
 
-# NOTE: This module is currently not maintained. We should probably put this somewhere else.
+# TODO: This module needs to be adapted to recent Trainer changes.
+#       It might not work as intended in this current state.
 
 import os
 import traceback

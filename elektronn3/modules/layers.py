@@ -12,11 +12,6 @@ import torch
 from torch import nn
 
 
-class Identity(nn.Module):
-    def forward(self, x):
-        return x
-
-
 class GatherExcite(nn.Module):
     """Gather-Excite module (https://arxiv.org/abs/1810.12348),
 
@@ -87,10 +82,10 @@ class GatherExcite(nn.Module):
                 nn.Conv3d(channels // reduction, channels, 1)
             )
         else:
-            self.excite = Identity()
+            self.excite = nn.Identity()
 
         if extent == 0:
-            self.interpolate = Identity()  # Use broadcasting instead of interpolation
+            self.interpolate = nn.Identity()  # Use broadcasting instead of interpolation
         else:
             self.interpolate = torch.nn.functional.interpolate
 
