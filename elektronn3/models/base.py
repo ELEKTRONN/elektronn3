@@ -143,6 +143,9 @@ def load_model(src: str) -> nn.Module:
     assert len(state_dict_p) == 1, "Multiple/None state dict file(s). " \
                                    "Ill-defined state dict file."
     state_dict = torch.load(state_dict_p[0])
+    # new trainer class stores more state dicts, we are only interested in the model here
+    if 'model_state_dict' in state_dict:
+        state_dict = state_dict['model_state_dict']
     try:
         model.load_state_dict(state_dict)
     # if model was saved as nn.DataParallel then remove 'module.'
