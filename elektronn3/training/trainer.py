@@ -442,14 +442,13 @@ class Trainer:
             return evaluator
 
         num_classes = self.num_classes
-        tr_evaluators = {
-            f'tr_DSC_c{c}': channel_metric(
-                metrics.dice_coefficient,
-                c=c, num_classes=num_classes
-            )
-            for c in range(num_classes)
-        }
-
+        tr_evaluators = {**{
+            f'tr_DSC_c{c}': channel_metric(metrics.dice_coefficient, c=c, num_classes=num_classes) for c in range(num_classes)
+        }, **{
+            f'tr_precision_c{c}': channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
+        }, **{
+            f'tr_recall_c{c}': channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
+        }}
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, list] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
         stats.update({name: [] for name in tr_evaluators.keys()})
