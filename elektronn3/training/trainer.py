@@ -481,7 +481,8 @@ class Trainer:
                 ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
                 dense_weight = self.criterion.weight.view(1,-1,1,1,1)
                 positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                self.criterion.weight = ignore_mask * dense_weight# + positive_target_mask * prev_weight.view(1,-1,1,1,1)
+                needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
+                self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
                 #dense_weight = weight.view(1,-1,1,1,1) # only the cube meta
                 #positive_target_mask = (dense_weight * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
                 #self.criterion.weight = ignore_mask * dense_weight + positive_target_mask * (dense_weight == 0).type(dtarget.dtype)
@@ -616,7 +617,8 @@ class Trainer:
                 ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
                 dense_weight = self.criterion.weight.view(1,-1,1,1,1)
                 positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                self.criterion.weight = ignore_mask * dense_weight# + positive_target_mask * prev_weight.view(1,-1,1,1,1)
+                needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
+                self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             with torch.no_grad():
                 dout = self.model(dinp)
