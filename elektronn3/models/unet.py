@@ -659,6 +659,24 @@ class UNet3dLite(UNet):
                 dim=self.dim, conv_mode=self.conv_mode
             )
 
+class UNet_Ensemble(nn.Module):
+    def __init__(self,modelA, modelB, channel_A=None, channel_B=None):
+        super().__init__()
+        self.modelA = modelA
+        self.modelB = modelB
+        self.softmax = torch.nn.Softmax(dim=1)
+        for param in self.modelA.parameters():
+            param.requires_grad = False
+        for param in self.modelB.parameters():
+            param.requires_grad = False
+    
+    def forward(self, x):
+        y1 = self.softmax(self.modelA(x))
+        y1_ = (y1[:,[1]]>0.5).to(x.dtype)
+        x2 = torch.cat((x, y1_), dim=1)
+        y2 = self.softmax(self.modelB(x2))
+        y = torch.cat((y1[:,[1]],y2[:,[1,2]]),dim=1)
+        return y
 
 def test_model(
     batch_size=1,
