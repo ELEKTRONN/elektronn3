@@ -108,10 +108,25 @@ class RandomSlicewiseTransform:
     match.
 
     Args:
-        transform:
-        prob:
+        transform: transform that works on 2D slices
+        prob: Probability with which each slice is chosen to transformed by the
+            specified ``transform``.
+
+    Example::
+
+        Here we replace each slice by zeros with p=0.1. This has an effect
+        similar to the "missing section" augmentation described in
+        https://arxiv.org/abs/1706.00120.
+
+        >>> def zero_out(inp, target): return inp * 0, target
+        >>> t = RandomSlicewiseTransform(zero_out, prob=0.1)
     """
-    def __init__(self, transform, prob=0.1, inplace=True):
+    def __init__(
+            self,
+            transform: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]],
+            prob: float = 0.1,
+            inplace: bool = True
+    ):
         self.transform = transform
         self.prob = prob
         assert inplace, 'Only inplace operation is supported currently'
