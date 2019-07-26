@@ -139,7 +139,8 @@ Tensor
     crop_high_corner = tile_shape + overlap_shape - offset
     # Used to crop the output tile to the relevant, unpadded region
     #  that will be written to the final output
-    final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
+    final_crop_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(crop_low_corner,
+                                                                 crop_high_corner)])
 
     tiles = np.ceil(out_shape[2:] / tile_shape).astype(int)
     num_tiles = np.prod(tiles)
@@ -170,10 +171,12 @@ Tensor
         assert np.all(np.less_equal(inp_high_corner, inp_padded.shape[2:])), inp_high_corner
         # Slice only the current tile region in ([D,] H, W) dims
         # Slice input with overlap
-        inp_slice = _extend_nc([slice(l, h) for l, h in zip(inp_low_corner, inp_high_corner)])
+        inp_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(inp_low_corner,
+                                                                   inp_high_corner)])
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
-        out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
+        out_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(out_low_corner,
+                                                                   out_high_corner)])
         inp_tile = inp_padded[inp_slice].contiguous().to(device)
         out_tile = func(inp_tile)
 
@@ -181,7 +184,6 @@ Tensor
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
         out[out_slice] = out_tile
-
     return out
 
 
