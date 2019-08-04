@@ -5,10 +5,44 @@
 # Authors: Martin Drawitsch
 
 """Loss functions"""
+from typing import Sequence, Optional
 
 import torch
 
 from elektronn3.modules.lovasz_losses import lovasz_softmax
+
+
+class CombinedLoss(torch.nn.Module):
+    """Defines a loss function as a weighted sum of combinable loss criteria.
+
+    Args:
+        criteria: List of loss criterion modules that should be combined.
+        weight: Weight assigned to the individual loss criteria (in the same
+            order as ``criteria``).
+        device: The device on which the loss should be computed. This needs
+            to be set to the device that the loss arguments are allocated on.
+    """
+    def __init__(
+            self,
+            criteria: Sequence[torch.nn.Module],
+            weight: Optional[Sequence[float]] = None,
+            device: torch.device = None
+    ):
+        super().__init__()
+        self.criteria = torch.nn.ModuleList(criteria)
+        self.device = device
+        if weight is None:
+            weight = torch.ones(len(criteria))
+        else:
+            weight = torch.as_tensor(weight, dtype=torch.float32)
+            assert weight.shape == (len(criteria),)
+        self.register_buffer('weight', weight.to(self.device))
+
+    def forward(self, *args):
+        loss = torch.tensor(0., device=self.device)
+        for crit, weight in zip(self.criteria, self.weight):
+            loss += weight * crit(*args)
+        return loss
 
 
 def _channelwise_sum(x: torch.Tensor):
@@ -17,13 +51,13 @@ def _channelwise_sum(x: torch.Tensor):
     return x.sum(dim=reduce_dims)
 
 
-# Simple n-dimensional dice loss. Minimalistic version for easier verification
+# TODO: Dense weight support
 def dice_loss(probs, target, weight=1., eps=0.0001):
     # Probs need to be softmax probabilities, not raw network outputs
     tsh, psh = target.shape, probs.shape
 
     if tsh == psh:  # Already one-hot
-        onehot_target = target.to(torch.float32)
+        onehot_target = target.to(probs.dtype)
     elif tsh[0] == psh[0] and tsh[1:] == psh[2:]:  # Assume dense target storage, convert to one-hot
         onehot_target = torch.zeros_like(probs)
         onehot_target.scatter_(1, target.unsqueeze(1), 1)
@@ -31,14 +65,18 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
         raise ValueError(
             f'Target shape {target.shape} is not compatible with output shape {probs.shape}.'
         )
+    # if weight is None:
+    #     weight = torch.ones(probs.shape[0], dtype=probs.dtype)  # (C,)
+    # if ignore_index is not None:
+    #     weight[:, ignore_index] = 0.
 
-    intersection = probs * onehot_target
-    numerator = 2 * _channelwise_sum(intersection)
-    denominator = probs + onehot_target
-    denominator = _channelwise_sum(denominator) + eps
-    loss_per_channel = 1 - (numerator / denominator)
-    weighted_loss_per_channel = weight * loss_per_channel
-    return weighted_loss_per_channel.mean()
+    intersection = probs * onehot_target  # (N, C, ...)
+    numerator = 2 * _channelwise_sum(intersection)  # (C,)
+    denominator = probs + onehot_target  # (N, C, ...)
+    denominator = _channelwise_sum(denominator) + eps  # (C,)
+    loss_per_channel = 1 - (numerator / denominator)  # (C,)
+    weighted_loss_per_channel = weight * loss_per_channel  # (C,)
+    return weighted_loss_per_channel.mean()  # ()
 
 
 class DiceLoss(torch.nn.Module):
@@ -59,7 +97,7 @@ class DiceLoss(torch.nn.Module):
             If ``False``, ``output`` is assumed to already contain softmax
             probabilities.
         weight: Weight tensor for class-wise loss rescaling.
-            Has to be of shape (C,).
+            Has to be of shape (C,). If ``None``, classes are weighted equally.
     """
     def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
         super().__init__()

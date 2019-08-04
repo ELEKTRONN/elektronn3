@@ -8,13 +8,13 @@
 
 import argparse
 import os
+import random
 import _pickle
 
 import torch
 from torch import nn
 from torch import optim
-
-# TODO: Make torch and numpy RNG seed configurable
+import numpy as np
 
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
@@ -45,8 +45,14 @@ parser.add_argument(
 "onsave": Use regular Python model for training, but trace it on-demand for saving training state;
 "train": Use traced model for training and serialize it on disk"""
 )
+parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument(
+    '--deterministic', action='store_true',
+    help='Run in fully deterministic mode (at the cost of execution speed).'
+)
 args = parser.parse_args()
 
+<<<<<<< HEAD
 def train(parameterization, max_steps, resume=None):
 
 
@@ -157,6 +163,7 @@ def train(parameterization, max_steps, resume=None):
     ])
     valid_transform = transforms.Compose(common_transforms + [])
 
+
     # Specify data set
     aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
     common_data_kwargs = {  # Common options for training and valid sets.
@@ -189,6 +196,7 @@ def train(parameterization, max_steps, resume=None):
         transform=valid_transform,
         **common_data_kwargs
     )
+
 
     # Use first validation cube for previews. Can be set to any other data source.
     preview_batch = get_preview_batch(

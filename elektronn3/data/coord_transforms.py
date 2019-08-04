@@ -7,8 +7,9 @@
 __all__ = ['warp_slice', 'get_warped_coord_transform', 'WarpingOOBError']
 
 import itertools
-from typing import Tuple, Union, Optional
+from typing import Tuple, Union, Optional, Sequence
 from functools import reduce, lru_cache
+import h5py
 import numpy as np
 import numba
 from elektronn3 import floatX
@@ -193,15 +194,13 @@ def chain_matrices(mat_list):
     return reduce(np.dot, mat_list, identity())
 
 
-def get_random_rotmat(lock_z=False, amount=1.0, rng=None):
-    rng = np.random.RandomState() if rng is None else rng
-
-    gamma = rng.rand() * 2 * np.pi * amount
+def get_random_rotmat(lock_z=False, amount=1.0):
+    gamma = np.random.rand() * 2 * np.pi * amount
     if lock_z:
         return rotate_z(gamma)
 
-    phi = rng.rand() * 2 * np.pi * amount
-    theta = np.arcsin(rng.rand()) * amount
+    phi = np.random.rand() * 2 * np.pi * amount
+    theta = np.arcsin(np.random.rand()) * amount
 
     R1 = rotate_z(-phi)
     R2 = rotate_y(-theta)
@@ -210,10 +209,9 @@ def get_random_rotmat(lock_z=False, amount=1.0, rng=None):
     return R
 
 
-def get_random_flipmat(no_x_flip=False, rng=None):
-    rng = np.random.RandomState() if rng is None else rng
+def get_random_flipmat(no_x_flip=False):
     F = np.eye(4, dtype=floatX)
-    flips = rng.binomial(1, 0.5, 4) * 2 - 1
+    flips = np.random.binomial(1, 0.5, 4) * 2 - 1
     flips[3] = 1 # don't flip homogeneous dimension
     if no_x_flip:
         flips[2] = 1
@@ -222,8 +220,7 @@ def get_random_flipmat(no_x_flip=False, rng=None):
     return F
 
 
-def get_random_swapmat(lock_z=False, rng=None):
-    rng = np.random.RandomState() if rng is None else rng
+def get_random_swapmat(lock_z=False):
     S = np.eye(4, dtype=floatX)
     if lock_z:
         swaps = [[0, 1, 2, 3],
@@ -236,12 +233,12 @@ def get_random_swapmat(lock_z=False, rng=None):
                  [2, 0, 1, 3],
                  [2, 1, 0, 3]]
 
-    i = rng.randint(0, len(swaps))
+    i = np.random.randint(0, len(swaps))
     S = S[swaps[i]]
     return S
 
 
-def get_random_warpmat(lock_z=False, perspective=False, amount=1.0, rng=None):
+def get_random_warpmat(lock_z=False, perspective=False, amount=1.0):
     W = np.eye(4, dtype=floatX)
     amount *= 0.1
     perturb = np.random.uniform(-amount, amount, (4, 4))
@@ -283,14 +280,35 @@ def make_dest_corners(sh):
 
 
 class WarpingOOBError(ValueError):
+    """Raised when transformed coordinates are refer to out-of-bounds areas.
+
+    This is expected to happen a lot when using random warping, but
+    is caught early on before reading data.
+    The dataset iterator is expected to handle this exception by just retrying
+    the same call again, which will re-randomize the transformation."""
     def __init__(self, *args, **kwargs):
         super(WarpingOOBError, self).__init__( *args, **kwargs)
 
 
+class WarpingSanityError(Exception):
+    """Raised when a sanity check of coordinate warping fails.
+
+    This can happen due to random numerical inaccuracies, but it shouldn't occur
+    more often than every few hundred thousand warp_slice() calls."""
+    # TODO: Can we fix these errors? It's really hard to debug them because
+    #       they appear randomly, with a chance of ~ 1 in a million.
+    pass
+
+
 def warp_slice(
-        inp_src, patch_shape, M, target_src=None, target_patch_shape=None, target_discrete_ix=None,
-        debug=True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
-) -> Tuple[np.ndarray, np.ndarray]:
+        inp_src: Union[h5py.Dataset, np.ndarray],
+        patch_shape: Union[Tuple[int], np.ndarray],
+        M: np.ndarray,
+        target_src: Optional[Union[h5py.Dataset, np.ndarray]] = None,
+        target_patch_shape: Optional[Union[Tuple[int], np.ndarray]] = None,
+        target_discrete_ix: Optional[Sequence[int]] = None,
+        debug: bool = True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
     Warping is applied by multiplying the original source coordinates with
@@ -309,19 +327,19 @@ def warp_slice(
 
     Parameters
     ----------
-    inp_src: h5py.Dataset
+    inp_src
         Input image source (in HDF5)
-    patch_shape: tuple or np.ndarray
+    patch_shape
         (spatial only) Patch shape ``(D, H, W)``
         (spatial shape of the neural network's input node)
-    M: np.ndarray
+    M
         Forward warping tansformation matrix (4x4).
         Must contain translations in source and target_src array.
-    target_src: h5py.Dataset or None
+    target_src
         Optional target source array to be extracted from in the same way.
-    target_patch_shape: tuple or np.ndarray
+    target_patch_shape
         Patch size for the ``target_src`` array.
-    target_discrete_ix: list
+    target_discrete_ix
         List of target channels that contain discrete values.
         By default (``None``), every channel is is seen as discrete (this is
         generally the case for classification tasks).
@@ -329,12 +347,14 @@ def warp_slice(
         be used for reading target data:
         - discrete targets are obtained by nearest-neighbor interpolation
         - non-discrete (continuous) targets are linearly interpolated.
+    debug: If ``True`` (default), enable additional sanity checks to catch
+        warping issues early.
 
     Returns
     -------
-    inp: np.ndarray
+    inp
         Warped input image slice
-    target: np.ndarray or None
+    target
         Warped target_src image slice
         or ``None``, if ``target_src is None``.
     """
@@ -406,9 +426,9 @@ def warp_slice(
     lo = lo.astype(floatX)
 
     if debug and np.any((src_coords - lo).max(2).max(1).max(0) >= img_cut.shape[-3:]):
-        raise RuntimeError(f'Warping is broken: src_coords check failed (too high).\n{(src_coords - lo).max(2).max(1).max(0), img_cut.shape[-3:]}')
+        raise WarpingSanityError(f'src_coords check failed (too high).\n{(src_coords - lo).max(2).max(1).max(0), img_cut.shape[-3:]}')
     if debug and np.any((src_coords - lo).min(2).min(1).min(0) < 0):
-        raise RuntimeError(f'Warping is broken: src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
+        raise WarpingSanityError(f'src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
 
     for k in range(n_f):
         map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
@@ -430,9 +450,9 @@ def warp_slice(
             target_discrete_ix = [i in target_discrete_ix for i in range(n_f_t)]
 
         if debug and np.any((src_coords_target - lo_targ).max(2).max(1).max(0) >= target_cut.shape[-3:]):
-            raise RuntimeError(f'Warping is broken: src_coords_target check failed (too high).\n{(src_coords_target - lo_targ).max(2).max(1).max(0)}\n{target_cut.shape[-3:]}')
+            raise WarpingSanityError(f'src_coords_target check failed (too high).\n{(src_coords_target - lo_targ).max(2).max(1).max(0)}\n{target_cut.shape[-3:]}')
         if debug and np.any((src_coords_target - lo_targ).min(2).min(1).min(0) < 0):
-            raise RuntimeError(f'Warping is broken: src_coords_target check failed (negative indices).\n{(src_coords_target - lo_targ).min(2).min(1).min(0)}')
+            raise WarpingSanityError(f'src_coords_target check failed (negative indices).\n{(src_coords_target - lo_targ).min(2).min(1).min(0)}')
 
         for k, discr in enumerate(target_discrete_ix):
             if discr:
@@ -478,7 +498,6 @@ def get_warped_coord_transform(
         perspective: bool = False,
         target_src_shape: Optional[Union[Tuple, np.ndarray]] = None,
         target_patch_shape: Optional[Union[Tuple, np.ndarray]] = None,
-        rng: Optional[np.random.RandomState] = None
 ) -> np.ndarray:
     """
     Generates the warping transformation parameters and composes them into a
@@ -512,10 +531,6 @@ def get_warped_coord_transform(
         Target data source shape
     target_patch_shape
         Target patch shape
-    rng
-        Random number generator state (obtainable by
-        ``np.random.RandomState()``). Passing a known state makes the random
-        transformations reproducible.
 
     Returns
     -------
@@ -523,7 +538,6 @@ def get_warped_coord_transform(
         Coordinate transformation matrix.
     """
 
-    rng = np.random.RandomState() if rng is None else rng
     patch_shape = np.array(patch_shape)
     if target_patch_shape is not None:
         target_patch_shape = np.array(target_patch_shape)
@@ -559,23 +573,23 @@ def get_warped_coord_transform(
             'is significantly smaller than the shape of the smallest labelled '
             'region of your data set.'
         )
-    z = rng.randint(lo_pos[0], hi_pos[0]) + src_remainder[0]
-    y = rng.randint(lo_pos[1], hi_pos[1]) + src_remainder[1]
-    x = rng.randint(lo_pos[2], hi_pos[2]) + src_remainder[2]
+    z = np.random.randint(lo_pos[0], hi_pos[0]) + src_remainder[0]
+    y = np.random.randint(lo_pos[1], hi_pos[1]) + src_remainder[1]
+    x = np.random.randint(lo_pos[2], hi_pos[2]) + src_remainder[2]
 
     # Generate coordinate transformation matrices that express the region
-    F = get_random_flipmat(no_x_flip, rng)
+    F = get_random_flipmat(no_x_flip)
     if no_x_flip:
         S = np.eye(4, dtype=floatX)
     else:
-        S = get_random_swapmat(lock_z, rng)
+        S = get_random_swapmat(lock_z)
 
     if np.isclose(warp_amount, 0):
         R = np.eye(4, dtype=floatX)
         W = np.eye(4, dtype=floatX)
     else:
-        R = get_random_rotmat(lock_z, warp_amount, rng)
-        W = get_random_warpmat(lock_z, perspective, warp_amount, rng)
+        R = get_random_rotmat(lock_z, warp_amount)
+        W = get_random_warpmat(lock_z, perspective, warp_amount)
 
     # Using negative translations and inverse anisotropic scaling because of
     #  later matrix inversion? (see M_inv in warp_slice())

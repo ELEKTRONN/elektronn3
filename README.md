@@ -2,12 +2,11 @@
 
 # elektronn3
 
-A PyTorch-based library for research on
-convolutional neural networks for 3D semantic segmentation.
+A PyTorch-based library for neural networks for 2D/3D semantic segmentation.
 Its focus is on HDF5 data loading/augmentation, training, monitoring
 and model evaluation.
 
-**elektronn3** is under active development and its API is not yet stable.
+**elektronn3** is under active development and particularily well suited for 3D image data.
 
 For a roadmap of planned features, see the ["enhancement" issues on the tracker](https://github.com/ELEKTRONN/elektronn3/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement).
 
@@ -30,6 +29,9 @@ To install **elektronn3** in development mode, run
 
 To update your installation, just `git pull` in your clone
 directory.
+
+If you are not familiar with virtualenv and conda or are not sure about some of
+the required steps, you can find a more detailed setup guide [here](https://github.com/ELEKTRONN/elektronn3/blob/master/setup.md)
 
 # Training
 

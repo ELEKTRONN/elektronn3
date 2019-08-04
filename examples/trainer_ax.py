@@ -20,6 +20,8 @@ from train_unet_neurodata import train
 from ax import RangeParameter, ParameterType
 from ax import optimize
 from ax import *
+from ax.plot.contour import plot_contour
+from ax.utils.notebook.plotting import render
 
 
 
@@ -42,7 +44,7 @@ def validate(
     stats = {name: [] for name in valid_metrics.keys()}
     # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
     print("reaching here!")
-    max_steps = 10
+    max_steps = 100
     steps = 0
     for inp, target in tqdm(valid_loader, 'Validating'):
         #inp = torch.from_numpy(inp).float()
@@ -140,8 +142,8 @@ valid_dataset = PatchCreator(
     **common_data_kwargs
 )
 
-model_path="/u/mahsabh/e3training_june2019/withElasticRandomGray/UNet__19-06-19_14-55-09/state_dict_swa.pth"
-model = torch.load(model_path)
+#model_path="/u/mahsabh/e3training_june2019/withElasticRandomGray/UNet__19-06-19_14-55-09/state_dict_swa.pth"
+#model = torch.load(model_path)
 
 
 
@@ -166,7 +168,7 @@ model = torch.load(model_path)
 
 
 def train_evaluate(parameterization):
-    trained_model = train(parameterization, max_steps = 1, resume = model_path)
+    trained_model = train(parameterization, max_steps = 100)
     print("trained model returned ")
     stats, _ = validate(trained_model, valid_loader=valid_dataset, criterion=criterion, device=device,
                         valid_metrics=valid_metrics)
@@ -188,14 +190,14 @@ best_parameters, best_values, experiment, model = optimize(
     ],
     evaluation_function = train_evaluate,
     minimize = True,
-    total_trials = 10,
+    total_trials = 1,
 
 )
 
 print(best_parameters)
 print(best_values)
 
-render(plot_contour(model=trained_model, param_x='AGN_prob', param_y='start_filts', metric_name='val_loss'))
+render(plot_contour(model=model, param_x='AGN_prob', param_y='start_filts', metric_name='val_loss'))
 
 
 
