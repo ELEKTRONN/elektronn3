@@ -47,206 +47,218 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-if not args.disable_cuda and torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
-
-print(f'Running on device: {device}')
-
-# Don't move this stuff, it needs to be run this early to work
-import elektronn3
-elektronn3.select_mpl_backend('Agg')
-
-from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
-from elektronn3.training import Trainer, Backup, metrics, Padam
-from elektronn3.modules import DiceLoss
-from elektronn3.models.unet import UNet
+def train(parameterization, max_steps, resume=None):
 
 
-torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
+    if not args.disable_cuda and torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
 
-model = UNet(
-    n_blocks=4,
-    start_filts=32,
-    planar_blocks=(0,),
-    activation='relu',
-    batch_norm=True,
-    # conv_mode='valid',
-    # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
-    adaptive=True  # Experimental. Disable if results look weird.
-).to(device)
-# Example for a model-compatible input.
-example_input = torch.randn(1, 1, 32, 64, 64)
+    print(f'Running on device: {device}')
 
-enable_save_trace = False if args.jit == 'disabled' else True
-if args.jit == 'onsave':
-    # Make sure that tracing works
-    tracedmodel = torch.jit.trace(model, example_input.to(device))
-elif args.jit == 'train':
-    if getattr(model, 'checkpointing', False):
-        raise NotImplementedError(
-            'Traced models with checkpointing currently don\'t '
-            'work, so either run with --disable-trace or disable '
-            'checkpointing.')
-    tracedmodel = torch.jit.trace(model, example_input.to(device))
-    model = tracedmodel
+    # Don't move this stuff, it needs to be run this early to work
+    import elektronn3
+    elektronn3.select_mpl_backend('Agg')
+
+    from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
+    from elektronn3.training import Trainer, Backup, metrics, Padam
+    from elektronn3.modules import DiceLoss
+    from elektronn3.models.unet import UNet
 
 
-# USER PATHS
-save_root = os.path.expanduser('~/e3training/')
-os.makedirs(save_root, exist_ok=True)
-if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
-    data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-    fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
-    input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
-    target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
-    valid_indices = [1, 3, 5, 7]
+    torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
 
-    # These statistics are computed from the training dataset.
-    # Remember to re-compute and change them when switching the dataset.
-    dataset_mean = (0.6170815,)
-    dataset_std = (0.15687169,)
-    # Class weights for imbalanced dataset
-    class_weights = torch.tensor([0.2808, 0.7192]).to(device)
-else:  # Use publicly available neuro_data_cdhw dataset
-    data_root = os.path.expanduser('~/neuro_data_cdhw/')
-    input_h5data = [
-        (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
-        for i in range(3)
+    model = UNet(
+        n_blocks=4,
+        start_filts= parameterization["start_filts"],
+        #start_filts = 32,
+        planar_blocks=(0,),
+        activation='relu',
+        batch_norm=True,
+        # conv_mode='valid',
+        # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
+        adaptive=True  # Experimental. Disable if results look weird.
+    ).to(device)
+    # Example for a model-compatible input.
+    example_input = torch.randn(1, 1, 32, 64, 64)
+
+    enable_save_trace = False if args.jit == 'disabled' else True
+    if args.jit == 'onsave':
+        # Make sure that tracing works
+        tracedmodel = torch.jit.trace(model, example_input.to(device))
+    elif args.jit == 'train':
+        if getattr(model, 'checkpointing', False):
+            raise NotImplementedError(
+                'Traced models with checkpointing currently don\'t '
+                'work, so either run with --disable-trace or disable '
+                'checkpointing.')
+        tracedmodel = torch.jit.trace(model, example_input.to(device))
+        model = tracedmodel
+
+
+    # USER PATHS
+    save_root = os.path.expanduser('~/e3training_july2019/withAx')
+    os.makedirs(save_root, exist_ok=True)
+    if os.getenv('CLUSTER') == 'WHOLEBRAIN_1':  # Use bigger, but private data set
+        data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
+        fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
+        input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
+        target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
+        valid_indices = [1, 3, 5, 7]
+
+        # These statistics are computed from the training dataset.
+        # Remember to re-compute and change them when switching the dataset.
+        dataset_mean = (0.6170815,)
+        dataset_std = (0.15687169,)
+        # Class weights for imbalanced dataset
+        class_weights = torch.tensor([0.2808, 0.7192]).to(device)
+    else:  # Use publicly available neuro_data_cdhw dataset
+        data_root = os.path.expanduser('~/neuro_data_cdhw/')
+        input_h5data = [
+            (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+            for i in range(2)
+        ]
+        target_h5data = [
+            (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+            for i in range(2)
+        ]
+        valid_indices = [1]
+
+        dataset_mean = (155.291411,)
+        dataset_std = (42.599973,)
+        class_weights = torch.tensor([0.2653, 0.7347]).to(device)
+
+    #max_steps = args.max_steps
+    max_runtime = args.max_runtime
+
+    #if args.resume is not None:  # Load pretrained network
+    if resume is not None:
+        try:  # Assume it's a state_dict for the model
+            model.load_state_dict(torch.load(os.path.expanduser(resume)))
+        except _pickle.UnpicklingError as exc:
+            # Assume it's a complete saved ScriptModule
+            model = torch.jit.load(os.path.expanduser(resume), map_location=device)
+
+    # Transformations to be applied to samples before feeding them to the network
+    common_transforms = [
+        transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
+        transforms.Normalize(mean=dataset_mean, std=dataset_std)
     ]
-    target_h5data = [
-        (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
-        for i in range(3)
-    ]
-    valid_indices = [2]
+    train_transform = transforms.Compose(common_transforms + [
+        #transforms.RandomGrayAugment(channels=[0], prob=1.0),
+        #transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=1.0),
+        transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=parameterization["AGN_prob"]),
+    #<<<<<<< Updated upstream
+        # transforms.RandomBlurring({'probability': 0.5})
+    #=======
+        # transforms.ElasticTransform(prob=1.0)
+    #>>>>>>> Stashed changes
+    ])
+    valid_transform = transforms.Compose(common_transforms + [])
 
-    dataset_mean = (155.291411,)
-    dataset_std = (42.599973,)
-    class_weights = torch.tensor([0.2653, 0.7347]).to(device)
+    # Specify data set
+    aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
+    common_data_kwargs = {  # Common options for training and valid sets.
+        'aniso_factor': aniso_factor,
+        'patch_shape': (48, 96, 96),
+        # 'offset': (8, 20, 20),
+        'num_classes': 2,
+    }
+    train_dataset = PatchCreator(
+        input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+        target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+        train=True,
+        epoch_size=args.epoch_size,
+        warp_prob=0.2,
+        warp_kwargs={
+            'sample_aniso': aniso_factor != 1,
+            'perspective': True,
+            'warp_amount': 0.1,
+        },
+        transform=train_transform,
+        **common_data_kwargs
+    )
+    valid_dataset = None if not valid_indices else PatchCreator(
+        input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+        target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+        train=False,
+        epoch_size=10,  # How many samples to use for each validation run
+        warp_prob=0,
+        warp_kwargs={'sample_aniso': aniso_factor != 1},
+        transform=valid_transform,
+        **common_data_kwargs
+    )
 
-max_steps = args.max_steps
-max_runtime = args.max_runtime
+    # Use first validation cube for previews. Can be set to any other data source.
+    preview_batch = get_preview_batch(
+        h5data=input_h5data[valid_indices[0]],
+        preview_shape=(32, 320, 320),
+        transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    )
 
-if args.resume is not None:  # Load pretrained network
-    try:  # Assume it's a state_dict for the model
-        model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
-    except _pickle.UnpicklingError as exc:
-        # Assume it's a complete saved ScriptModule
-        model = torch.jit.load(os.path.expanduser(args.resume), map_location=device)
+    optimizer = Padam(
+        model.parameters(),
+        lr=0.1,
+        weight_decay=0.5e-4,
+        #weight_decay=parameterization["weight_decay"],
+        partial=1/4,
+    )
 
-# Transformations to be applied to samples before feeding them to the network
-common_transforms = [
-    transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
-]
-train_transform = transforms.Compose(common_transforms + [
-    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
-    # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
-    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
-    # transforms.RandomBlurring({'probability': 0.5})
-])
-valid_transform = transforms.Compose(common_transforms + [])
-
-# Specify data set
-aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
-common_data_kwargs = {  # Common options for training and valid sets.
-    'aniso_factor': aniso_factor,
-    'patch_shape': (48, 96, 96),
-    # 'offset': (8, 20, 20),
-    'num_classes': 2,
-}
-train_dataset = PatchCreator(
-    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    train=True,
-    epoch_size=args.epoch_size,
-    warp_prob=0.2,
-    warp_kwargs={
-        'sample_aniso': aniso_factor != 1,
-        'perspective': True,
-        'warp_amount': 0.1,
-    },
-    transform=train_transform,
-    **common_data_kwargs
-)
-valid_dataset = None if not valid_indices else PatchCreator(
-    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    train=False,
-    epoch_size=10,  # How many samples to use for each validation run
-    warp_prob=0,
-    warp_kwargs={'sample_aniso': aniso_factor != 1},
-    transform=valid_transform,
-    **common_data_kwargs
-)
-
-# Use first validation cube for previews. Can be set to any other data source.
-preview_batch = get_preview_batch(
-    h5data=input_h5data[valid_indices[0]],
-    preview_shape=(32, 320, 320),
-    transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
-)
-
-optimizer = Padam(
-    model.parameters(),
-    lr=0.1,
-    weight_decay=0.5e-4,
-    partial=1/4,
-)
-
-# All these metrics assume a binary classification problem. If you have
-#  non-binary targets, remember to adapt the metrics!
-valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
-    # 'val_AP': metrics.bin_average_precision,  # expensive
-    # 'val_AUROC': metrics.bin_auroc,  # expensive
-}
+    # All these metrics assume a binary classification problem. If you have
+    #  non-binary targets, remember to adapt the metrics!
+    valid_metrics = {
+        'val_accuracy': metrics.bin_accuracy,
+        'val_precision': metrics.bin_precision,
+        'val_recall': metrics.bin_recall,
+        'val_DSC': metrics.bin_dice_coefficient,
+        'val_IoU': metrics.bin_iou,
+        # 'val_AP': metrics.bin_average_precision,  # expensive
+        # 'val_AUROC': metrics.bin_auroc,  # expensive
+    }
 
 
-# criterion = nn.CrossEntropyLoss(weight=class_weights)
-criterion = DiceLoss(apply_softmax=True, weight=class_weights)
+    #   = nn.CrossEntropyLoss(weight=class_weights)
+    criterion = DiceLoss(apply_softmax=True, weight=class_weights)
 
-# Create trainer
-trainer = Trainer(
-    model=model,
-    criterion=criterion,
-    optimizer=optimizer,
-    device=device,
-    train_dataset=train_dataset,
-    valid_dataset=valid_dataset,
-    batchsize=1,
-    num_workers=1,
-    save_root=save_root,
-    exp_name=args.exp_name,
-    example_input=example_input,
-    enable_save_trace=enable_save_trace,
-    # schedulers={"lr": optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)},
-    valid_metrics=valid_metrics,
-    preview_batch=preview_batch,
-    preview_interval=5,
-    # enable_videos=False,  # Uncomment to get rid of videos in tensorboard
-    offset=train_dataset.offset,
-    apply_softmax_for_prediction=True,
-    num_classes=train_dataset.num_classes,
-    # TODO: Tune these:
-    preview_tile_shape=(32, 64, 64),
-    preview_overlap_shape=(32, 64, 64),
-    # mixed_precision=True,  # Enable to use Apex for mixed precision training
-)
+    # Create trainer
+    trainer = Trainer(
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        train_dataset=train_dataset,
+        valid_dataset=valid_dataset,
+        batchsize=1,
+        num_workers=0,
+        save_root=save_root,
+        exp_name=args.exp_name,
+        example_input=example_input,
+        enable_save_trace=enable_save_trace,
+        # schedulers={"lr": optim.lr_scheduler.StepLR(optimizer, 1000, 0.995)},
+        valid_metrics=valid_metrics,
+        preview_batch=preview_batch,
+        preview_interval=5,
+        # enable_videos=False,  # Uncomment to get rid of videos in tensorboard
+        offset=train_dataset.offset,
+        apply_softmax_for_prediction=True,
+        num_classes=train_dataset.num_classes,
+        # TODO: Tune these:
+        preview_tile_shape=(32, 64, 64),
+        preview_overlap_shape=(32, 64, 64),
+        # mixed_precision=True,  # Enable to use Apex for mixed precision training
+    )
 
-# Archiving training script, src folder, env info
-Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+    # Archiving training script, src folder, env info
+    Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
-# Start training
-trainer.run(max_steps=max_steps, max_runtime=max_runtime)
+    # Start training
+    trainer.run(max_steps=max_steps, max_runtime=max_runtime)
+
+    return trainer.model
 
 
-# How to re-calculate mean, std and class_weights for other datasets:
-#  dataset_mean = utils.calculate_means(train_dataset.inputs)
-#  dataset_std = utils.calculate_stds(train_dataset.inputs)
-#  class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))
+    # How to re-calculate mean, std and class_weights for other datasets:
+    #  dataset_mean = utils.calculate_means(train_dataset.inputs)
+    #  dataset_std = utils.calculate_stds(train_dataset.inputs)
+    #  class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))
