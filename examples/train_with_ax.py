@@ -1,4 +1,5 @@
 import os
+import time
 
 import torch
 from torch import nn
@@ -166,9 +167,10 @@ model_path="/u/mahsabh/e3training_june2019/withElasticRandomGray/UNet__19-06-19_
 #    objective_val= stats['val_loss']
 #    return {"objective": objective_val}
 
+start = time.time()
 
 def train_evaluate(parameterization):
-    trained_model = train(parameterization, max_steps = 1000, resume = model_path)
+    trained_model = train(parameterization, max_steps = 10000, resume = model_path)
     print("trained model returned ")
     stats, _ = validate(trained_model, valid_loader=valid_dataset, criterion=criterion, device=device,
                         valid_metrics=valid_metrics)
@@ -190,10 +192,13 @@ best_parameters, best_values, experiment, model = optimize(
     ],
     evaluation_function = train_evaluate,
     minimize = True,
-    total_trials = 1,
+    total_trials = 10,
 
 )
 
+end= time.time()
+
+print("time: ", end-start )
 print(best_parameters)
 print(best_values)
 
