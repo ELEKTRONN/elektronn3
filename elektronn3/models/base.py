@@ -9,7 +9,7 @@ import glob
 from collections import OrderedDict
 import numpy as np
 import time
-from typing import Union
+from typing import Union, Callable, Optional
 from elektronn3.training.train_utils import pretty_string_time
 
 
@@ -30,8 +30,10 @@ class InferenceModel(object):
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
     def __init__(self, src: Union[str, nn.Module], disable_cuda: bool = False,
-                 multi_gpu: bool = True, normalize_func=None):
+                 multi_gpu: bool = True, normalize_func: Optional[Callable] = None,
+                 bs: int = 10):
         self.normalize_func = normalize_func
+        self.bs = bs
         if not disable_cuda and torch.cuda.is_available():
             device = torch.device('cuda')
         else:
@@ -49,18 +51,20 @@ class InferenceModel(object):
             self.model = nn.DataParallel(self.model)
         self.model.to(self.device)
 
-    def predict_proba(self, inp: np.ndarray, bs: int = 10,
+    def predict_proba(self, inp: np.ndarray, bs: Optional[int] = None,
                         verbose: bool = False):
         """
 
         Args:
             inp: Input data, e.g. of shape [N, C, H, W]
-            bs: batch size
+            bs: batch size, ``self.bs`` is used per default.
             verbose: report inference speed
 
         Returns:
 
         """
+        if bs is None:
+            bs = self.bs
         if verbose:
             start = time.time()
         if self.normalize_func is not None:

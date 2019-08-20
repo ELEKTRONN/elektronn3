@@ -15,7 +15,7 @@ tqdm
 pillow
 colorlog
 tensorboardX
-torchvision
+torchvision==0.3.0
 
 # Only required for running a tensorboard server:
 tensorboard>=1.13

@@ -35,7 +35,7 @@ setup(
         'tensorflow',
         'tensorboard',
         'tensorboardX',
-        'torchvision'
+        'torchvision==0.3.0'
     ],
 
 )
