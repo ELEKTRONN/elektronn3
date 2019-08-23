@@ -1,5 +1,6 @@
 import os
 import time
+import pickle
 
 import torch
 from torch import nn
@@ -20,9 +21,9 @@ from unet_for_ax import train
 
 from ax import RangeParameter, ParameterType
 from ax import optimize
+from ax import save
 from ax import *
-from ax.plot.contour import plot_contour
-from ax.utils.notebook.plotting import render
+
 
 
 
@@ -143,7 +144,7 @@ valid_dataset = PatchCreator(
     **common_data_kwargs
 )
 
-model_path="/u/mahsabh/e3training_june2019/withElasticRandomGray/UNet__19-06-19_14-55-09/model.pt"
+model_path="/u/mahsabh/e3training_june2019/withoutAugmentation/UNet__19-06-16_21-02-33/model.pt"
 #model = torch.load(model_path)
 
 
@@ -185,16 +186,20 @@ print("starting the optimization loop")
 best_parameters, best_values, experiment, model = optimize(
     parameters=[
         {"name": "AGN_prob", "type": "range", "bounds": [0.0, 1.0]},
-        {"name": "start_filts", "type": "choice", "values" : list(range(2,33)) },
+        {"name": "AGN_sigma", "type": "range", "bounds": [0.0, 2.0]},
+        #{"name": "RGC_prob", "type": "range", "bounds": [0.0, 1.0]},
+        # {"name": "start_filts", "type": "choice", "values" : list(range(2,33)) },
         #"start_filts",
 
         #ChoiceParameter(name="start_filts", values=list(range(2,33)), parameter_type=ParameterType.INT),
     ],
     evaluation_function = train_evaluate,
     minimize = True,
-    total_trials = 10,
+    total_trials = 20,
 
 )
+
+
 
 end= time.time()
 
@@ -202,4 +207,14 @@ print("time: ", end-start )
 print(best_parameters)
 print(best_values)
 
-render(plot_contour(model=model, param_x='AGN_prob', param_y='start_filts', metric_name='val_loss'))
+
+filename = '/wholebrain/scratch/mahsabh/ax_pickled_models/random_seed'
+outfile = open(filename, 'wb')
+pickle.dump(model, outfile)
+outfile.close()
+
+save_path= '~/ax_experiments/random_ex_3.json'
+save(experiment, save_path)
+
+
+#render(plot_contour(model=model, param_x='AGN_prob', param_y='AGN_sigma', metric_name='val_loss'))

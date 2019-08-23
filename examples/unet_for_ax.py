@@ -46,7 +46,7 @@ parser.add_argument(
 "onsave": Use regular Python model for training, but trace it on-demand for saving training state;
 "train": Use traced model for training and serialize it on disk"""
 )
-parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument('--seed', type=int, default=3, help='Base seed for all RNGs.')
 parser.add_argument(
     '--deterministic', action='store_true',
     help='Run in fully deterministic mode (at the cost of execution speed).'
@@ -86,7 +86,8 @@ def train(parameterization, max_steps, resume=None):
 
     model = UNet(
         n_blocks=4,
-        start_filts=parameterization['start_filts'],
+        #start_filts=parameterization['start_filts'],
+        start_filts= 32,
         planar_blocks=(0,),
         activation='relu',
         batch_norm=True,
@@ -112,7 +113,7 @@ def train(parameterization, max_steps, resume=None):
 
 
     # USER PATHS
-    save_root = os.path.expanduser('~/e3training/')
+    save_root = os.path.expanduser('~/e3training_with_ax/experiment_3/random_seed')
     os.makedirs(save_root, exist_ok=True)
     if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
         data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
@@ -180,8 +181,8 @@ def train(parameterization, max_steps, resume=None):
     ]
     train_transform = transforms.Compose(common_transforms + [
         # transforms.RandomGrayAugment(channels=[0], prob=0.3),
-        # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
-        transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=parameterization['AGN_prob']),
+        # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=parameterization['RGC_prob']),
+        transforms.AdditiveGaussianNoise(sigma=parameterization['AGN_sigma'], channels=[0], prob=parameterization['AGN_prob']),
     ])
     valid_transform = transforms.Compose(common_transforms + [])
 
@@ -247,8 +248,8 @@ def train(parameterization, max_steps, resume=None):
             optimizer,
             base_lr=1e-6,
             max_lr=0.1,
-            step_size_up=10000,
-            step_size_down=10000,
+            step_size_up=2000,
+            step_size_down=8000,
             cycle_momentum=True
         )
         if optimizer_state_dict is not None:
