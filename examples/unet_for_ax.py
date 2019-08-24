@@ -113,7 +113,7 @@ def train(parameterization, max_steps, resume=None):
 
 
     # USER PATHS
-    save_root = os.path.expanduser('~/e3training_with_ax/experiment_3/')
+    save_root = os.path.expanduser('~/e3training_with_ax/')
     os.makedirs(save_root, exist_ok=True)
     if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
         data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'

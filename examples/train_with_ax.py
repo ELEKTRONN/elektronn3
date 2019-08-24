@@ -12,8 +12,8 @@ from typing import Tuple, Dict, Callable
 from tqdm import tqdm
 
 import elektronn3
-#from elektronn3.modules import DiceLoss, CombinedLoss
-from elektronn3.modules import DiceLoss
+from elektronn3.modules import DiceLoss, CombinedLoss
+#from elektronn3.modules import DiceLoss
 from elektronn3.data import PatchCreator, transforms
 
 from elektronn3.training import metrics
@@ -99,8 +99,8 @@ common_data_kwargs = {  # Common options for training and valid sets.
 
 crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
-#criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
-criterion = crossentropy
+criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
+#criterion = crossentropy
 data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
 
 # Transformations to be applied to samples before feeding them to the network
@@ -133,29 +133,15 @@ valid_dataset = PatchCreator(
     **common_data_kwargs
 )
 
+#using a pre-trained model
 model_path="/u/mahsabh/e3training_june2019/withoutAugmentation/UNet__19-06-16_21-02-33/model.pt"
 #model = torch.load(model_path)
-
-
-
-
-#validate(model, valid_loader=valid_dataset, criterion=criterion, device=device, valid_metrics=valid_metrics)
-
 
 
 #range_param = RangeParameter(name="elastic_prob", parameter_type=ParameterType.FLOAT, lower=0.0, upper=1.0)
 #range_param = RangeParameter(name="gray_prob", parameter_type=ParameterType.FLOAT, lower=0.0, upper=1.0)
 
 
-#def evaluation_function(
-#        parameterization,
-#        weight= None,
-#):
-#
-#    prob = parameterization["elastic_prob"]
-#    stats, _ = validate(model, valid_loader=valid_dataset, criterion=criterion, device=device, valid_metrics=valid_metrics)
-#    objective_val= stats['val_loss']
-#    return {"objective": objective_val}
 
 start = time.time()
 
@@ -173,13 +159,12 @@ best_parameters, best_values, experiment, model = optimize(
         {"name": "AGN_sigma", "type": "range", "bounds": [0.0, 2.0]},
         #{"name": "RGC_prob", "type": "range", "bounds": [0.0, 1.0]},
         # {"name": "start_filts", "type": "choice", "values" : list(range(2,33)) },
-        #"start_filts",
 
-        #ChoiceParameter(name="start_filts", values=list(range(2,33)), parameter_type=ParameterType.INT),
     ],
     evaluation_function = train_evaluate,
+    experiment_name = 'experiment',
     minimize = True,
-    total_trials = 20,
+    total_trials = 1,
 
 )
 
@@ -192,9 +177,11 @@ print(best_parameters)
 print(best_values)
 
 
-filename = '/wholebrain/scratch/mahsabh/ax_pickled_models/random_seed'
-outfile = open(filename, 'wb')
-pickle.dump(model, outfile)
+#filename = 'random_seed'
+#outfile = open(filename, 'wb')
+with open('/wholebrain/scratch/mahsabh/ax_pickled_models/random_seed', 'wb') as outfile:
+    pickle.dump(model, outfile)
+#pickle.dump(model, outfile)
 outfile.close()
 
 save_path= '~/ax_experiments/random_ex_alak.json'
