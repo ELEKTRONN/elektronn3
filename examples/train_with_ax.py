@@ -5,6 +5,7 @@ import pickle
 import torch
 from torch import nn
 import torch.utils.data
+from torch.utils.data import DataLoader
 import numpy as np
 from typing import Tuple, Dict, Callable
 
@@ -45,16 +46,8 @@ def validate(
     val_loss = []
     stats = {name: [] for name in valid_metrics.keys()}
     # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
-    print("reaching here!")
-    max_steps = 100
-    steps = 0
+
     for inp, target in tqdm(valid_loader, 'Validating'):
-        #inp = torch.from_numpy(inp).float()
-        inp = torch.as_tensor(inp)
-        inp = inp[None]
-        #target = torch.from_numpy(target).float()
-        target= torch.as_tensor(target)
-        target= target[None]
         # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
         dinp = inp.to(device, non_blocking=True)
         dtarget = target.to(device, non_blocking=True)
@@ -64,10 +57,7 @@ def validate(
             out = dout.detach().cpu()
             for name, evaluator in valid_metrics.items():
                 stats[name].append(evaluator(target, out))
-        print("printing steps:", steps)
-        steps+=1
-        if steps >= max_steps:
-            break
+
 
     images = {
         'inp': inp.numpy(),
@@ -81,7 +71,6 @@ def validate(
         stats[name] = np.nanmean(stats[name])
 
     model.train()  # Reset model to training mode
-    print("printing:", stats['val_loss'])
     return stats, images
 
 
@@ -137,7 +126,7 @@ valid_dataset = PatchCreator(
     input_h5data= [('/u/mahsabh/neuro_data_cdhw/raw_0.h5', 'raw')],
     target_h5data = [('/u/mahsabh/neuro_data_cdhw/barrier_int16_0.h5', 'lab')],
     train=False,
-    epoch_size=1,  # How many samples to use for each validation run
+    epoch_size=100,  # How many samples to use for each validation run
     warp_prob=0,
     warp_kwargs={'sample_aniso': aniso_factor != 1},
     transform=valid_transform,
@@ -172,16 +161,11 @@ start = time.time()
 
 def train_evaluate(parameterization):
     trained_model = train(parameterization, max_steps = 10000, resume = model_path)
-    print("trained model returned ")
-    stats, _ = validate(trained_model, valid_loader=valid_dataset, criterion=criterion, device=device,
+    stats, _ = validate(trained_model, valid_loader=DataLoader(valid_dataset), criterion=criterion, device=device,
                         valid_metrics=valid_metrics)
-    print("validation over ")
     objective_val = stats['val_loss']
     return objective_val
 
-print("starting the optimization loop")
-
-#choice_param = ChoiceParameter(name="start_filts", values=list(range(2,33)), parameter_type=ParameterType.INT)
 
 best_parameters, best_values, experiment, model = optimize(
     parameters=[
@@ -213,7 +197,7 @@ outfile = open(filename, 'wb')
 pickle.dump(model, outfile)
 outfile.close()
 
-save_path= '~/ax_experiments/random_ex_3.json'
+save_path= '~/ax_experiments/random_ex_alak.json'
 save(experiment, save_path)
 
 
