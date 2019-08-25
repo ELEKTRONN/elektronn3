@@ -133,7 +133,7 @@ valid_dataset = PatchCreator(
     **common_data_kwargs
 )
 
-#using a pre-trained model
+#using a pre-trained model, change resume on train_evaluate to this path
 model_path="/u/mahsabh/e3training_june2019/withoutAugmentation/UNet__19-06-16_21-02-33/model.pt"
 #model = torch.load(model_path)
 
@@ -146,7 +146,7 @@ model_path="/u/mahsabh/e3training_june2019/withoutAugmentation/UNet__19-06-16_21
 start = time.time()
 
 def train_evaluate(parameterization):
-    trained_model = train(parameterization, max_steps = 10000, resume = model_path)
+    trained_model = train(parameterization, max_steps = 10000, resume = None)
     stats, _ = validate(trained_model, valid_loader=DataLoader(valid_dataset), criterion=criterion, device=device,
                         valid_metrics=valid_metrics)
     objective_val = stats['val_loss']
@@ -164,7 +164,7 @@ best_parameters, best_values, experiment, model = optimize(
     evaluation_function = train_evaluate,
     experiment_name = 'experiment',
     minimize = True,
-    total_trials = 1,
+    total_trials = 20,
 
 )
 
@@ -176,16 +176,15 @@ print("time: ", end-start )
 print(best_parameters)
 print(best_values)
 
-
-#filename = 'random_seed'
-#outfile = open(filename, 'wb')
-with open('/wholebrain/scratch/mahsabh/ax_pickled_models/random_seed', 'wb') as outfile:
+# save the surrogate model for visualization
+root_dir = '/wholebrain/scratch/mahsabh/ax_pickled_models/'
+file_name = time.strftime("%Y_%m_%d-%H:%M:%S")
+with open(os.path.join(root_dir, file_name), 'wb') as outfile:
     pickle.dump(model, outfile)
 #pickle.dump(model, outfile)
 outfile.close()
 
-save_path= '~/ax_experiments/random_ex_alak.json'
-save(experiment, save_path)
+#save_path= '~/ax_experiments/random_ex_alak.json'
+#save(experiment, save_path)
 
 
-#render(plot_contour(model=model, param_x='AGN_prob', param_y='AGN_sigma', metric_name='val_loss'))

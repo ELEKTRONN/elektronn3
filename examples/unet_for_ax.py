@@ -46,7 +46,7 @@ parser.add_argument(
 "onsave": Use regular Python model for training, but trace it on-demand for saving training state;
 "train": Use traced model for training and serialize it on disk"""
 )
-parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument('--seed', type=int, default=3, help='Base seed for all RNGs.')
 parser.add_argument(
     '--deterministic', action='store_true',
     help='Run in fully deterministic mode (at the cost of execution speed).'
@@ -113,7 +113,7 @@ def train(parameterization, max_steps, resume=None):
 
 
     # USER PATHS
-    save_root = os.path.expanduser('~/e3training_with_ax/')
+    save_root = os.path.expanduser('~/e3training_with_ax/experiment_3')
     os.makedirs(save_root, exist_ok=True)
     if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
         data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
