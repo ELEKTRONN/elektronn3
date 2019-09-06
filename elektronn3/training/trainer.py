@@ -369,7 +369,8 @@ class Trainer:
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60, worker_init_fn=_worker_init_fn
+            timeout=60 if self.num_workers > 0 else 0,
+            worker_init_fn=_worker_init_fn
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
