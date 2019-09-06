@@ -772,32 +772,67 @@ class RandomFlip:
         return inp_flipped, target_flipped
 
 
-# TODO: Support other image shapes
+# TODO: Make rotation border mode configurable
 class RandomRotate2d:
-    """Random rotations, based on scikit-image"""
+    """Random rotations in the xy plane, based on scikit-image.
+
+    If inputs are 3D images ([C,] D, H, W) Rotate them as a stack of 2D images
+    by the same angle, constraining the rotation direction to the xy plane"""
     def __init__(self, angle_range=(-180, 180), prob=1):
         self.angle_range = angle_range
         self.prob = prob
 
     def __call__(self, inp, target):
-        assert inp.ndim == 3 and inp.shape[0] == 1
-        assert target.ndim == 2 and target.shape == inp.shape[1:]
+        assert inp.ndim in (3, 4)
         if np.random.rand() > self.prob:
             return inp, target
         angle = np.random.uniform(*self.angle_range)
         rot_opts = {'angle': angle, 'preserve_range': True, 'mode': 'reflect'}
-        rinp = skimage.transform.rotate(inp[0], **rot_opts).astype(inp.dtype)[None]  # Hack: Assume 1 channel
-        rtarget = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)  # Hack: Assume no channel dimension
+
+        if target.ndim == inp.ndim - 1:  # Implicit (no) channel dimension
+            target_c = False
+        elif target.ndim == inp.ndim:  # Explicit channel dimension
+            target_c = True
+        else:
+            raise ValueError('Target dimension not understood.')
+
+        def rot(inp, target):
+            """Rotate in 2D space"""
+            for c in range(inp.shape[0]):
+                inp[c] = skimage.transform.rotate(inp[c], **rot_opts).astype(inp.dtype)[None]
+            if target is None:
+                return inp, target  # Return early if target shouldn't be transformed
+            # Otherwise, transform target:
+            if target_c:
+                for c in range(target.shape[0]):
+                    target[c] = skimage.transform.rotate(target[c], **rot_opts).astype(target.dtype)
+            else:
+                target = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)
+            return inp, target
+        
+        if inp.ndim == 3:  # 2D case
+            rinp, rtarget = rot(inp, target)
+        else:  # 3D case: Rotate each z slice separately by the same angle
+            rinp = np.empty_like(inp)
+            rtarget = np.empty_like(target)
+            for z in range(rinp.shape[1]):
+                if target_c:
+                    rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
+                else:
+                    rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
+
         return rinp, rtarget
 
 
 # TODO: Support other image shapes
-# TODO: Document target is None
 class AlbuSeg2d:
     """Wrapper for albumentations' segmentation-compatible 2d augmentations.
 
     Wraps an augmentation so it can be used within elektronn3's transform pipeline.
     See https://github.com/albu/albumentations.
+
+    If ``target`` is ``None``, it is ignored. Else, it is passed to the wrapped
+    albumentations augmentation as the ``mask`` argument.
 
     Args:
         albu: albumentation object of type `DualTransform`.
