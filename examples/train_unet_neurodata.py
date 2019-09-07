@@ -298,6 +298,9 @@ trainer = Trainer(
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
+if args.deterministic:
+    assert trainer.num_workers <= 1, 'num_workers > 1 introduces indeterministic behavior'
+
 # Archiving training script, src folder, env info
 Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
