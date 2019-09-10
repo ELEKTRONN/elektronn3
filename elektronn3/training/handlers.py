@@ -324,12 +324,12 @@ def _tb_log_sample_images(
             pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
-                plot_image(target_slice_ov, colorbar=False),
+                plot_image(target_slice_ov, colorbar=True),
                 global_step=trainer.step
             )
             trainer.tb.add_figure(
                 f'{group}/pred_overlay',
-                plot_image(pred_slice_ov, colorbar=False),
+                plot_image(pred_slice_ov, colorbar=True),
                 global_step=trainer.step
             )
             # TODO: What's up with the colorbar in overlay plots?
@@ -337,5 +337,6 @@ def _tb_log_sample_images(
             #       This normalization issue gets worse with higher alpha values
             #       (i.e. with more contribution of the overlayed label map).
             #       Don't know how to fix this currently.
+            # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
     elif is_regression:
         trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap), global_step=trainer.step)
