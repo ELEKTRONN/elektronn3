@@ -206,10 +206,6 @@ class Trainer:
             and (if a GPU with Tensor Cores is used) make training much faster.
             This is currently experimental and might cause instabilities.
     """
-    # TODO: Write logs of the text logger to a file in save_root. The file
-    #       handler should be replaced (see elektronn3.logger module).
-    # TODO: Log useful info, like ELEKTRONN2 does
-    # TODO: Support logging non-binary metrics
 
     tb: tensorboardX.SummaryWriter
     terminate: bool
@@ -589,7 +585,6 @@ class Trainer:
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        # TODO: Avoid unnecessary cpu -> gpu -> cpu moves, just save cpu tensors for later
         for inp, target in tqdm(self.valid_loader, 'Validating'):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)

@@ -315,7 +315,6 @@ class Trainer:
                 tensorboard_root_path = os.path.expanduser(tensorboard_root_path)
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
-            # TODO: Make always_flush user-configurable here:
             self.tb = tensorboardX.SummaryWriter(log_dir=tb_path)
 
         self.train_loader = DelayedDataLoader(

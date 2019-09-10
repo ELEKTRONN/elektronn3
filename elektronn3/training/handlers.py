@@ -170,7 +170,6 @@ def _tb_log_preview(
         trainer._first_plot = False
 
 
-# TODO: There seems to be an issue with inp-target mismatches when batch_size > 1
 def _tb_log_sample_images(
         trainer: 'Trainer',
         images: Dict[str, np.ndarray],
@@ -325,7 +324,6 @@ def _tb_log_sample_images(
                 plot_image(pred_slice_ov, colorbar=False),
                 global_step=trainer.step
             )
-            # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
             # TODO: What's up with the colorbar in overlay plots?
             # TODO: When plotting overlay images, they appear darker than they should.
             #       This normalization issue gets worse with higher alpha values

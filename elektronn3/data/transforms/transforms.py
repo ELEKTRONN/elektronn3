@@ -493,7 +493,6 @@ class RandomBlurring:  # Warning: This operates in-place!
             patch_shape: Optional[Sequence[int]] = None
     ):
         self.config = {**self._default_config, **config}
-        # TODO: support random state
         if patch_shape is not None:
             random_blurring.check_random_data_blurring_config(patch_shape, **config)
 
@@ -547,17 +546,15 @@ class AdditiveGaussianNoise:
         return noisy_inp, target
 
 
-
 class RandomCrop:
     def __init__(self, size: Sequence[int]):
-        # TODO: support random state
         self.size = np.array(size)
 
     def __call__(
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         ndim_spatial = len(self.size)  # Number of spatial axes E.g. 3 for (C,D,H.W)
         img_shape = inp.shape[-ndim_spatial:]
         # Number of nonspatial axes (like the C axis). Usually this is one
