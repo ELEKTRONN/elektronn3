@@ -39,6 +39,7 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
+        argmax_with_threshold = None,
         verbose: bool = False
 ) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -119,7 +120,8 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=torch.uint8, device='cpu')
+    out_dtype = torch.uint8 if argmax_with_threshold is not None else dtype
+    out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
@@ -180,7 +182,10 @@ Tensor
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
-        out[out_slice] = (out_tile > 0.5).argmax(dim=1).to(torch.uint8)
+        if argmax_with_threshold is not None:
+            out[out_slice] = (out_tile > argmax_with_threshold).argmax(dim=1).to(torch.uint8)
+        else:
+            out[out_slice] = out_tile
 
     return out
 
@@ -283,6 +288,7 @@ class Predictor:
             offset: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
+            argmax_with_threshold = None,
             verbose: bool = False,
     ):
         if device is None:
@@ -308,6 +314,7 @@ class Predictor:
                 'that are passed as file paths (strings).'
             )
         self.dtype = torch.float16 if float16 else torch.float32
+        self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
         if isinstance(model, str):
             if os.path.isfile(model):
@@ -361,6 +368,7 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=(inp.shape[0], *self.out_shape),
+                argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
