@@ -471,7 +471,7 @@ class Trainer:
             dtarget = target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
-            self.criterion.weight *= weight
+            self.criterion.weight = weight
             #self.criterion.weight = None
             #self.criterion.pos_weight = prev_weight * weight
             #self.criterion.pos_weight = self.criterion.weight
