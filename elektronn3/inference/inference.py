@@ -273,6 +273,7 @@ class Predictor:
             but will later be discarded from the output tensor).
             If ``True``, incompatible shapes will result in an error.
         verbose: If ``True``, report inference speed.
+        report_inp_stats
 
     Examples:
         >>> model = nn.Sequential(
@@ -298,6 +299,7 @@ class Predictor:
             strict_shapes: bool = False,
             argmax_with_threshold = None,
             verbose: bool = False,
+            report_inp_stats = False
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -327,6 +329,7 @@ class Predictor:
         self.strict_shapes = strict_shapes
         self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
+        self.report_inp_stats = report_inp_stats
         if isinstance(model, str):
             if os.path.isfile(model):
                 # TorchScript serialization can be identified by checking if
@@ -423,6 +426,13 @@ class Predictor:
         Returns:
             Model output
         """
+        if self.report_inp_stats:
+            from elektronn3.data import utils
+            try:
+                print('input dist', utils.calculate_means(inp.numpy()), utils.calculate_stds(inp.numpy()))
+            except:
+                print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
+
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
