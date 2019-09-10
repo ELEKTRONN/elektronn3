@@ -153,6 +153,14 @@ def _tb_log_preview(
         plot_image(pred_slice, num_classes=trainer.num_classes),
         trainer.step
     )
+    inp_slice = batch2img(inp_batch)[0]
+    inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
+    pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+    trainer.tb.add_figure(
+        f'{group}/pred_overlay',
+        plot_image(pred_slice_ov, colorbar=True),
+        global_step=trainer.step
+    )
 
     # This is only run once per training, because the ground truth for
     # previews is constant (always the same preview inputs/targets)
