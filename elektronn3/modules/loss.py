@@ -159,13 +159,16 @@ def norpf_dice_loss(probs, target, weight=1., class_weight=1.):
 
     bg_probs = 1 - probs
     bg_target = 1 - onehot_target
+    global_weight = (class_weight > 0).type(probs.dtype)
+    positive_target_mask = (weight.view(1,-1,1,1,1) * onehot_target)[0][1:-1].sum(dim=0).view(1,1,*probs.shape[2:]) # weighted targets w\ background and ignore
+    weight = weight * global_weight
     dense_weight = weight.view(1,-1,1,1,1)
-    positive_target_mask = (dense_weight * onehot_target)[0][1:-1].sum(dim=0).view(1,1,*probs.shape[2:]) # targets w\ background (0) and ignore (-1)
-    target_mask_empty = ((positive_target_mask * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
-    target_empty = ((onehot_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
-    bg_target_empty = ((bg_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
+    target_mask_empty = ((positive_target_mask * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(probs.dtype)
+    target_empty = ((onehot_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(probs.dtype)
+    bg_target_empty = ((bg_target * ignore_mask).sum(dim=(0,2,3,4)) == 0).type(probs.dtype)
     # complete background for weighted classes and target of weighted classes as background for unweighted classes
-    bg_mask = torch.ones_like(bg_probs) * dense_weight# + positive_target_mask * (1 - dense_weight)
+    needs_positive_target_mark = (dense_weight.sum() == 0).type(probs.dtype)
+    bg_mask = torch.ones_like(bg_probs) * dense_weight + needs_positive_target_mark * positive_target_mask * global_weight.view(1,-1,1,1,1)
 
     # make num/denom 1 for unweighted classes and classes with no target
     intersection = probs * onehot_target * ignore_mask * dense_weight  # (N, C, ...)
@@ -177,12 +180,12 @@ def norpf_dice_loss(probs, target, weight=1., class_weight=1.):
     denominator = class_weight * _channelwise_sum(denominator)  # (C,)
     denominator2 = _channelwise_sum(denominator2)  # (C,)
 
-    no_tp = (numerator == 0).type(positive_target_mask.dtype)
+    no_tp = (numerator == 0).type(probs.dtype)
     # workarounds for divide by zero
     # unweighted classes get DSC=1
     numerator += (1 - weight)
     denominator += (1 - weight)
-    bg_mask_empty = ((bg_mask).sum(dim=(0,2,3,4)) == 0).type(positive_target_mask.dtype)
+    bg_mask_empty = ((bg_mask).sum(dim=(0,2,3,4)) == 0).type(probs.dtype)
     numerator2 *= 1 - bg_mask_empty
     numerator2 += bg_mask_empty
     denominator2 *= 1 - bg_mask_empty
