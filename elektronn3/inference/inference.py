@@ -412,6 +412,12 @@ class Predictor:
         if self.verbose:
             start = time.time()
 
+        from elektronn3.data import PatchCreator, transforms, utils
+        try:
+            print('input dist', utils.calculate_means(inp.numpy()), utils.calculate_stds(inp.numpy()))
+        except:
+            print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
+
         orig_shape = inp.shape
         new_shape = np.array(inp.shape)
         new_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
