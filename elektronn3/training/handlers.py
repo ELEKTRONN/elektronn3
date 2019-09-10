@@ -311,12 +311,12 @@ def _tb_log_sample_images(
         pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
         trainer.tb.add_figure(
             f'{group}/target_overlay',
-            plot_image(target_slice_ov, colorbar=False),
+            plot_image(target_slice_ov, colorbar=True),
             global_step=trainer.step
         )
         trainer.tb.add_figure(
             f'{group}/pred_overlay',
-            plot_image(pred_slice_ov, colorbar=False),
+            plot_image(pred_slice_ov, colorbar=True),
             global_step=trainer.step
         )
         # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
