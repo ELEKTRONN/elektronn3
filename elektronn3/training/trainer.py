@@ -479,9 +479,13 @@ class Trainer:
             #self.criterion.pos_weight = self.criterion.pos_weight.view(-1,1,1,1)
 
             if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
-                ignore_mask = (1 - target[0][-1]).view(1,1,*target.shape[2:])
-                positive_target_mask = target[0][1:-1].sum(dim=0).view(1,1,*target.shape[2:]) # targets w\ background and ignore
-                self.criterion.weight = ignore_mask.to(self.device) * self.criterion.weight.view(1,-1,1,1,1) + positive_target_mask.to(self.device) * (weight == 0).type(target.dtype).view(1,-1,1,1,1)
+                ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
+                dense_weight = self.criterion.weight.view(1,-1,1,1,1)
+                positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
+                self.criterion.weight = ignore_mask * dense_weight# + positive_target_mask * prev_weight.view(1,-1,1,1,1)
+                #dense_weight = weight.view(1,-1,1,1,1) # only the cube meta
+                #positive_target_mask = (dense_weight * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
+                #self.criterion.weight = ignore_mask * dense_weight + positive_target_mask * (dense_weight == 0).type(dtarget.dtype)
 
             # forward pass
             dout = self.model(dinp)
@@ -610,9 +614,10 @@ class Trainer:
             #self.criterion.pos_weight = self.criterion.weight
 
             if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
-                ignore_mask = (1 - target[0][-1]).view(1,1,*target.shape[2:])
-                positive_target_mask = target[0][1:-1].sum(dim=0).view(1,1,*target.shape[2:]) # targets w\ background and ignore
-                self.criterion.weight = ignore_mask.to(self.device) * self.criterion.weight.view(1,-1,1,1,1) + positive_target_mask.to(self.device) * (weight == 0).type(target.dtype).view(1,-1,1,1,1)
+                ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
+                dense_weight = self.criterion.weight.view(1,-1,1,1,1)
+                positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
+                self.criterion.weight = ignore_mask * dense_weight# + positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             with torch.no_grad():
                 dout = self.model(dinp)
