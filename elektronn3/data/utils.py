@@ -115,6 +115,8 @@ def calculate_class_weights(
         return __inverse(targets)
     elif mode == 'inversesquared':
         return __inverse(targets) ** 2
+    elif mode == 'norpf_inverse':
+        return __norpf_inverse(targets)
     elif mode == 'binmean':
         return __binmean(targets)
 
