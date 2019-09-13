@@ -26,6 +26,9 @@ from elektronn3.data.utils import slice_h5
 logger = logging.getLogger('elektronn3log')
 
 
+class _DefaultCubeMeta:
+    def __getitem__(self, *args, **kwargs): return 1
+
 class PatchCreator(data.Dataset):
     """Dataset iterator class that creates 3D image patches from HDF5 files.
 
@@ -151,7 +154,7 @@ class PatchCreator(data.Dataset):
             transform: Callable = transforms.Identity(),
             num_classes: Optional[int] = None,
             in_memory: bool = False,
-            cube_meta = 1,
+            cube_meta=_DefaultCubeMeta(),
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
