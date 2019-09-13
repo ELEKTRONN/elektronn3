@@ -52,7 +52,7 @@ class SoftmaxBCELoss(torch.nn.Module):
 
     def forward(self, output, target):
         probs = torch.nn.functional.softmax(output, dim=1)
-        return self.bce(output, target)
+        return self.bce(probs, target)
 
 # class MultiLabelCrossEntropy(nn.Module):
 #     def __init__(self, weight=torch.tensor(1.)):
