@@ -534,7 +534,7 @@ class Trainer:
 
             with torch.no_grad():
                 loss = float(dloss)
-            	# TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
+                # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
                 acc = metrics.accuracy(multi_class_target, out_class, num_classes)
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
