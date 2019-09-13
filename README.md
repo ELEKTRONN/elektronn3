@@ -54,14 +54,6 @@ you can run:
 
     python3 train_unet_neurodata.py
 
-## Training shell
-
-- Hitting Ctrl-C anytime during the training will drop you to the
-IPython training shell where you can access training data and make interactive
-changes.
-- To continue training, hit Ctrl-D twice.
-- If you want the process to terminate after leaving the shell, set
-`self.terminate = True` inside it and then hit Ctrl-D twice.
 
 ## Using Tensorboard
 

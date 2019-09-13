@@ -244,7 +244,7 @@ class Trainer:
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
             ignore_errors: bool = False,
-            ipython_shell: bool = True,
+            ipython_shell: bool = False,
             num_classes: Optional[int] = None,
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,

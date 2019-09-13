@@ -51,6 +51,9 @@ parser.add_argument(
     '--deterministic', action='store_true',
     help='Run in fully deterministic mode (at the cost of execution speed).'
 )
+parser.add_argument('-i', '--ipython', action='store_true',
+    help='Drop into IPython shell on errors or keyboard interrupts.'
+)
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
@@ -295,6 +298,7 @@ trainer = Trainer(
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),
     preview_overlap_shape=(32, 64, 64),
+    ipython_shell=args.ipython,
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
