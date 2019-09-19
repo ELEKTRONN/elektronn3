@@ -1,6 +1,10 @@
+# TODO: This example uses a data set that is not publicly available. Make a version that can be
+#       tried out by people without access to the wholebrain cluster.
+import datetime
 import os
 import time
 import pickle
+import traceback
 
 import torch
 from torch import nn
@@ -101,30 +105,24 @@ crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
 criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
 #criterion = crossentropy
-data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
+# data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
-train_transform = transforms.Compose(common_transforms + [
-    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
-    # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
-    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
-])
 valid_transform = transforms.Compose(common_transforms + [])
 
+data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
+fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
+input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
+target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
+valid_indices = [1, 3, 5, 7]
+
 valid_dataset = PatchCreator(
-    #input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    #target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    #data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/',
-    #data_root = os.path.expanduser('~/neuro_data_cdhw/'),
-    #fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')]),
-    #input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames],
-    #target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames],
-    input_h5data= [('/u/mahsabh/neuro_data_cdhw/raw_0.h5', 'raw')],
-    target_h5data = [('/u/mahsabh/neuro_data_cdhw/barrier_int16_0.h5', 'lab')],
+    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    target_h5data=[target_h5data[i] for i in range(len(target_h5data)) if i in valid_indices],
     train=False,
     epoch_size=100,  # How many samples to use for each validation run
     warp_prob=0,
@@ -134,22 +132,26 @@ valid_dataset = PatchCreator(
 )
 
 #using a pre-trained model, change resume on train_evaluate to this path
-model_path="/u/mahsabh/e3training_june2019/withoutAugmentation/UNet__19-06-16_21-02-33/model.pt"
+# model_path = '...'
 #model = torch.load(model_path)
-
 
 #range_param = RangeParameter(name="elastic_prob", parameter_type=ParameterType.FLOAT, lower=0.0, upper=1.0)
 #range_param = RangeParameter(name="gray_prob", parameter_type=ParameterType.FLOAT, lower=0.0, upper=1.0)
 
-
-
 start = time.time()
 
+timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
+
+save_root = os.path.expanduser(f'~/e3training_with_ax/ax__{timestamp}')
+
+
 def train_evaluate(parameterization):
-    trained_model = train(parameterization, max_steps = 10000, resume = None)
+    trainer = train(parameterization, max_steps=10000, save_root=save_root, resume=None)
+    trained_model = trainer.model
     stats, _ = validate(trained_model, valid_loader=DataLoader(valid_dataset), criterion=criterion, device=device,
                         valid_metrics=valid_metrics)
     objective_val = stats['val_loss']
+    trainer.tb.add_hparams(parameterization, stats)
     return objective_val
 
 
@@ -162,29 +164,32 @@ best_parameters, best_values, experiment, model = optimize(
 
     ],
     evaluation_function = train_evaluate,
-    experiment_name = 'experiment',
-    minimize = True,
-    total_trials = 20,
-
+    experiment_name='uax',
+    minimize=True,
+    total_trials=10,
+    objective_name='val_loss'
 )
 
+end = time.time()
 
-
-end= time.time()
-
-print("time: ", end-start )
+print("time: ", end - start)
 print(best_parameters)
 print(best_values)
 
 # save the surrogate model for visualization
-root_dir = '/wholebrain/scratch/mahsabh/ax_pickled_models/'
+# root_dir = '/wholebrain/scratch/mdraw/ax_pickled_models/'
 file_name = time.strftime("%Y_%m_%d-%H:%M:%S")
-with open(os.path.join(root_dir, file_name), 'wb') as outfile:
-    pickle.dump(model, outfile)
-#pickle.dump(model, outfile)
-outfile.close()
+try:
+    with open(os.path.join(save_root, file_name), 'wb') as outfile:
+        pickle.dump(model, outfile)
+except:
+    traceback.print_exc()
 
-#save_path= '~/ax_experiments/random_ex_alak.json'
-#save(experiment, save_path)
+try:
+    # save_path= '/wholebrain/scratch/mdraw/ax_experiments/random_ex_alak.json'
+    save_path = os.path.join(save_root, 'random_ex_alak.json')
+    save(experiment, save_path)
+except:
+    traceback.print_exc()
 
-
+import IPython; IPython.embed(); raise SystemExit

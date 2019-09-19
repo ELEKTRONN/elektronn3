@@ -54,7 +54,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 
-def train(parameterization, max_steps, resume=None):
+def train(parameterization, max_steps, save_root, resume=None):
     # Set up all RNG seeds, set level of determinism
     random_seed = args.seed
     torch.manual_seed(random_seed)
@@ -113,45 +113,42 @@ def train(parameterization, max_steps, resume=None):
 
 
     # USER PATHS
-    save_root = os.path.expanduser('~/e3training_with_ax/experiment_3')
     os.makedirs(save_root, exist_ok=True)
-    if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
-        data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-        fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
-        input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
-        target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
-        valid_indices = [1, 3, 5, 7]
+    # if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
+    data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
+    fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
+    input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
+    target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
+    valid_indices = [1, 3, 5, 7]
 
-        # These statistics are computed from the training dataset.
-        # Remember to re-compute and change them when switching the dataset.
-        dataset_mean = (0.6170815,)
-        dataset_std = (0.15687169,)
-        # Class weights for imbalanced dataset
-        class_weights = torch.tensor([0.2808, 0.7192]).to(device)
-    else:  # Use publicly available neuro_data_cdhw dataset
-        data_root = os.path.expanduser('~/neuro_data_cdhw/')
-        input_h5data = [
-            (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
-            for i in range(3)
-        ]
-        target_h5data = [
-            (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
-            for i in range(3)
-        ]
-        valid_indices = [2]
+    # These statistics are computed from the training dataset.
+    # Remember to re-compute and change them when switching the dataset.
+    dataset_mean = (0.6170815,)
+    dataset_std = (0.15687169,)
+    # Class weights for imbalanced dataset
+    class_weights = torch.tensor([0.2808, 0.7192]).to(device)
+    # else:  # Use publicly available neuro_data_cdhw dataset
+    # data_root = os.path.expanduser('~/neuro_data_cdhw/')
+    # input_h5data = [
+    #     (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+    #     for i in range(3)
+    # ]
+    # target_h5data = [
+    #     (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+    #     for i in range(3)
+    # ]
+    # valid_indices = [2]
+    #
+    # dataset_mean = (155.291411,)
+    # dataset_std = (42.599973,)
+    # class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
-        dataset_mean = (155.291411,)
-        dataset_std = (42.599973,)
-        class_weights = torch.tensor([0.2653, 0.7347]).to(device)
-
-    # TODO: Recalculate above class_weights with mode='inverse'
-
-    #max_steps = args.max_steps
     max_runtime = args.max_runtime
 
     optimizer_state_dict = None
     lr_sched_state_dict = None
-    #if args.resume is not None:  # Load pretrained network
+
+    # Load pretrained network
     if resume is not None:
         pretrained = os.path.expanduser(resume)
         _warning_str = 'Loading model without optimizer state. Prefer state dicts'
@@ -229,33 +226,36 @@ def train(parameterization, max_steps, resume=None):
 
     optimizer = optim.SGD(
         model.parameters(),
-        lr=0,  # Learning rate is set by the lr_sched below
+        lr=0.1,  # Learning rate is set by the lr_sched below
         momentum=0.9,
         weight_decay=0.5e-4,
     )
     optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
 
-    # Set to True to perform Cyclical LR range test instead of normal training
-    #  (see https://arxiv.org/abs/1506.01186, sec. 3.3).
-    do_lr_range_test = False
-    if do_lr_range_test:
-        # Begin with a very small lr and double it every 1000 steps.
-        for grp in optimizer.param_groups:
-            grp['lr'] = 1e-7  # Note: lr will be > 1.0 after 24k steps.
-        lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
-    else:
-        lr_sched = torch.optim.lr_scheduler.CyclicLR(
-            optimizer,
-            base_lr=1e-6,
-            max_lr=0.1,
-            step_size_up=2000,
-            step_size_down=8000,
-            cycle_momentum=True
-        )
-        if optimizer_state_dict is not None:
-            optimizer.load_state_dict(optimizer_state_dict)
-        if lr_sched_state_dict is not None:
-            lr_sched.load_state_dict(lr_sched_state_dict)
+    # # Set to True to perform Cyclical LR range test instead of normal training
+    # #  (see https://arxiv.org/abs/1506.01186, sec. 3.3).
+    # do_lr_range_test = False
+    # if do_lr_range_test:
+    #     # Begin with a very small lr and double it every 1000 steps.
+    #     for grp in optimizer.param_groups:
+    #         grp['lr'] = 1e-7  # Note: lr will be > 1.0 after 24k steps.
+    #     lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
+    # else:
+    #     lr_sched = torch.optim.lr_scheduler.CyclicLR(
+    #         optimizer,
+    #         base_lr=1e-6,
+    #         max_lr=0.1,
+    #         step_size_up=2000,
+    #         step_size_down=8000,
+    #         cycle_momentum=True
+    #     )
+    #     if optimizer_state_dict is not None:
+    #         optimizer.load_state_dict(optimizer_state_dict)
+    #     if lr_sched_state_dict is not None:
+    #         lr_sched.load_state_dict(lr_sched_state_dict)
+
+    # Use a simple LR scheduler to enable more flexibility of training length
+    lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.9)
 
     # All these metrics assume a binary classification problem. If you have
     #  non-binary targets, remember to adapt the metrics!
@@ -267,7 +267,6 @@ def train(parameterization, max_steps, resume=None):
         'val_DSC': metrics.bin_dice_coefficient,
         'val_IoU': metrics.bin_iou,
     }
-
 
     crossentropy = nn.CrossEntropyLoss(weight=class_weights)
     dice = DiceLoss(apply_softmax=True, weight=class_weights)
@@ -299,6 +298,7 @@ def train(parameterization, max_steps, resume=None):
         preview_tile_shape=(32, 64, 64),
         preview_overlap_shape=(32, 64, 64),
         # mixed_precision=True,  # Enable to use Apex for mixed precision training
+        ipython_shell=False,
     )
 
     # Archiving training script, src folder, env info
@@ -306,10 +306,4 @@ def train(parameterization, max_steps, resume=None):
 
     # Start training
     trainer.run(max_steps=max_steps, max_runtime=max_runtime)
-    return trainer.model
-
-
-    # How to re-calculate mean, std and class_weights for other datasets:
-    #  dataset_mean = utils.calculate_means(train_dataset.inputs)
-    #  dataset_std = utils.calculate_stds(train_dataset.inputs)
-    #  class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))
+    return trainer
