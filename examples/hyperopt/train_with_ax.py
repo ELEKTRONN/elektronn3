@@ -155,15 +155,17 @@ def train_evaluate(parameterization):
 
 best_parameters, best_values, experiment, axmodel = optimize(
     parameters=[
-        {"name": "AGN_prob", "type": "range", "bounds": [0.0, 1.0]},
-        {"name": "AGN_sigma", "type": "range", "bounds": [0.0, 2.0]},
+        # {"name": "AGN_prob", "type": "range", "bounds": [0.0, 1.0]},
+        # {"name": "AGN_sigma", "type": "range", "bounds": [0.0, 2.0]},
         #{"name": "RGC_prob", "type": "range", "bounds": [0.0, 1.0]},
         # {"name": "start_filts", "type": "choice", "values" : list(range(2,33)) },
+        {'name': 'ELA_sigma', 'type': 'range', 'bounds': [0.0, 5.0]},
+        {'name': 'ELA_alpha', 'type': 'range', 'bounds': [0.0, 10.0]},
     ],
     evaluation_function=train_evaluate,
     experiment_name='uax',
     minimize=True,
-    total_trials=10,
+    total_trials=20,
     objective_name='val_loss'
 )
 

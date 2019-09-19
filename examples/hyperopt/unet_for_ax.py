@@ -179,7 +179,8 @@ def train(parameterization, max_steps, save_root, resume=None):
     train_transform = transforms.Compose(common_transforms + [
         # transforms.RandomGrayAugment(channels=[0], prob=0.3),
         # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=parameterization['RGC_prob']),
-        transforms.AdditiveGaussianNoise(sigma=parameterization['AGN_sigma'], channels=[0], prob=parameterization['AGN_prob']),
+        transforms.ElasticTransform(sigma=parameterization['ELA_sigma'], alpha=parameterization['ELA_alpha'], prob=0.9),
+        # transforms.AdditiveGaussianNoise(sigma=parameterization['AGN_sigma'], channels=[0], prob=parameterization['AGN_prob']),
     ])
     valid_transform = transforms.Compose(common_transforms + [])
 
