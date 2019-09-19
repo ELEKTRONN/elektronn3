@@ -24,10 +24,8 @@ from elektronn3.training import metrics
 
 from unet_for_ax import train
 
-from ax import RangeParameter, ParameterType
-from ax import optimize
-from ax import save
-from ax import *
+from ax.service.managed_loop import optimize
+from ax.storage import save
 
 
 
@@ -155,15 +153,14 @@ def train_evaluate(parameterization):
     return objective_val
 
 
-best_parameters, best_values, experiment, model = optimize(
+best_parameters, best_values, experiment, axmodel = optimize(
     parameters=[
         {"name": "AGN_prob", "type": "range", "bounds": [0.0, 1.0]},
         {"name": "AGN_sigma", "type": "range", "bounds": [0.0, 2.0]},
         #{"name": "RGC_prob", "type": "range", "bounds": [0.0, 1.0]},
         # {"name": "start_filts", "type": "choice", "values" : list(range(2,33)) },
-
     ],
-    evaluation_function = train_evaluate,
+    evaluation_function=train_evaluate,
     experiment_name='uax',
     minimize=True,
     total_trials=10,
@@ -173,15 +170,14 @@ best_parameters, best_values, experiment, model = optimize(
 end = time.time()
 
 print("time: ", end - start)
-print(best_parameters)
-print(best_values)
+print(f'best_parameters = {best_parameters}')
+print(f'best_value = {best_values[0]}')
 
 # save the surrogate model for visualization
 # root_dir = '/wholebrain/scratch/mdraw/ax_pickled_models/'
-file_name = time.strftime("%Y_%m_%d-%H:%M:%S")
 try:
-    with open(os.path.join(save_root, file_name), 'wb') as outfile:
-        pickle.dump(model, outfile)
+    with open(os.path.join(save_root, 'axobjects.pkl'), 'wb') as outfile:
+        pickle.dump({'axmodel': axmodel, 'experiment': experiment}, outfile)
 except:
     traceback.print_exc()
 
@@ -191,5 +187,7 @@ try:
     save(experiment, save_path)
 except:
     traceback.print_exc()
+
+print(f'\nFinished experiments. To start tensorboard, run:\n\ntensorboard --logdir {save_root}')
 
 import IPython; IPython.embed(); raise SystemExit
