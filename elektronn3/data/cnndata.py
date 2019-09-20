@@ -27,7 +27,7 @@ logger = logging.getLogger('elektronn3log')
 
 
 class _DefaultCubeMeta:
-    def __getitem__(self, *args, **kwargs): return 1
+    def __getitem__(self, *args, **kwargs): return np.inf
 
 class PatchCreator(data.Dataset):
     """Dataset iterator class that creates 3D image patches from HDF5 files.

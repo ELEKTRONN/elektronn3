@@ -485,7 +485,7 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+            if cube_meta != np.inf:
                 weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
                 prev_weight = self.criterion.weight.clone()
                 self.criterion.weight = weight
@@ -528,7 +528,7 @@ class Trainer:
                 loss = float(dloss)
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
-                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target  # TODO
+                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 and cube_meta != np.inf else target  # TODO
                 acc = metrics.accuracy(multi_class_target, out_class, num_classes)
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
@@ -564,7 +564,7 @@ class Trainer:
                 #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
                 #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
-            if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+            if cube_meta != np.inf:
                 self.criterion.weight = prev_weight
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
@@ -672,11 +672,11 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
-                    weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
-                    prev_weight = self.criterion.weight.clone()
-                    self.criterion.weight *= weight
-                    #self.criterion.pos_weight = self.criterion.weight
+            if cube_meta != np.inf:
+                weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
+                prev_weight = self.criterion.weight.clone()
+                self.criterion.weight *= weight
+                #self.criterion.pos_weight = self.criterion.weight
 
                 if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
                     ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
@@ -687,11 +687,11 @@ class Trainer:
 
             with torch.no_grad():
                 dout = self.model(dinp)
-                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target  # TODO
+                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 and cube_meta != np.inf else target  # TODO
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
                 out_class = out.argmax(dim=1)
-                if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+                if cube_meta != np.inf:
                     self.criterion.weight = prev_weight
                 for name, evaluator in self.valid_metrics.items():
                     stats[name].append(evaluator(multi_class_target, out_class))
