@@ -270,8 +270,7 @@ class PatchCreator(data.Dataset):
 
         # inp, target are still numpy arrays here. Relying on auto-conversion to
         #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
-        multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target
-        return inp, target, multi_class_target, self.cube_meta[i], os.path.basename(self.input_h5data[i][0])
+        return inp, target, self.cube_meta[i], os.path.basename(self.input_h5data[i][0])
 
     def __len__(self) -> int:
         return self.epoch_size

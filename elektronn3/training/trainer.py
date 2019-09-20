@@ -448,7 +448,7 @@ class Trainer:
 
     def _train(self, max_steps, max_runtime):
 
-        def channel_metric(metric, c, num_classes):
+        def _channel_metric(metric, c, num_classes):
             """Returns an evaluator that calculates the ``metric``
             and selects its value for channel ``c``."""
 
@@ -461,11 +461,11 @@ class Trainer:
 
         num_classes = self.num_classes
         tr_evaluators = {**{
-            f'tr_DSC_c{c}': channel_metric(metrics.dice_coefficient, c=c, num_classes=num_classes) for c in range(num_classes)
+            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c, num_classes=num_classes) for c in range(num_classes)
         }, **{
-            f'tr_precision_c{c}': channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
+            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
         }, **{
-            f'tr_recall_c{c}': channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
+            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
         }}
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
@@ -480,30 +480,22 @@ class Trainer:
         self.optimizer.zero_grad()
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
-        import gc
-        gc.collect()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, (inp, target, multi_class_target, cube_meta, fname) in pbar:
+        for i, (inp, target, cube_meta, fname) in pbar:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
-            prev_weight = self.criterion.weight.clone()
-            self.criterion.weight = weight
-            #self.criterion.weight = None
-            #self.criterion.pos_weight = prev_weight * weight
-            #self.criterion.pos_weight = self.criterion.weight
-            #self.criterion.pos_weight = self.criterion.pos_weight.view(-1,1,1,1)
+            if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+                weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
+                prev_weight = self.criterion.weight.clone()
+                self.criterion.weight = weight
 
-            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
-                ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
-                dense_weight = self.criterion.weight.view(1,-1,1,1,1)
-                positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
-                self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
-                #dense_weight = weight.view(1,-1,1,1,1) # only the cube meta
-                #positive_target_mask = (dense_weight * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                #self.criterion.weight = ignore_mask * dense_weight + positive_target_mask * (dense_weight == 0).type(dtarget.dtype)
+                if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                    ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
+                    dense_weight = self.criterion.weight.view(1,-1,1,1,1)
+                    positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
+                    needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
+                    self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             # forward pass
             dout = self.model(dinp)
@@ -536,6 +528,7 @@ class Trainer:
                 loss = float(dloss)
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
+                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target  # TODO
                 acc = metrics.accuracy(multi_class_target, out_class, num_classes)
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
@@ -571,8 +564,8 @@ class Trainer:
                 #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
                 #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
-
-            self.criterion.weight = prev_weight
+            if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+                self.criterion.weight = prev_weight
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
             misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
@@ -675,28 +668,31 @@ class Trainer:
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        for inp, target, multi_class_target, cube_meta, _ in tqdm(self.valid_loader, 'Validating'):
+        for inp, target, cube_meta, _ in tqdm(self.valid_loader, 'Validating'):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
-            prev_weight = self.criterion.weight.clone()
-            self.criterion.weight *= weight
-            #self.criterion.pos_weight = self.criterion.weight
+            if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+                    weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
+                    prev_weight = self.criterion.weight.clone()
+                    self.criterion.weight *= weight
+                    #self.criterion.pos_weight = self.criterion.weight
 
-            if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
-                ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
-                dense_weight = self.criterion.weight.view(1,-1,1,1,1)
-                positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
-                self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
+                if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
+                    ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
+                    dense_weight = self.criterion.weight.view(1,-1,1,1,1)
+                    positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
+                    needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
+                    self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             with torch.no_grad():
                 dout = self.model(dinp)
+                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target  # TODO
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
                 out_class = out.argmax(dim=1)
-                self.criterion.weight = prev_weight
+                if isinstance(cube_meta, (list, np.ndarray, torch.Tensor)):  # not _DefaultCubeMeta
+                    self.criterion.weight = prev_weight
                 for name, evaluator in self.valid_metrics.items():
                     stats[name].append(evaluator(multi_class_target, out_class))
 
