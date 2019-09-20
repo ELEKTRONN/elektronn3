@@ -227,9 +227,12 @@ class PatchCreator(data.Dataset):
                     # Note that this warning will be spammed once the conditions are met.
                     # Better than logging it once and risking that it stays unnoticed IMO.
                     logger.warning(
-                        f'{fail_percentage}% of warping attempts are failing.\n'
-                        'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
+                        f'{fail_percentage}% of warping attempts are failing '
+                        f'for cubes {input_src} and {target_src}.\n'
+                        'Consider lowering warp_kwargs[\'warp_amount\']).'
                     )
+                if self.n_failed_warp > 100:
+                    input_src, target_src = self._getcube()  # get new cube randomly
                 continue
             except coord_transforms.WarpingSanityError:
                 logger.exception('Invalid coordinate values encountered while warping. Retrying...')
@@ -253,9 +256,25 @@ class PatchCreator(data.Dataset):
                     'traceback above.\n'
                 )
                 continue
+            # TODO: Add custom Exception for lo > hi postion during warping
+            # This should only be caught if many training cubes are used!
+            except RuntimeError as e:
+                # let's roll the dice again
+                logger.warning(f'Caught RuntimeError and drawing new data cube.\n'
+                               f'{str(e)}')
+                print(input_src)
+                input_src, target_src = self._getcube()  # get new cube randomly
+                print(input_src)
+                continue
             self.n_successful_warp += 1
             try:
-                inp, target = self.transform(inp, target)
+                inp_tr, target_tr = self.transform(inp, target)
+                if np.any(np.isnan(inp_tr)) or np.any(np.isnan(target_tr)):
+                    logger.warning(f'NaN value in {repr(self.transform)}-transformed '
+                                   f'input or target. Falling back to '
+                                   f'untransformed input.')
+                else:
+                    inp, target = inp_tr, target_tr
             except transforms._DropSample:
                 # A filter transform has chosen to drop this sample, so skip it
                 logger.debug('Sample dropped.')
@@ -438,7 +457,16 @@ class PatchCreator(data.Dataset):
                 target_h5_val = target_h5_data[()]
                 target_h5_file.close()
                 target_h5_data = target_h5_val
-
+                if np.max(inp_h5_data) == 0 or np.any(np.isnan(inp_h5_data))\
+                        or np.any(np.isnan(target_h5_data)):
+                    msg = f'{inp_fname} contains 0-signal input or NaN values in ' \
+                        f'input or target.'
+                    logger.error(msg)
+                    raise ValueError(msg)
+            if np.any(self.patch_shape[-3:] > np.array(target_h5_data.shape)[-3:]):
+                raise ValueError(f'GT target cube: {target_fname}[{target_key}]:'
+                                 f' {target_h5_data.shape} ({target_h5_data.dtype}) '
+                                 f'is incompatible with patch shape {self.patch_shape}.')
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
             inp_h5sets.append(inp_h5_data)

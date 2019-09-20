@@ -393,12 +393,20 @@ def warp_slice(
 
         target_src_offset = np.subtract(inp_src_shape, target_src.shape[-3:])
         if np.any(np.mod(target_src_offset, 2)):
-            raise ValueError("targets must be centered w.r.t. images")
+            msg = f"targets must be centered w.r.t. images. data shape: " \
+                f"{inp_src_shape}; target shape: {target_patch_shape}"
+            print(msg)
+            raise WarpingOOBError(msg)
+            # raise ValueError("targets must be centered w.r.t. images")
         target_src_offset //= 2
 
         target_offset = np.subtract(patch_shape, target_patch_shape)
         if np.any(np.mod(target_offset, 2)):
-            raise ValueError("targets must be centered w.r.t. images")
+            msg = f"targets must be centered w.r.t. images. Target shape: " \
+                f"{target_patch_shape}; data shape: {inp_src_shape}"
+            print(msg)
+            raise WarpingOOBError(msg)
+            # raise ValueError("targets must be centered w.r.t. images")
         target_offset //= 2
 
         src_coords_target = src_coords[

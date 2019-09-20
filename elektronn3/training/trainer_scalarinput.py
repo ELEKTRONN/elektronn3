@@ -472,7 +472,6 @@ class Trainer:
                 mean_target = float(target.to(torch.float32).mean())
                 pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
-
             # this was changed to support ReduceLROnPlateau which does not implement get_lr
             misc['learning_rate'] = self.optimizer.param_groups[0]["lr"]  # .get_lr()[-1]
             # update schedules
@@ -552,33 +551,53 @@ class Trainer:
         # TODO: Refactor: Remove side effects (plotting)
         return stats
 
-    def _save_model(self, suffix: str = '', unwrap_parallel: bool = True) -> None:
+    def _save_model(
+            self,
+            suffix: str = '',
+            unwrap_parallel: bool = True,
+            verbose: bool = True
+    ) -> None:
         """Save/serialize trained model state to files.
 
-        If the model uses a parallel wrapper like ``torch.nn.DataParallel``,
-        this is automatically detected and the wrapped model is saved directly
-        to make later deserialization easier. This can be disabled by setting
-        ``unwrap_parallel=False``.
+        Writes the following files in the ``self.save_path``:
 
-        Writes to two files in the ``self.save_path``:
-
-        - ``state_dict.pth`` contains the ``state_dict`` of the trained model.
+        - ``state_dicts.pth`` contains the a dict that holds the ``state_dict``
+          of the trained model, the ``state_dict`` of the optimizer and
+          some meta information (global step, epoch, best validation loss)
           The included parameters can be read and used to overwrite another
           model's ``state_dict``. The model code (architecture) itself is not
           included in this file.
-        - ``model.pt`` contains a pickled version of the complete model, including
-          the trained weights. You can simply
+        - ``model.pt`` contains a pickled version of the complete model,
+          including the trained weights. You can simply
           ``model = torch.load('model.pt')`` to obtain the full model and its
           training state. This will not work if the source code relevant to de-
           serializing the model object has changed! If this is is the case,
           you will need to use the ``state_dict.pth`` to extract parameters and
           manually load them into a model.
+        - ``model.pts`` contains the model in the ``torch.jit`` ScriptModule
+          serialization format. If ``model`` is not already a ``ScriptModule``
+          and ``self.enable_save_trace`` is ``True``, a ScriptModule form of the
+          ``model`` will be created on demand by jit-tracing it with
+          ``self.example_input``.
 
-        If ``suffix`` is defined, it will be added before the file extension.
+        Args:
+            suffix: If defined, this string will be added before the file
+                extensions of the respective files mentioned above.
+            unwrap_parallel: If ``True`` (default) and the model uses a parallel
+                module wrapper like ``torch.nn.DataParallel``, this is
+                automatically detected and the wrapped model is saved directly
+                to make later deserialization easier. This can be disabled by
+                setting ``unwrap_parallel=False``.
+            verbose: If ``True`` (default), log infos about saved models at
+                log-level "INFO" (which appears in stdout). Else, only silently
+                log with log-level "DEBUG".
         """
-        # TODO: Document ScriptModule saving special cases
-        # TODO: Logging
+        log = logger.info if verbose else logger.debug
+
         model = self.model
+
+        model_trainmode = model.training
+
         # We do this awkard check because there are too many different
         # parallel wrappers in PyTorch and some of them have changed names
         # in different releases (DataParallel, DistributedDataParallel{,CPU}).
@@ -597,21 +616,33 @@ class Trainer:
         state_dict_path = os.path.join(self.save_path, f'state_dict{suffix}.pth')
         model_path = os.path.join(self.save_path, f'model{suffix}.pt')
 
-        torch.save(model.state_dict(), state_dict_path)
+        try:
+            lr_sched_state = self.schedulers['lr'].state_dict()
+        except:  # No valid scheduler in use
+            lr_sched_state = None
+
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'lr_sched_state_dict': lr_sched_state,
+            'global_step': self.step,
+            'epoch': self.epoch,
+            'best_val_loss': self.best_val_loss
+        }, state_dict_path)
+        log(f'Saved state_dict as {state_dict_path}.')
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
+            log(f'Saved model as {model_path}.')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
                 model_path += 's'
                 traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
                 traced.save(model_path)
+                log(f'Saved jit-traced model as {model_path}.')
                 # Uncomment these lines if separate traces for train/eval are required:
-                # traced_eval = torch.jit.trace(model.eval(), self.example_input.to(self.device))
-                # traced_eval.save('eval_' + model_path)
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
-
         except (TypeError, PickleError) as exc:
             # If model is already a ScriptModule, it can't be saved with torch.save()
             # Use ScriptModule.save() instead in this case.
@@ -619,8 +650,13 @@ class Trainer:
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
                 model.save(model_path)
+                log(f'Saved jitted model as {model_path}.')
             else:
                 raise exc
+        finally:
+            # Reset training state to the one it had before this function call,
+            # because it could have changed with the model.eval() call above.
+            model.training = model_trainmode
 
     def _tb_log_scalars(
             self,

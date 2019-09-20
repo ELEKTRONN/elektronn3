@@ -141,9 +141,9 @@ def load_model(src: str) -> nn.Module:
     model = get_model()
     state_dict_p = glob.glob(f'{src}/*.pth')
     if len(state_dict_p) > 1:
-        final_p = ["final" in sp for sp in state_dict_p]
-        if np.sum(final_p) == 1:
-            state_dict_p = [state_dict_p[np.argmax(final_p)]]
+        last_p = ["state_dict.pth" in sp for sp in state_dict_p]
+        if np.sum(last_p) == 1:
+            state_dict_p = [state_dict_p[np.argmax(last_p)]]
     assert len(state_dict_p) == 1, "Multiple/None state dict file(s). " \
                                    "Ill-defined state dict file."
     state_dict = torch.load(state_dict_p[0])

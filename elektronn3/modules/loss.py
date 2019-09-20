@@ -113,6 +113,43 @@ class DiceLoss(torch.nn.Module):
         return self.dice(probs, target, weight=self.weight)
 
 
+class DiceLossFancy(torch.nn.Module):
+    """Generalized Dice Loss, as described in https://arxiv.org/abs/1707.03237.
+
+    Works for n-dimensional data. Assuming that the ``output`` tensor to be
+    compared to the ``target`` has the shape (N, C, D, H, W), the ``target``
+    can either have the same shape (N, C, D, H, W) (one-hot encoded) or
+    (N, D, H, W) (with dense class indices, as in
+    ``torch.nn.CrossEntropyLoss``). If the latter shape is detected, the
+    ``target`` is automatically internally converted to a one-hot tensor
+    for loss calculation.
+
+    Args:
+        apply_softmax: If ``True``, a softmax operation is applied to the
+            ``output`` tensor before loss calculation. This is necessary if
+            your model does not already apply softmax as the last layer.
+            If ``False``, ``output`` is assumed to already contain softmax
+            probabilities.
+        weight: Weight tensor for class-wise loss rescaling.
+            Has to be of shape (C,). If ``None``, classes are weighted equally.
+    """
+    def __init__(self, apply_softmax=True, weights=torch.tensor(1.),
+                 ignore_index=None):
+        super().__init__()
+        if apply_softmax:
+            self.softmax = torch.nn.Softmax(dim=1)
+        else:
+            self.softmax = lambda x: x  # Identity (no softmax)
+        self.dice = _dice_loss_with_cool_extra_features
+        self.register_buffer('weights', weights)
+        self._ignore_index = ignore_index
+
+    def forward(self, output, target):
+        probs = self.softmax(output)
+        return self.dice(probs, target, weights=self.weights,
+                         ignore_index=self._ignore_index)
+
+
 class LovaszLoss(torch.nn.Module):
     """https://arxiv.org/abs/1705.08790"""
     def __init__(self, apply_softmax=True):
@@ -134,7 +171,7 @@ class LovaszLoss(torch.nn.Module):
 
 # Version with features that are untested and currently not needed
 # Based on https://discuss.pytorch.org/t/one-hot-encoding-with-autograd-dice-loss/9781/5
-def __dice_loss_with_cool_extra_features(output, target, weights=None, ignore_index=None):
+def _dice_loss_with_cool_extra_features(output, target, weights=None, ignore_index=None):
     eps = 0.0001
 
     encoded_target = torch.zeros_like(output)
