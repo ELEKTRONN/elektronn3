@@ -119,7 +119,7 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out_dtype = torch.uint8 if argmax_with_threshold is not None else dtype
+    out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
     out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
