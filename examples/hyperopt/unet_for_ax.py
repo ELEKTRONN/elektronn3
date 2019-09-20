@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
-    '-s', '--epoch-size', type=int, default=100,
+    '-s', '--epoch-size', type=int, default=500,
     help='How many training samples to process between '
          'validation/preview/extended-stat calculation phases.'
 )
@@ -87,7 +87,7 @@ def train(parameterization, max_steps, save_root, resume=None):
     model = UNet(
         n_blocks=4,
         #start_filts=parameterization['start_filts'],
-        start_filts= 32,
+        start_filts=32,
         planar_blocks=(0,),
         activation='relu',
         batch_norm=True,
@@ -191,7 +191,7 @@ def train(parameterization, max_steps, save_root, resume=None):
         'patch_shape': (48, 96, 96),
         # 'offset': (8, 20, 20),
         'num_classes': 2,
-        # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
+        'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
     }
     train_dataset = PatchCreator(
         input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
@@ -246,8 +246,8 @@ def train(parameterization, max_steps, save_root, resume=None):
     #         optimizer,
     #         base_lr=1e-6,
     #         max_lr=0.1,
-    #         step_size_up=2000,
-    #         step_size_down=8000,
+    #         step_size_up=1000,
+    #         step_size_down=9000,
     #         cycle_momentum=True
     #     )
     #     if optimizer_state_dict is not None:
@@ -282,7 +282,7 @@ def train(parameterization, max_steps, save_root, resume=None):
         train_dataset=train_dataset,
         valid_dataset=valid_dataset,
         batchsize=1,
-        num_workers=1,
+        num_workers=2,
         save_root=save_root,
         exp_name=args.exp_name,
         example_input=example_input,
