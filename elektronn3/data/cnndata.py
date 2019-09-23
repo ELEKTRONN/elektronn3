@@ -206,11 +206,11 @@ class PatchCreator(data.Dataset):
         self.n_failed_warp = 0
         self.n_read_failures = 0
 
-    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
         # Note that the index is ignored. Samples are always random
         return self._get_random_sample()
 
-    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
         #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 

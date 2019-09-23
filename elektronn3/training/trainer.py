@@ -249,7 +249,6 @@ class Trainer:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
-            optimizer_iterations: int = 1,
     ):
         if preview_batch is not None and\
                 (preview_tile_shape is None or preview_overlap_shape is None):
@@ -304,8 +303,6 @@ class Trainer:
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
-        self.optimizer_iterations = optimizer_iterations
-        assert(optimizer_iterations > 0)
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -390,7 +387,6 @@ class Trainer:
     # TODO: Modularize, make some general parts reusable for other trainers.
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
-
         After each training epoch, validation performance is measured and
         visualizations are computed and logged to tensorboard."""
         self.start_time = datetime.datetime.now()
@@ -400,7 +396,7 @@ class Trainer:
         self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:
             try:
-                stats, file_stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
+                stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
                 if self.valid_dataset is None:
@@ -413,16 +409,16 @@ class Trainer:
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
-                self._log_to_tensorboard(stats, file_stats, misc, tr_sample_images, val_sample_images)
+                self._log_to_tensorboard(stats, misc, tr_sample_images, val_sample_images)
                 # Legacy non-tensorboard logging to files
                 self._log_to_history_tracker(stats, misc)
 
                 # Save trained model state
-                self._save_model(loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
+                self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best', loss=stats['val_loss'])
+                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -447,37 +443,15 @@ class Trainer:
         self._save_model(suffix='_final')
 
     def _train(self, max_steps, max_runtime):
+        self.model.train()
 
-        def _channel_metric(metric, c, num_classes):
-            """Returns an evaluator that calculates the ``metric``
-            and selects its value for channel ``c``."""
-
-            def evaluator(target, out):
-                #pred = metrics._argmax(out)
-                m = metric(target, out, num_classes=num_classes)
-                return m[c]
-
-            return evaluator
-
-        num_classes = self.num_classes
-        tr_evaluators = {**{
-            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c, num_classes=num_classes) for c in range(num_classes)
-        }, **{
-            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
-        }, **{
-            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
-        }}
         # Scalar training stats that should be logged and written to tensorboard later
-        stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
-        stats.update({name: [] for name in tr_evaluators.keys()})
-        file_stats = {}
+        stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
         # Hold image tensors for real-time training sample visualization in tensorboard
         images: Dict[str, np.ndarray] = {}
 
-        self.model.train()
-        self.optimizer.zero_grad()
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
@@ -485,87 +459,34 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            if cube_meta != np.inf:
-                weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
-                prev_weight = self.criterion.weight.clone()
-                self.criterion.weight = weight
-
-                if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
-                    ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
-                    dense_weight = self.criterion.weight.view(1,-1,1,1,1)
-                    positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                    needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
-                    self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             # forward pass
             dout = self.model(dinp)
-
-            #print(dout.dtype, dout.shape, dtarget.dtype, dtarget.shape, dout.min(), dout.max())
             dloss = self.criterion(dout, dtarget)
-            #dcumloss = dloss if i == 0 else dcumloss + dloss
-            #print(dloss, dloss.size())
-            #dloss = (dloss * prev_weight * weight).mean()
-            if torch.isnan(dloss).sum():
+            if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
 
+            # update step
+            self.optimizer.zero_grad()
             if self.mixed_precision:
-                from apex import amp
-                with amp.scale_loss(dloss, self.optimizer) as scaled_loss:
+                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
-                # update step
                 dloss.backward()
-
-            if i % self.optimizer_iterations == self.optimizer_iterations - 1:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-                #loss2 = float(self.criterion(self.model(dinp), dtarget))
-                #print(f'loss gain factor {np.divide(float(dloss), (float(dloss)-loss2))})')
+            self.optimizer.step()
             # End of core training loop on self.device
+
+            # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
+            out = dout.detach().cpu()  # Copy model output to host memory for metrics, visualization
 
             with torch.no_grad():
                 loss = float(dloss)
-                # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
-                out_class = dout.argmax(dim=1).detach().cpu()
-                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 and cube_meta != np.inf else target  # TODO
-                acc = metrics.accuracy(multi_class_target, out_class, num_classes)
-                acc = np.average(acc[~np.isnan(acc)])#, weights=)
-                mean_target = float(multi_class_target.to(torch.float32).mean())
-
-                # import h5py
-                # dsc5 = channel_metric(metrics.dice_coefficient, c=5, num_classes=num_classes)(multi_class_target, out_class)
-                # after_step = '+' if i % self.optimizer_iterations == 0 else ''
-                # with h5py.File(os.path.join(self.save_path, f'batch {self.step}{after_step} loss={float(dloss)} dsc5={dsc5}.h5'), "w") as f:
-                #     f.create_dataset('raw', data=inp.squeeze(dim=0), compression="gzip")
-                #     f.create_dataset('labels', data=multi_class_target.numpy().astype(np.uint16), compression="gzip")
-                #     f.create_dataset('pred', data=dout.squeeze(dim=0).detach().cpu().numpy(), compression="gzip")
-
-                if fname[0] not in file_stats:
-                    file_stats[fname[0]] = []
-                file_stats[fname[0]] += [float('nan')] * (i - len(file_stats[fname[0]])) + [loss]
-
+                mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
-                stats['tr_loss_mean'] += [float('nan')] * (i - len(stats['tr_loss_mean']))
-                if i % self.optimizer_iterations == self.optimizer_iterations - 1:
-                    stats['tr_loss_mean'] += [np.mean(stats['tr_loss'][-self.optimizer_iterations:])]
-                stats['tr_accuracy'].append(acc)
-                for name, evaluator in tr_evaluators.items():
-                    stats[name].append(evaluator(multi_class_target, out_class))
-
                 misc['mean_target'].append(mean_target)
-                # if loss-loss2 == 0 and not torch.any(out_class != multi_class_target):
-                #     print('grad', self.model.up_convs[0].conv2.weight.grad)
-                #     IPython.embed()
-                #if loss - 0.99 < 1e-3:
-                #    print('asd', loss, loss2)
-                #    IPython.embed()
-                pbar.set_description(f'Training (loss {loss})')
-                #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
-                #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
+                pbar.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
-            if cube_meta != np.inf:
-                self.criterion.weight = prev_weight
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
             misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
@@ -583,10 +504,6 @@ class Trainer:
 
             running_vx_size += inp.numel()
 
-            #if stats['tr_loss_mean'][-1] < self.best_tr_loss:
-            #   self.best_tr_loss = stats['tr_loss'][-1]
-            #   self._save_model(suffix='_best_train', loss=stats['tr_loss'][-1])
-
             self.step += 1
             if self.step >= max_steps:
                 logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
@@ -598,8 +515,8 @@ class Trainer:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
                 images['inp'] = inp.numpy()
-                images['target'] = multi_class_target.numpy()
-                images['out'] = dout.detach().cpu().numpy()
+                images['target'] = target.numpy()
+                images['out'] = out.numpy()
 
             if self.terminate:
                 break
@@ -608,7 +525,7 @@ class Trainer:
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
-        return stats, file_stats, misc, images
+        return stats, misc, images
 
     def _handle_lr(self) -> None:
         r"""Handle quasi-periodic learning rate schedulers that lower the
@@ -672,34 +589,17 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            if cube_meta != np.inf:
-                weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
-                prev_weight = self.criterion.weight.clone()
-                self.criterion.weight *= weight
-                #self.criterion.pos_weight = self.criterion.weight
-
-                if isinstance(self.criterion, torch.nn.BCEWithLogitsLoss):
-                    ignore_mask = (1 - dtarget[0][-1]).view(1,1,*dtarget.shape[2:])
-                    dense_weight = self.criterion.weight.view(1,-1,1,1,1)
-                    positive_target_mask = (weight.view(1,-1,1,1,1) * dtarget)[0][1:-1].sum(dim=0).view(1,1,*dtarget.shape[2:]) # weighted targets w\ background and ignore
-                    needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
-                    self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
-
             with torch.no_grad():
                 dout = self.model(dinp)
-                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 and cube_meta != np.inf else target  # TODO
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
-                out_class = out.argmax(dim=1)
-                if cube_meta != np.inf:
-                    self.criterion.weight = prev_weight
                 for name, evaluator in self.valid_metrics.items():
-                    stats[name].append(evaluator(multi_class_target, out_class))
+                    stats[name].append(evaluator(target, out))
 
         images = {
             'inp': inp.numpy(),
             'out': out.numpy(),
-            'target': multi_class_target.numpy()
+            'target': target.numpy()
         }
 
         stats['val_loss'] = np.mean(val_loss)
@@ -839,16 +739,15 @@ class Trainer:
     def _log_to_tensorboard(
             self,
             stats: Dict,
-            file_stats: Dict,
             misc: Dict,
             tr_images: Dict,
-            val_images: Optional[Dict]
+            val_images: Optional[Dict] = None,
+            file_stats: Optional[Dict] = None,
     ) -> None:
         """Create visualizations, make preview predictions, log and plot to tensorboard"""
         if self.tb:
             try:
                 self._tb_log_scalars(stats, 'stats')
-                self._tb_log_scalars(file_stats, 'file_stats')
                 self._tb_log_scalars(misc, 'misc')
                 if self.preview_batch is not None:
                     if self.epoch % self.preview_interval == 0 or self.epoch == 1:
@@ -857,6 +756,8 @@ class Trainer:
                 self.sample_plotting_handler(self, tr_images, group='tr_samples')
                 if val_images is not None:
                     self.sample_plotting_handler(self, val_images, group='val_samples')
+                if file_stats is not None:
+                    self._tb_log_scalars(file_stats, 'file_stats')
                 self._tb_log_histograms()
             except Exception:
                 logger.exception('Error occured while logging to tensorboard:')
