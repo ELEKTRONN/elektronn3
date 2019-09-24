@@ -174,7 +174,7 @@ class TrainerMulti(Trainer):
                 loss = float(dloss)
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
-                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target  # TODO
+                multi_class_target = target.argmax(1) if len(target.shape) > 4 else target  # TODO
                 acc = metrics.accuracy(multi_class_target, out_class, num_classes)
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
@@ -279,7 +279,7 @@ class TrainerMulti(Trainer):
 
             with torch.no_grad():
                 dout = self.model(dinp)
-                multi_class_target = target.argmax(axis=0) if len(target.shape) > 3 else target
+                multi_class_target = target.argmax(1) if len(target.shape) > 4 else target
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
                 out_class = out.argmax(dim=1)
