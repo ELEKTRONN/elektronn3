@@ -93,24 +93,25 @@ class TrainerMulti(Trainer):
 
     def _train(self, max_steps, max_runtime):
 
-        def _channel_metric(metric, c, num_classes):
+        num_classes = self.num_classes
+
+        def _channel_metric(metric, c, num_classes=num_classes, mean=False):
             """Returns an evaluator that calculates the ``metric``
             and selects its value for channel ``c``."""
 
             def evaluator(target, out):
                 #pred = metrics._argmax(out)
-                m = metric(target, out, num_classes=num_classes)
+                m = metric(target, out, num_classes=num_classes, mean=mean)
                 return m[c]
 
             return evaluator
 
-        num_classes = self.num_classes
         tr_evaluators = {**{
-            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c, num_classes=num_classes) for c in range(num_classes)
+            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c) for c in range(num_classes)
         }, **{
-            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
+            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c) for c in range(num_classes)
         }, **{
-            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c, num_classes=num_classes) for c in range(num_classes)
+            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c) for c in range(num_classes)
         }}
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
@@ -175,7 +176,7 @@ class TrainerMulti(Trainer):
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
                 multi_class_target = target.argmax(1) if len(target.shape) > 4 else target  # TODO
-                acc = metrics.accuracy(multi_class_target, out_class, num_classes)
+                acc = metrics.accuracy(multi_class_target, out_class, num_classes, mean=False)
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
 
