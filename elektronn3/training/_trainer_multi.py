@@ -211,8 +211,8 @@ class TrainerMulti(Trainer):
                 #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
                 #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
-            if cube_meta != np.inf:
-                self.criterion.weight = prev_weight
+
+            self.criterion.weight = prev_weight
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
             misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
