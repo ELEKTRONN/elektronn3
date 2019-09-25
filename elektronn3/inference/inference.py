@@ -119,7 +119,7 @@ Tensor
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
+    out_dtype = torch.bool if argmax_with_threshold is not None else inp.dtype
     out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
@@ -184,7 +184,7 @@ Tensor
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
         if argmax_with_threshold is not None:
-            out[out_slice] = (out_tile > argmax_with_threshold).argmax(dim=1).to(torch.uint8)
+            out[out_slice] = (out_tile > argmax_with_threshold).argmax(dim=1).to(torch.bool)
         else:
             out[out_slice] = out_tile
 
