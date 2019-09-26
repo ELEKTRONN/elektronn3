@@ -58,7 +58,7 @@ class TrainerMulti(Trainer):
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
-                self._log_to_tensorboard(stats, file_stats, misc, tr_sample_images, val_sample_images)
+                self._log_to_tensorboard(stats, misc, tr_sample_images, val_sample_images, file_stats=file_stats)
                 # Legacy non-tensorboard logging to files
                 self._log_to_history_tracker(stats, misc)
 
