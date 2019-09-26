@@ -176,7 +176,7 @@ class TrainerMulti(Trainer):
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
                 multi_class_target = target.argmax(1) if len(target.shape) > 4 else target  # TODO
-                acc = metrics.accuracy(multi_class_target, out_class, num_classes, mean=False)
+                acc = metrics.accuracy(multi_class_target, out_class, num_classes, mean=False).numpy()
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
 
@@ -207,7 +207,7 @@ class TrainerMulti(Trainer):
                 #if loss - 0.99 < 1e-3:
                 #    print('asd', loss, loss2)
                 #    IPython.embed()
-                pbar.set_description(f'Training (loss {loss})')
+                pbar.set_description(f'Training (loss {loss:.4f})')
                 #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
                 #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
