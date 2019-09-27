@@ -5,12 +5,17 @@ from typing import Dict, Optional, Callable
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
+import matplotlib.cm
 import numpy as np
 import torch
 from skimage.color import label2rgb
 from torch.nn import functional as F
 
 from elektronn3.data.utils import squash01
+
+
+def get_colors(num_classes: int, cmap: str = 'viridis') -> np.ndarray:
+    return matplotlib.cm.get_cmap(cmap, num_classes).colors
 
 
 def plot_image(
@@ -159,10 +164,13 @@ def _tb_log_preview(
     )
     inp_slice = batch2img(inp_batch)[0]
     inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-    pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+    pred_slice_ov = label2rgb(
+        pred_slice, inp01, bg_label=0,
+        colors=get_colors(trainer.num_classes), alpha=trainer.overlay_alpha
+    )
     trainer.tb.add_figure(
         f'{group}/pred_overlay',
-        plot_image(pred_slice_ov, colorbar=True),
+        plot_image(pred_slice_ov, colorbar=False),
         global_step=trainer.step
     )
 
@@ -317,26 +325,30 @@ def _tb_log_sample_images(
         )
         if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
             inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-            target_slice_ov = label2rgb(target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
-            pred_slice_ov = label2rgb(pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha)
+            target_slice_ov = label2rgb(
+                target_slice, inp01, bg_label=0,
+                colors=get_colors(trainer.num_classes), alpha=trainer.overlay_alpha
+            )
+            pred_slice_ov = label2rgb(
+                pred_slice, inp01, bg_label=0,
+                colors=get_colors(trainer.num_classes), alpha=trainer.overlay_alpha
+            )
             # Ensure the value range remains [0, 1]
             target_slice_ov = np.clip(target_slice_ov, 0, 1)
             pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
-                plot_image(target_slice_ov, colorbar=True),
+                plot_image(target_slice_ov, colorbar=False),
                 global_step=trainer.step
             )
             trainer.tb.add_figure(
                 f'{group}/pred_overlay',
-                plot_image(pred_slice_ov, colorbar=True),
+                plot_image(pred_slice_ov, colorbar=False),
                 global_step=trainer.step
             )
-            # TODO: What's up with the colorbar in overlay plots?
             # TODO: When plotting overlay images, they appear darker than they should.
             #       This normalization issue gets worse with higher alpha values
             #       (i.e. with more contribution of the overlayed label map).
             #       Don't know how to fix this currently.
-            # TODO: Synchronize overlay colors with pred_slice- and target_slice colors
     elif is_regression:
         trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap), global_step=trainer.step)

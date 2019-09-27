@@ -166,6 +166,7 @@ class TrainerMulti(Trainer):
 
             if i % self.optimizer_iterations == self.optimizer_iterations - 1:
                 self.optimizer.step()
+                # TODO (lp): calling zero_grad() here makes gradients disappear from tb histograms
                 self.optimizer.zero_grad()
                 #loss2 = float(self.criterion(self.model(dinp), dtarget))
                 #print(f'loss gain factor {np.divide(float(dloss), (float(dloss)-loss2))})')
