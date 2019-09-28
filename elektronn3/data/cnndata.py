@@ -205,6 +205,7 @@ class PatchCreator(data.Dataset):
         self.n_successful_warp = 0
         self.n_failed_warp = 0
         self.n_read_failures = 0
+        self._failed_warp_warned = False
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
         # Note that the index is ignored. Samples are always random
@@ -226,16 +227,15 @@ class PatchCreator(data.Dataset):
                 #  reflect the actual probability of a sample being obtained by warping.
                 warp_prob = 1 if warp_prob > 0 else 0
                 self.n_failed_warp += 1
-                if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp:
+                if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp and not self._failed_warp_warned:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
                     fail_percentage = int(round(100 * fail_ratio))
-                    # Note that this warning will be spammed once the conditions are met.
-                    # Better than logging it once and risking that it stays unnoticed IMO.
                     print(e)
                     logger.warning(
                         f'{fail_percentage}% of warping attempts are failing.\n'
                         'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
                     )
+                    self._failed_warp_warned = True
                 continue
             except coord_transforms.WarpingSanityError:
                 logger.exception('Invalid coordinate values encountered while warping. Retrying...')
