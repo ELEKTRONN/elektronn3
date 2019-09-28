@@ -238,7 +238,7 @@ class Trainer:
             batchsize: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
-            overlay_alpha: float = 0.2,
+            overlay_alpha: float = 0.4,
             enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
