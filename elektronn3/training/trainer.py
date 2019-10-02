@@ -695,17 +695,17 @@ class Trainer:
             'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
         }, state_dict_path)
-        log(f'Saved state_dict as {state_dict_path}.')
+        log(f'Saved state_dict as {state_dict_path}')
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
-            log(f'Saved model as {model_path}.')
+            log(f'Saved model as {model_path}')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
                 model_path += 's'
                 traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
                 traced.save(model_path)
-                log(f'Saved jit-traced model as {model_path}.')
+                log(f'Saved jit-traced model as {model_path}')
                 # Uncomment these lines if separate traces for train/eval are required:
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
@@ -716,7 +716,7 @@ class Trainer:
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
                 model.save(model_path)
-                log(f'Saved jitted model as {model_path}.')
+                log(f'Saved jitted model as {model_path}')
             else:
                 raise exc
         finally:
