@@ -93,7 +93,6 @@ model = UNet(
     batch_norm=True,
     # conv_mode='valid',
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
-    adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
 # Example for a model-compatible input.
 example_input = torch.ones(1, 1, 32, 64, 64)

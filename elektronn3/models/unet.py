@@ -450,6 +450,9 @@ class UNet(nn.Module):
         self.down_convs = []
         self.up_convs = []
 
+        if adaptive:
+            print('Warning: adaptive mode is no longer needed on newer PyTorch/CUDA/CuDNN setups and is therefore deprecated.')
+
         # Indices of blocks that should operate in 2D instead of 3D mode,
         # to save resources
         self.planar_blocks = planar_blocks
