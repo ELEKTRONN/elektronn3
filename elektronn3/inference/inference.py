@@ -37,7 +37,7 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
-        argmax_with_threshold = None,
+        argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
 ) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -297,7 +297,7 @@ class Predictor:
             float16: bool = False,
             apply_softmax: bool = True,
             strict_shapes: bool = False,
-            argmax_with_threshold = None,
+            argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
             report_inp_stats = False
     ):

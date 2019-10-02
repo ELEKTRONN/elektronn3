@@ -446,7 +446,8 @@ class PatchCreator(data.Dataset):
 
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
-            logger.info(f'  cube_meta:   {cube_meta}')
+            if not np.all(cube_meta == np.inf):
+                logger.info(f'  cube_meta:   {cube_meta}')
             inp_h5sets.append(inp_h5_data)
             target_h5sets.append(target_h5_data)
         print()
