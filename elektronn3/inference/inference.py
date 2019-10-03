@@ -22,6 +22,12 @@ from tqdm import tqdm
 
 logger = logging.getLogger('elektronn3log')
 
+# Alias for type hinting
+Transform = Callable[
+    [np.ndarray, Optional[np.ndarray]],
+    Tuple[np.ndarray, Optional[np.ndarray]]
+]
+
 
 def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
     """Extend a spatial slice ([D,] H, W) to also include the non-spatial (N, C) dims."""
@@ -266,6 +272,16 @@ class Predictor:
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        transform: Transformation function to be applied to inputs before
+            performing inference. The primary use of this is for normalization.
+            Make sure to use the same normalization parameters for inference as
+            the ones that were used for training of the ``model``.
+            See :py:mod:`elektronn3.data.transforms`. for some implementations.
+            For pure input normalization you can use this template::
+
+            >>> from elektronn3.data import transforms
+            >>> # m, s are mean, std of the inputs the model was trained on
+            >>> transform = transforms.Normalize(mean=m, std=s, inplace=True)
         strict_shapes: If ``False`` (default), force the ``output_shape`` to be
             a multiple of the ``tile_shape`` by padding the input. This allows
             for greater flexibility of the ``tile_shape`` but potentially wastes
@@ -296,6 +312,7 @@ class Predictor:
             offset: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
+            transform: Optional[Transform] = None,
             strict_shapes: bool = False,
             argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
@@ -326,6 +343,7 @@ class Predictor:
                 'that are passed as file paths (strings).'
             )
         self.dtype = torch.float16 if float16 else torch.float32
+        self.transform = transform
         self.strict_shapes = strict_shapes
         self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
@@ -432,7 +450,9 @@ class Predictor:
                 print('input dist', utils.calculate_means(inp.numpy()), utils.calculate_stds(inp.numpy()))
             except:
                 print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
-
+        if self.transform is not None:
+            for i in range(inp.shape[0]):  # Apply transform for each sample of the batch separately
+                inp[i], _ = self.transform(inp[i], None)  # target=None because we don't have any here
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape

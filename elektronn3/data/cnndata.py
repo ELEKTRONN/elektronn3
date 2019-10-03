@@ -123,6 +123,8 @@ class PatchCreator(data.Dataset):
             samples (for normalization, data augmentation etc.). The signature
             is always ``inp, target = transform(inp, target)``, where ``inp``
             and ``target`` both are ``numpy.ndarray``s.
+            In some transforms ``target`` can also be set to ``None``. In this
+            case it is ignored and only ``inp`` is processed.
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.

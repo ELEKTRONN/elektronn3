@@ -806,7 +806,7 @@ class Trainer:
             self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
     # TODO: Make more configurable
-    # TODO: Inference on secondary GPU
+    # TODO: Use Predictor(..., transform=...) and remove normalization from preview batch?
     def _preview_inference(
             self,
             inp: np.ndarray,
