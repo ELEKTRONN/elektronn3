@@ -27,7 +27,10 @@ from scipy.ndimage.interpolation import map_coordinates
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 
-Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+Transform = Callable[
+    [np.ndarray, Optional[np.ndarray]],
+    Tuple[np.ndarray, Optional[np.ndarray]]
+]
 
 
 class _DropSample(Exception):
@@ -36,7 +39,7 @@ class _DropSample(Exception):
 
 
 class Identity:
-    def __call__(self, inp, target):
+    def __call__(self, inp, target=None):
         return inp, target
 
 
