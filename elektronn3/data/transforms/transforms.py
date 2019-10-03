@@ -212,14 +212,18 @@ class Normalize:
         std: Global standard deviation value(s) of the inputs. Can either
             be a sequence of float values where each value corresponds to a
             channel or a single float value (only for single-channel data).
+        inplace: Apply in-place (works faster, needs less memory but overwrites
+            inputs).
     """
     def __init__(
             self,
             mean: Union[Sequence[float], float],
-            std: Union[Sequence[float], float]
+            std: Union[Sequence[float], float],
+            inplace: bool = False
     ):
         self.mean = np.array(mean)
         self.std = np.array(std)
+        self.inplace = inplace
         # Unsqueeze first dimensions if mean and scalar are passed as scalars
         if self.mean.ndim == 0:
             self.mean = self.mean[None]
@@ -230,9 +234,11 @@ class Normalize:
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
-            # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        normalized = np.empty_like(inp)
+        if self.inplace:
+            normalized = inp  # Refer to the same memory space
+        else:
+            normalized = np.empty_like(inp)
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
             raise ValueError('mean and std must have the same length as the C '
                              'axis (number of channels) of the input.')

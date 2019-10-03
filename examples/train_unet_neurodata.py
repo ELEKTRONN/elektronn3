@@ -175,7 +175,7 @@ if args.resume is not None:  # Load pretrained network
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
 ]
 train_transform = transforms.Compose(common_transforms + [
     # transforms.RandomRotate2d(prob=0.9),

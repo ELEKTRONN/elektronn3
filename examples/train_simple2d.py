@@ -102,7 +102,7 @@ dataset_std = (44.264744,)
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
 ]
 train_transform = transforms.Compose(common_transforms + [
     transforms.RandomCrop((128, 128)),  # Use smaller patches for training
