@@ -238,7 +238,7 @@ class Trainer:
             batchsize: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
-            overlay_alpha: float = 0.2,
+            overlay_alpha: float = 0.4,
             enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
@@ -314,7 +314,7 @@ class Trainer:
 
         if self.mixed_precision:
             from apex import amp
-            self.amp_handle = amp.init()
+            self.model, self.optimizer = amp.initialize(self.model, self.optimizer, opt_level='O1')
 
         if exp_name is None:  # Auto-generate a name based on model name and ISO timestamp
             timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
@@ -380,13 +380,13 @@ class Trainer:
                 worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
+        self.best_tr_loss = np.inf
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
     # TODO: Modularize, make some general parts reusable for other trainers.
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
-
         After each training epoch, validation performance is measured and
         visualizations are computed and logged to tensorboard."""
         self.start_time = datetime.datetime.now()
@@ -414,11 +414,11 @@ class Trainer:
                 self._log_to_history_tracker(stats, misc)
 
                 # Save trained model state
-                self._save_model(verbose=False)  # Not verbose because it can get spammy.
+                self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best')
+                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -455,7 +455,7 @@ class Trainer:
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, (inp, target) in pbar:
+        for i, (inp, target, cube_meta, fname) in pbar:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
@@ -585,7 +585,7 @@ class Trainer:
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        for inp, target in tqdm(self.valid_loader, 'Validating'):
+        for inp, target, cube_meta, _ in tqdm(self.valid_loader, 'Validating'):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
@@ -611,11 +611,14 @@ class Trainer:
 
         return stats, images
 
+# TODO: Instead of using specific keys like val_loss, enable passing info as an
+#       extra dict whose contents will be added to the state_dict
     def _save_model(
             self,
             suffix: str = '',
             unwrap_parallel: bool = True,
-            verbose: bool = True
+            verbose: bool = True,
+            val_loss=np.nan
     ) -> None:
         """Save/serialize trained model state to files.
 
@@ -651,6 +654,8 @@ class Trainer:
             verbose: If ``True`` (default), log infos about saved models at
                 log-level "INFO" (which appears in stdout). Else, only silently
                 log with log-level "DEBUG".
+            val_loss: Stores the validation loss
+                (default value if not supplied: NaN)
         """
         log = logger.info if verbose else logger.debug
 
@@ -687,19 +692,20 @@ class Trainer:
             'lr_sched_state_dict': lr_sched_state,
             'global_step': self.step,
             'epoch': self.epoch,
-            'best_val_loss': self.best_val_loss
+            'best_val_loss': self.best_val_loss,
+            'val_loss': val_loss,
         }, state_dict_path)
-        log(f'Saved state_dict as {state_dict_path}.')
+        log(f'Saved state_dict as {state_dict_path}')
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
-            log(f'Saved model as {model_path}.')
+            log(f'Saved model as {model_path}')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
                 model_path += 's'
                 traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
                 traced.save(model_path)
-                log(f'Saved jit-traced model as {model_path}.')
+                log(f'Saved jit-traced model as {model_path}')
                 # Uncomment these lines if separate traces for train/eval are required:
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
@@ -710,7 +716,7 @@ class Trainer:
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
                 model.save(model_path)
-                log(f'Saved jitted model as {model_path}.')
+                log(f'Saved jitted model as {model_path}')
             else:
                 raise exc
         finally:
@@ -735,7 +741,8 @@ class Trainer:
             stats: Dict,
             misc: Dict,
             tr_images: Dict,
-            val_images: Optional[Dict]
+            val_images: Optional[Dict] = None,
+            file_stats: Optional[Dict] = None,
     ) -> None:
         """Create visualizations, make preview predictions, log and plot to tensorboard"""
         if self.tb:
@@ -749,6 +756,8 @@ class Trainer:
                 self.sample_plotting_handler(self, tr_images, group='tr_samples')
                 if val_images is not None:
                     self.sample_plotting_handler(self, val_images, group='val_samples')
+                if file_stats is not None:
+                    self._tb_log_scalars(file_stats, 'file_stats')
                 self._tb_log_histograms()
             except Exception:
                 logger.exception('Error occured while logging to tensorboard:')
@@ -782,9 +791,8 @@ class Trainer:
                 for i in range(len(value)):
                     if not np.isnan(value[i]):
                         self.tb.add_scalar(f'{tag}/{key}', value[i], self.step - len(value) + i)
-            else:
-                if not np.isnan(value):
-                    self.tb.add_scalar(f'{tag}/{key}', value, self.step)
+            elif not np.isnan(value):
+                self.tb.add_scalar(f'{tag}/{key}', value, self.step)
 
     def _tb_log_histograms(self) -> None:
         """Log histograms of model parameters and their current gradients.
@@ -798,7 +806,7 @@ class Trainer:
             self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
     # TODO: Make more configurable
-    # TODO: Inference on secondary GPU
+    # TODO: Use Predictor(..., transform=...) and remove normalization from preview batch?
     def _preview_inference(
             self,
             inp: np.ndarray,

@@ -32,6 +32,7 @@ References:
 """
 
 from functools import lru_cache
+from typing import Optional
 
 import sklearn.metrics
 import torch
@@ -41,12 +42,6 @@ eps = 0.0001  # To avoid divisions by zero
 
 # TODO: Tests would make a lot of sense here.
 
-# TODO: Support ignoring certain classes (labels).
-#       OR Support a ``labels=...`` param like sklearn, where you pass a
-#        whitelist of classes that should be considered in calculations).
-#        Actually although it's a bit more effort, I think that's a better
-#        approach than blacklisting via an ``ignore=...` param.
-
 
 @lru_cache(maxsize=128)
 def confusion_matrix(
@@ -55,7 +50,8 @@ def confusion_matrix(
         num_classes: int = 2,
         dtype: torch.dtype = torch.float32,
         device: torch.device = torch.device('cpu'),
-        nan_when_empty: bool = True
+        nan_when_empty: bool = True,
+        ignore: Optional[int] = None,
 ) -> torch.Tensor:
     """ Calculate per-class confusion matrix.
 
@@ -76,6 +72,7 @@ def confusion_matrix(
         nan_when_empty: If ``True`` (default), the confusion matrix will
             be filled with NaN values for each channel of which there are
             no positive entries in the ``target`` tensor.
+        ignore: Index to be ignored for cm calculation
 
     Returns:
         Confusion matrix ``cm``, with shape ``(num_classes, 4)``, where
@@ -97,12 +94,16 @@ def confusion_matrix(
         pos_pred = pred == c
         neg_pred = ~pos_pred
         pos_target = target == c
+        if ignore is not None:
+            ign_target = target == ignore
+        else:
+            ign_target = False  # Makes `& ~ign_target` a no-op
         neg_target = ~pos_target
 
-        true_pos = (pos_pred & pos_target).sum(dtype=dtype)
-        true_neg = (neg_pred & neg_target).sum(dtype=dtype)
-        false_pos = (pos_pred & neg_target).sum(dtype=dtype)
-        false_neg = (neg_pred & pos_target).sum(dtype=dtype)
+        true_pos = (pos_pred & pos_target & ~ign_target).sum(dtype=dtype)
+        true_neg = (neg_pred & neg_target & ~ign_target).sum(dtype=dtype)
+        false_pos = (pos_pred & neg_target & ~ign_target).sum(dtype=dtype)
+        false_neg = (neg_pred & pos_target & ~ign_target).sum(dtype=dtype)
 
         cm[c] = torch.tensor([true_pos, true_neg, false_pos, false_neg])
 
@@ -112,9 +113,9 @@ def confusion_matrix(
     return cm
 
 
-def precision(target, pred, num_classes=2, mean=True):
+def precision(target, pred, num_classes=2, mean=True, ignore=None):
     """Precision metric (in %)"""
-    cm = confusion_matrix(target, pred, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes, ignore=ignore)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     # Compute metrics for each class simulataneously
     prec = tp / (tp + fp + eps)  # Per-class precision
@@ -123,9 +124,9 @@ def precision(target, pred, num_classes=2, mean=True):
     return prec * 100
 
 
-def recall(target, pred, num_classes=2, mean=True):
+def recall(target, pred, num_classes=2, mean=True, ignore=None):
     """Recall metric a.k.a. sensitivity a.k.a. hit rate (in %)"""
-    cm = confusion_matrix(target, pred, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes, ignore=ignore)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     rec = tp / (tp + fn + eps)  # Per-class recall
     if mean:
@@ -133,9 +134,9 @@ def recall(target, pred, num_classes=2, mean=True):
     return rec * 100
 
 
-def accuracy(target, pred, num_classes=2, mean=True):
+def accuracy(target, pred, num_classes=2, mean=True, ignore=None):
     """Accuracy metric (in %)"""
-    cm = confusion_matrix(target, pred, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes, ignore=ignore)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     acc = (tp + tn) / (tp + tn + fp + fn + eps)  # Per-class accuracy
     if mean:
@@ -143,9 +144,9 @@ def accuracy(target, pred, num_classes=2, mean=True):
     return acc * 100
 
 
-def dice_coefficient(target, pred, num_classes=2, mean=True):
+def dice_coefficient(target, pred, num_classes=2, mean=True, ignore=None):
     """Sørensen–Dice coefficient a.k.a. DSC a.k.a. F1 score (in %)"""
-    cm = confusion_matrix(target, pred, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes, ignore=ignore)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     dsc = 2 * tp / (2 * tp + fp + fn + eps)  # Per-class (Sørensen-)Dice similarity coefficient
     if mean:
@@ -153,9 +154,9 @@ def dice_coefficient(target, pred, num_classes=2, mean=True):
     return dsc * 100
 
 
-def iou(target, pred, num_classes=2, mean=True):
+def iou(target, pred, num_classes=2, mean=True, ignore=None):
     """IoU (Intersection over Union) a.k.a. IU a.k.a. Jaccard index (in %)"""
-    cm = confusion_matrix(target, pred, num_classes=num_classes)
+    cm = confusion_matrix(target, pred, num_classes=num_classes, ignore=ignore)
     tp, tn, fp, fn = cm.transpose(0, 1)  # Transposing to put class axis last
     iu = tp / (tp + fp + fn + eps)  # Per-class Intersection over Union
     if mean:

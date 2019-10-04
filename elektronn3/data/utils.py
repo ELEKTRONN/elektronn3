@@ -89,6 +89,16 @@ def calculate_class_weights(
         class_weights = (targets.size / num_labeled + eps).astype(np.float32)
         return class_weights
 
+    def __norpf_inverse(targets):
+        classes = np.arange(0, targets.max() + 1)
+        # Count total number of labeled elements per class
+        num_labeled = np.array([
+            np.sum(np.equal(targets, c))
+            for c in classes
+        ], dtype=np.float32)
+        class_weights = (num_labeled / targets.size).astype(np.float32)
+        return class_weights
+
     def __binmean(targets):
         """Use the mean of the targets to determine class weights.
 
@@ -105,6 +115,8 @@ def calculate_class_weights(
         return __inverse(targets)
     elif mode == 'inversesquared':
         return __inverse(targets) ** 2
+    elif mode == 'norpf_inverse':
+        return __norpf_inverse(targets)
     elif mode == 'binmean':
         return __binmean(targets)
 

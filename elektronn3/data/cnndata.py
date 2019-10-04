@@ -26,6 +26,9 @@ from elektronn3.data.utils import slice_h5
 logger = logging.getLogger('elektronn3log')
 
 
+class _DefaultCubeMeta:
+    def __getitem__(self, *args, **kwargs): return np.inf
+
 class PatchCreator(data.Dataset):
     """Dataset iterator class that creates 3D image patches from HDF5 files.
 
@@ -120,6 +123,8 @@ class PatchCreator(data.Dataset):
             samples (for normalization, data augmentation etc.). The signature
             is always ``inp, target = transform(inp, target)``, where ``inp``
             and ``target`` both are ``numpy.ndarray``s.
+            In some transforms ``target`` can also be set to ``None``. In this
+            case it is ignored and only ``inp`` is processed.
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
@@ -151,6 +156,7 @@ class PatchCreator(data.Dataset):
             transform: Callable = transforms.Identity(),
             num_classes: Optional[int] = None,
             in_memory: bool = False,
+            cube_meta=_DefaultCubeMeta(),
     ):
         # Early checks
         if len(input_h5data) != len(target_h5data):
@@ -171,6 +177,7 @@ class PatchCreator(data.Dataset):
         target_h5data = [(expanduser(fn), key) for (fn, key) in target_h5data]
         self.input_h5data = input_h5data
         self.target_h5data = target_h5data
+        self.cube_meta = cube_meta
         self.cube_prios = cube_prios
         self.aniso_factor = aniso_factor
         self.target_discrete_ix = target_discrete_ix
@@ -200,36 +207,37 @@ class PatchCreator(data.Dataset):
         self.n_successful_warp = 0
         self.n_failed_warp = 0
         self.n_read_failures = 0
+        self._failed_warp_warned = False
 
-    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray]:
+    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
         # Note that the index is ignored. Samples are always random
         return self._get_random_sample()
 
-    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
         #                                 np.float32, self._target_dtype
         # use index just as counter, subvolumes will be chosen randomly
 
-        input_src, target_src = self._getcube()  # get cube randomly
+        input_src, target_src, i = self._getcube()  # get cube randomly
         warp_prob = self.warp_prob
         while True:
             try:
                 inp, target = self.warp_cut(input_src, target_src, warp_prob, self.warp_kwargs)
                 target = target.astype(self._target_dtype)
-            except coord_transforms.WarpingOOBError:
+            except coord_transforms.WarpingOOBError as e:
                 # Temporarily set warp_prob to 1 to make sure that the next attempt
                 #  will also try to use warping. Otherwise, self.warp_prob would not
                 #  reflect the actual probability of a sample being obtained by warping.
-                warp_prob = 1
+                warp_prob = 1 if warp_prob > 0 else 0
                 self.n_failed_warp += 1
-                if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp:
+                if self.n_failed_warp > 20 and self.n_failed_warp > 8 * self.n_successful_warp and not self._failed_warp_warned:
                     fail_ratio = self.n_failed_warp / (self.n_failed_warp + self.n_successful_warp)
                     fail_percentage = int(round(100 * fail_ratio))
-                    # Note that this warning will be spammed once the conditions are met.
-                    # Better than logging it once and risking that it stays unnoticed IMO.
+                    print(e)
                     logger.warning(
                         f'{fail_percentage}% of warping attempts are failing.\n'
                         'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
                     )
+                    self._failed_warp_warned = True
                 continue
             except coord_transforms.WarpingSanityError:
                 logger.exception('Invalid coordinate values encountered while warping. Retrying...')
@@ -264,7 +272,7 @@ class PatchCreator(data.Dataset):
 
         # inp, target are still numpy arrays here. Relying on auto-conversion to
         #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
-        return inp, target
+        return inp, target, self.cube_meta[i], os.path.basename(self.input_h5data[i][0])
 
     def __len__(self) -> int:
         return self.epoch_size
@@ -362,8 +370,7 @@ class PatchCreator(data.Dataset):
         or randomly on valid data
         """
         if self.train:
-            p = np.random.rand()
-            i = np.flatnonzero(self._sampling_weight <= p)[-1]
+            i = np.random.choice(np.arange(self._sampling_weight.size), p=self._sampling_weight)
             inp_source, target_source = self.inputs[i], self.targets[i]
         else:
             if len(self.inputs) == 0:
@@ -373,7 +380,7 @@ class PatchCreator(data.Dataset):
             i = np.random.randint(0, len(self.inputs))
             inp_source, target_source = self.inputs[i], self.targets[i]
 
-        return inp_source, target_source
+        return inp_source, target_source, i
 
     def load_data(self) -> None:
         inp_files, target_files = self.open_files()
@@ -391,8 +398,8 @@ class PatchCreator(data.Dataset):
         else:  # If priorities are given: sample irrespective of cube size
             prios = np.array(self.cube_prios, dtype=np.float)
 
-        # sample example i if: batch_prob[i] < p
-        self._sampling_weight = np.hstack((0, np.cumsum(prios / prios.sum())))
+        self._sampling_weight = prios / prios.sum()
+        logger.debug(f'prios = {prios}, sampling_weight = {self._sampling_weight}')
 
     def check_files(self) -> None:  # TODO: Update for cdhw version
         """
@@ -425,7 +432,7 @@ class PatchCreator(data.Dataset):
         modestr = 'Training' if self.train else 'Validation'
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
-        for (inp_fname, inp_key), (target_fname, target_key) in zip(self.input_h5data, self.target_h5data):
+        for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_h5data, self.target_h5data, self.cube_meta):
             inp_h5_file = h5py.File(inp_fname, 'r')
             inp_h5_data = inp_h5_file[inp_key]#[:, 50:-50, 100:-100, 100:-100]
             target_h5_file = h5py.File(target_fname, 'r')
@@ -441,6 +448,8 @@ class PatchCreator(data.Dataset):
 
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
+            if not np.all(cube_meta == np.inf):
+                logger.info(f'  cube_meta:   {cube_meta}')
             inp_h5sets.append(inp_h5_data)
             target_h5sets.append(target_h5_data)
         print()
