@@ -456,7 +456,11 @@ class Predictor:
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
-        inp, out_shape, relevant_slice = self._ensure_matching_shapes(inp)
+        if self.enable_tiling:
+            inp, out_shape, relevant_slice = self._ensure_matching_shapes(inp)
+        else:
+            relevant_slice = None
+            out_shape = self.out_shape
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         if self.device.type == 'cuda':
             inp.pin_memory()
