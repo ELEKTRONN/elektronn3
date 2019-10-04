@@ -530,8 +530,9 @@ class Predictor:
                         f'Adapting out_shape {tuple(self.out_shape[1:])} to '
                         f'tile_shape {tuple(self.tile_shape)} '
                         f'by padding out_shape to {tuple(padded_out_shape[1:])}.\n'
-                        f'At least {wasted_percentage:.2f}% of total compute will be '
-                        f'wasted by this padding.'
+                        f'Suboptimal shapes will reduce execution speed.'
+                        # f'At least {wasted_percentage:.2f}% of total compute will be '
+                        # f'wasted by this padding.'
                     )
                     # TODO: Calculate exact compute waste by looking at increased tile overlaps
                     #  (the current estimation omits the (potentially high-impact) added per-tile
