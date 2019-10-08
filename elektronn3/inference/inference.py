@@ -396,8 +396,10 @@ class Predictor:
 
         Tiling is not used if ``tile_shape`` and ``overlap_shape`` are
         undefined."""
-        out_shape = (inp.shape[0], *out_shape)
         if self.enable_tiling:
+            if self.out_shape is None:
+                raise ValueError('If you use tiling, you also need to supply out_shape.')
+            out_shape = (inp.shape[0], *out_shape)
             return tiled_apply(
                 self._predict,
                 inp=inp,
