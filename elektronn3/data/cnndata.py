@@ -610,7 +610,7 @@ class Segmentation2d(data.Dataset):
                 break
             except transforms._DropSample:
                 pass
-        return inp, target
+        return inp, target, np.inf, str(index)
 
     def __len__(self):
         return len(self.target_paths) * self.epoch_multiplier
@@ -655,7 +655,7 @@ class Reconstruction2d(data.Dataset):
                 break
             except transforms._DropSample:
                 pass
-        return inp, inp
+        return inp, inp, np.inf, str(index)
 
     def __len__(self):
         return len(self.inp_paths) * self.epoch_multiplier
