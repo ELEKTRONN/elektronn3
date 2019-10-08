@@ -45,6 +45,22 @@ class CombinedLoss(torch.nn.Module):
         return loss
 
 
+class FocalLoss(torch.nn.Module):
+    """Focal Loss (https://arxiv.org/abs/1708.02002)
+    
+    Expects raw outputs, not softmax probs."""
+    def __init__(self, weight=None, gamma=2., reduction='mean', ignore_index=-100):
+        super().__init__()
+        self.gamma = gamma
+        self.nll = torch.nn.NLLLoss(weight=weight, reduction=reduction, ignore_index=ignore_index)
+        self.log_softmax = torch.nn.LogSoftmax(1)
+        
+    def forward(self, output, target):
+        log_prob = self.log_softmax(output)
+        prob = torch.exp(log_prob)
+        return self.nll(((1 - prob) ** self.gamma) * log_prob, target)
+
+
 class SoftmaxBCELoss(torch.nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__()
