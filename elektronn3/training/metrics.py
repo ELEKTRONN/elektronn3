@@ -249,7 +249,7 @@ def channel_metric(metric, c, num_classes, argmax=True):
     """
     def evaluator(target, out):
         pred = _argmax(out) if argmax else out
-        m = metric(target, pred, num_classes=num_classes)
+        m = metric(target, pred, num_classes=num_classes, mean=False)
         return m[c]
 
     return evaluator
