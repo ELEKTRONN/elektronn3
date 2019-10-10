@@ -104,7 +104,7 @@ def tiled_apply(
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
         argmax_with_threshold
-Tensor
+
     Returns:
         Output tensor, as a torch tensor of the same shape as the input tensor.
     """
@@ -119,13 +119,18 @@ Tensor
             f'spatial inp shape {tuple(inp.shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
+    if out_shape[1] > 255 and argmax_with_threshold is not None:
+        raise NotImplementedError(
+            f'C = out_shape[1] = {out_shape[1]}, but '
+            f'argmax_with_threshold with C > 255 is not supported due to uint8 storage.'
+        )
 
     if offset is None:
         offset = np.zeros_like(tile_shape)
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out_dtype = torch.bool if argmax_with_threshold is not None else inp.dtype
+    out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
     out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
@@ -189,8 +194,9 @@ Tensor
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
+        # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
         if argmax_with_threshold is not None:
-            out[out_slice] = (out_tile > argmax_with_threshold).argmax(dim=1).to(torch.bool)
+            out[out_slice] = (out_tile > argmax_with_threshold).argmax(dim=1).to(out_dtype)
         else:
             out[out_slice] = out_tile
 
