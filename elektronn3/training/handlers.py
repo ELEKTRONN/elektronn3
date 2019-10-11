@@ -1,6 +1,8 @@
 # These are default plotting handlers that work in some common training
 #  scenarios, but won't work in every case:
 
+import os
+
 from typing import Dict, Optional, Callable
 
 import matplotlib.figure
@@ -14,7 +16,10 @@ from torch.nn import functional as F
 from elektronn3.data.utils import squash01
 
 
-def get_colors(num_classes: int, cmap: str = 'viridis') -> np.ndarray:
+E3_CMAP = os.getenv('E3_CMAP', 'viridis')
+
+
+def get_colors(num_classes: int, cmap: str = E3_CMAP) -> np.ndarray:
     return matplotlib.cm.get_cmap(cmap, num_classes).colors
 
 
@@ -37,7 +42,7 @@ def plot_image(
         # Assume label matrix with qualitative classes, no meaningful order
         # Using rainbow because IMHO all actually qualitative colormaps
         #  are incredibly ugly.
-        cmap = plt.cm.get_cmap('viridis', num_classes)
+        cmap = plt.cm.get_cmap(E3_CMAP, num_classes)
         ticks = np.arange(num_classes)
 
     if num_classes is not None:  # For label matrices
