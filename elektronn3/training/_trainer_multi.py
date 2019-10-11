@@ -128,9 +128,12 @@ class TrainerMulti(Trainer):
         timer = Timer()
         import gc
         gc.collect()
-        pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, (inp, target, cube_meta, fname) in pbar:
+        batch_iter = tqdm(self.valid_loader, 'Validating', total=len(self.valid_loader))
+        for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+            inp, target = batch['inp'], batch['target']
+            cube_meta = batch['weight']
+            fname = batch['file_stats']
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
@@ -208,7 +211,7 @@ class TrainerMulti(Trainer):
                 #if loss - 0.99 < 1e-3:
                 #    print('asd', loss, loss2)
                 #    IPython.embed()
-                pbar.set_description(f'Training (loss {loss:.4f})')
+                batch_iter.set_description(f'Training (loss {loss:.4f})')
                 #pbar.set_description(f'Training (loss {loss} / {float(dcumloss)})')
                 #pbar.set_description(f'Training (loss {loss} / {np.divide(loss, (loss-loss2))})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
@@ -263,8 +266,11 @@ class TrainerMulti(Trainer):
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        for inp, target, cube_meta, _ in tqdm(self.valid_loader, 'Validating'):
+        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
+        for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+            inp, target = batch['inp'], batch['target']
+            cube_meta = batch['cube_meta']
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)

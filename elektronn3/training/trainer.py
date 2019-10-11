@@ -441,6 +441,8 @@ class Trainer:
                 else:
                     raise e
         self._save_model(suffix='_final')
+        if self.tb is not None:
+            self.tb.close()  # Ensure that everything is flushed
 
     def _train(self, max_steps, max_runtime):
         self.model.train()
@@ -454,8 +456,10 @@ class Trainer:
 
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
-        pbar = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, (inp, target, cube_meta, fname) in pbar:
+        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
+        for i, batch in batch_iter:
+            inp = batch['inp']
+            target = batch['target']
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
@@ -485,7 +489,7 @@ class Trainer:
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
                 misc['mean_target'].append(mean_target)
-                pbar.set_description(f'Training (loss {loss:.4f})')
+                batch_iter.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
@@ -585,8 +589,10 @@ class Trainer:
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        for inp, target, cube_meta, _ in tqdm(self.valid_loader, 'Validating'):
+        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
+        for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+            inp, target = batch['inp'], batch['target']
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
             with torch.no_grad():

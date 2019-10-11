@@ -29,6 +29,7 @@ logger = logging.getLogger('elektronn3log')
 class _DefaultCubeMeta:
     def __getitem__(self, *args, **kwargs): return np.inf
 
+
 class PatchCreator(data.Dataset):
     """Dataset iterator class that creates 3D image patches from HDF5 files.
 
@@ -209,14 +210,11 @@ class PatchCreator(data.Dataset):
         self.n_read_failures = 0
         self._failed_warp_warned = False
 
-    def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
+    def __getitem__(self, index: int) -> Dict[str, Any]:
         # Note that the index is ignored. Samples are always random
         return self._get_random_sample()
 
-    def _get_random_sample(self) -> Tuple[np.ndarray, np.ndarray, Any, Any]:
-        #                                 np.float32, self._target_dtype
-        # use index just as counter, subvolumes will be chosen randomly
-
+    def _get_random_sample(self) -> Dict[str, Any]:
         input_src, target_src, i = self._getcube()  # get cube randomly
         warp_prob = self.warp_prob
         while True:
@@ -270,9 +268,17 @@ class PatchCreator(data.Dataset):
                 continue
             break
 
-        # inp, target are still numpy arrays here. Relying on auto-conversion to
-        #  torch Tensors by the ``collate_fn`` of the ``DataLoader``.
-        return inp, target, self.cube_meta[i], os.path.basename(self.input_h5data[i][0])
+        inp = torch.as_tensor(inp)
+        target = torch.as_tensor(target)
+        cube_meta = torch.as_tensor(self.cube_meta[i])
+        fname = os.path.basename(self.input_h5data[i][0])
+        sample = {
+            'inp': inp,
+            'target': target,
+            'cube_meta': cube_meta,
+            'fname': fname
+        }
+        return sample
 
     def __len__(self) -> int:
         return self.epoch_size
