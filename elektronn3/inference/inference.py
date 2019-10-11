@@ -389,9 +389,9 @@ class Predictor:
             self.enable_tiling = True
         self.model.eval()
 
+    @torch.no_grad()
     def _predict(self, inp: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            return self.model(inp)
+        return self.model(inp)
 
     def _tiled_predict(
             self,

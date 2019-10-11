@@ -261,6 +261,7 @@ class TrainerMulti(Trainer):
 
         return stats, file_stats, misc, images
 
+    @torch.no_grad()
     def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
@@ -285,15 +286,14 @@ class TrainerMulti(Trainer):
                 needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
                 self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
-            with torch.no_grad():
-                dout = self.model(dinp)
-                multi_class_target = target.argmax(1) if len(target.shape) > 4 else target
-                val_loss.append(self.criterion(dout, dtarget).item())
-                out = dout.detach().cpu()
-                out_class = out.argmax(dim=1)
-                self.criterion.weight = prev_weight
-                for name, evaluator in self.valid_metrics.items():
-                    stats[name].append(evaluator(multi_class_target, out_class))
+            dout = self.model(dinp)
+            multi_class_target = target.argmax(1) if len(target.shape) > 4 else target
+            val_loss.append(self.criterion(dout, dtarget).item())
+            out = dout.detach().cpu()
+            out_class = out.argmax(dim=1)
+            self.criterion.weight = prev_weight
+            for name, evaluator in self.valid_metrics.items():
+                stats[name].append(evaluator(multi_class_target, out_class))
 
         images = {
             'inp': inp.numpy(),

@@ -584,6 +584,7 @@ class Trainer:
                 self._save_model(suffix='_swa', verbose=False)
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
+    @torch.no_grad()
     def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
@@ -595,12 +596,11 @@ class Trainer:
             inp, target = batch['inp'], batch['target']
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            with torch.no_grad():
-                dout = self.model(dinp)
-                val_loss.append(self.criterion(dout, dtarget).item())
-                out = dout.detach().cpu()
-                for name, evaluator in self.valid_metrics.items():
-                    stats[name].append(evaluator(target, out))
+            dout = self.model(dinp)
+            val_loss.append(self.criterion(dout, dtarget).item())
+            out = dout.detach().cpu()
+            for name, evaluator in self.valid_metrics.items():
+                stats[name].append(evaluator(target, out))
 
         images = {
             'inp': inp.numpy(),
@@ -835,21 +835,6 @@ class Trainer:
         )
         out = predictor.predict(inp)
         return out
-
-
-def __naive_preview_inference(  # Deprecated
-        model: torch.nn.Module,
-        inp_batch: torch.Tensor
-) -> torch.Tensor:
-    model.eval()  # Set dropout and batchnorm to eval mode
-
-    # Attention: Inference on Tensors with unexpected shapes can lead to errors!
-    # Staying with multiples of 16 for lengths seems to work.
-    with torch.no_grad():
-        out_batch = model(inp_batch)
-    model.train()  # Reset model to training mode
-
-    return out_batch
 
 
 class Backup:
