@@ -548,39 +548,6 @@ class UNet(nn.Module):
         return x
 
 
-class UNet3dLite(UNet):
-    """(WIP) Re-implementation of the unet3d_lite model from ELEKTRONN2
-
-    See https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/unet3d_lite.py
-    (Not yet working due to the AutoCrop node in ELEKTRONN2 working differently)
-    """
-    def __init__(self):
-        super().__init__(
-            in_channels=1,
-            out_channels=2,
-            n_blocks=4,
-            start_filts=32,
-            up_mode='transpose',
-            merge_mode='concat',
-            planar_blocks=(0, 1, 2),  # U1 and U2 will later be replaced by non-planar blocks
-            activation='relu',
-            batch_norm=False,
-            dim=3,
-            conv_mode='valid',
-        )
-        # TODO: mrg0 in the original unet3d_lite has upconv_n_f=512, which doesn't appear here
-        for i in [1, 2]:
-            # Replace planar U1 and U2 blocks with non-planar 3x3x3 versions
-            ins = self.up_convs[i].upconv.in_channels
-            outs = self.up_convs[i].conv2.out_channels
-            self.up_convs[i] = UpConv(
-                ins, outs, merge_mode=self.merge_mode, up_mode=self.up_mode,
-                planar=False,
-                activation=self.activation, batch_norm=self.batch_norm,
-                dim=self.dim, conv_mode=self.conv_mode
-            )
-
-
 def test_model(
     batch_size=1,
     in_channels=1,
