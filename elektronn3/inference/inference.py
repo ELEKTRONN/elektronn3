@@ -203,6 +203,38 @@ def tiled_apply(
     return out
 
 
+class FlipAugment:
+    def __init__(self, dims):
+        self.dims = tuple(np.array(dims) + 2)  # Dim offset to skip (N, C) dims
+
+    def forward(self, inp):
+        print(f'Flipping {self.dims}')
+        return torch.flip(inp, dims=self.dims)
+
+    def backward(self, inp):
+        return self.forward(inp)
+
+
+# TODO
+# class Rot90Augment:
+#     def __init__(self, k, dims):
+#         self.k = k
+#         self.dims = dims
+#
+#     def forward(self, inp):
+#         return torch.rot90(inp, k=self.k, dims=self.dims)
+#
+#     def backward(self, inp):
+#         return torch.rot90(inp, k=-self.k, dims=self.dims)
+
+
+DEFAULT_AUGMENTATIONS_3D = [  # Flip every dim
+    FlipAugment(dims)
+    for dims in [(0,), (1,), (0, 1), (2,), (0, 2), (1, 2), (0, 1, 2)]
+]
+DEFAULT_AUGMENTATIONS_2D = DEFAULT_AUGMENTATIONS_3D[:3]  # Limit flips to first 2 dims
+
+
 class Predictor:
     """Class to perform inference using a ``torch.nn.Module`` object either
     passed directly or loaded from a file.
@@ -288,6 +320,9 @@ class Predictor:
             >>> from elektronn3.data import transforms
             >>> # m, s are mean, std of the inputs the model was trained on
             >>> transform = transforms.Normalize(mean=m, std=s, inplace=True)
+        augmentations: List of test-time augmentations or integer that
+            specifies the number of different flips to be performed as test-
+            time augmentations.
         strict_shapes: If ``False`` (default), force the ``output_shape`` to be
             a multiple of the ``tile_shape`` by padding the input. This allows
             for greater flexibility of the ``tile_shape`` but potentially wastes
@@ -319,6 +354,7 @@ class Predictor:
             float16: bool = False,
             apply_softmax: bool = True,
             transform: Optional[Transform] = None,
+            augmentations: Union[int, Optional[Sequence]] = None,
             strict_shapes: bool = False,
             argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
@@ -350,6 +386,9 @@ class Predictor:
             )
         self.dtype = torch.float16 if float16 else torch.float32
         self.transform = transform
+        if isinstance(augmentations, int):
+            augmentations = DEFAULT_AUGMENTATIONS_3D[:augmentations]
+        self.augmentations = augmentations
         self.strict_shapes = strict_shapes
         self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
@@ -390,8 +429,25 @@ class Predictor:
         self.model.eval()
 
     @torch.no_grad()
-    def _predict(self, inp: torch.Tensor) -> torch.Tensor:
-        return self.model(inp)
+    def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
+        dout = self.model(dinp)
+        if not self.augmentations:
+            return dout
+
+        # Else, apply test-time augmentations and take average
+        # Directly transferring to cpu after each augmented forward pass to save GPU memory
+        # TODO: Investigate if optionally keeping tensors on GPU makes sense for better speed.
+        inp = dinp.cpu()
+        out = dout.cpu()
+        outs = [out]
+        for aug in self.augmentations:
+            inp_aug = aug.forward(inp)
+            out_aug = self.model(inp_aug.to(self.device)).cpu()
+            out = aug.backward(out_aug)
+            outs.append(out)
+        outs = torch.stack(outs)
+        out = torch.mean(outs, dim=0)
+        return out
 
     def _tiled_predict(
             self,
