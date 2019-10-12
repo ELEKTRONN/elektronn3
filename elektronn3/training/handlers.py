@@ -213,7 +213,6 @@ def _tb_log_sample_images(
     if trainer.apply_softmax_for_prediction:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
-    batch2img = _get_batch2img_function(out_batch, z_plane)
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
 
     inp_slice = batch2img_inp(images['inp'])[0]
@@ -235,8 +234,7 @@ def _tb_log_sample_images(
 
     inp_sh = np.array(inp_batch.shape[2:])
     out_sh = np.array(out_batch.shape[2:])
-    if out_batch.shape[2:] != inp_batch.shape[2:] \
-            and not (out_batch.ndim == 2):
+    if out_batch.shape[2:] != inp_batch.shape[2:] and not (out_batch.ndim == 2):
         # Zero-pad output and target to match input shape
         # Create a central slice with the size of the output
         lo = (inp_sh - out_sh) // 2
@@ -256,6 +254,7 @@ def _tb_log_sample_images(
         target_batch = padded_target_batch
 
     target_cmap = None
+    batch2img = _get_batch2img_function(out_batch, z_plane)
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
     if is_classification:
