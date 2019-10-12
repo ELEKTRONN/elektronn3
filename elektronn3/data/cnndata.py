@@ -554,7 +554,16 @@ class SimpleNeuroData2d(data.Dataset):
         inp = self.inp[:, index]
         target = self.target[index]
         inp, target = self.transform(inp, target)
-        return inp, target
+        inp = torch.as_tensor(inp)
+        target = torch.as_tensor(target)
+        fname = str(index)
+        sample = {
+            'inp': inp,
+            'target': target,
+            'cube_meta': np.inf,
+            'fname': fname
+        }
+        return sample
 
     def __len__(self):
         return self.target.shape[0]
@@ -616,7 +625,13 @@ class Segmentation2d(data.Dataset):
                 break
             except transforms._DropSample:
                 pass
-        return inp, target, np.inf, str(index)
+        sample = {
+            'inp': torch.as_tensor(inp),
+            'target': torch.as_tensor(target),
+            'cube_meta': np.inf,
+            'fname': str(index)
+        }
+        return sample
 
     def __len__(self):
         return len(self.target_paths) * self.epoch_multiplier
@@ -661,7 +676,14 @@ class Reconstruction2d(data.Dataset):
                 break
             except transforms._DropSample:
                 pass
-        return inp, inp, np.inf, str(index)
+        inp = torch.as_tensor(inp)
+        sample = {
+            'inp': inp,
+            'target': inp,
+            'cube_meta': np.inf,
+            'fname': str(index)
+        }
+        return sample
 
     def __len__(self):
         return len(self.inp_paths) * self.epoch_multiplier
