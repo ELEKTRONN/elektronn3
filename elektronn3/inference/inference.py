@@ -208,7 +208,6 @@ class FlipAugment:
         self.dims = tuple(np.array(dims) + 2)  # Dim offset to skip (N, C) dims
 
     def forward(self, inp):
-        print(f'Flipping {self.dims}')
         return torch.flip(inp, dims=self.dims)
 
     def backward(self, inp):
