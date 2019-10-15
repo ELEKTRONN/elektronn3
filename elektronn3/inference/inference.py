@@ -196,7 +196,7 @@ def tiled_apply(
         out_tile = out_tile[final_crop_slice]
         # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
         if argmax_with_threshold is not None:
-            out[out_slice] = (out_tile > argmax_with_threshold).argmax(dim=1).to(out_dtype)
+            out[out_slice] = (out_tile > argmax_with_threshold).to(out_dtype).argmax(dim=1).to(out_dtype)
         else:
             out[out_slice] = out_tile
 
