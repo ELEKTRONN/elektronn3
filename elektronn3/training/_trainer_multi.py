@@ -129,7 +129,7 @@ class TrainerMulti(Trainer):
         import gc
         gc.collect()
         batch_iter = tqdm(self.valid_loader, 'Validating', total=len(self.valid_loader))
-        for i, batch in batch_iter:
+        for i, batch in enumerate(batch_iter):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
             cube_meta = batch['weight']
@@ -267,8 +267,8 @@ class TrainerMulti(Trainer):
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
-        for i, batch in batch_iter:
+        batch_iter = tqdm(self.valid_loader, 'Validating', total=len(self.valid_loader))
+        for i, batch in enumerate(batch_iter):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
             cube_meta = batch['cube_meta']
