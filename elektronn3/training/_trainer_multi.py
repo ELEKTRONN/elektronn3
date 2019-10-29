@@ -128,7 +128,7 @@ class TrainerMulti(Trainer):
         timer = Timer()
         import gc
         gc.collect()
-        batch_iter = tqdm(self.valid_loader, 'Validating', total=len(self.valid_loader))
+        batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
         for i, batch in enumerate(batch_iter):
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
