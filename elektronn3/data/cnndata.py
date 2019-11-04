@@ -30,6 +30,34 @@ class _DefaultCubeMeta:
     def __getitem__(self, *args, **kwargs): return np.inf
 
 
+class LazyH5:
+    """A lazy h5py.Dataset wrapper for safe multiprocessing. Opens the file and
+    the dataset on each read/property access and then immediately closes it.
+
+    This is a workaround for this issue and related data corruptions:
+    https://github.com/pytorch/pytorch/issues/11929.
+
+    By avoiding open file handles before worker processes are forked,
+    concurrency issues with HDF5's global state do not apply."""
+
+    def __init__(self, name: str, mode: str, key: str):
+        self.name = name
+        self.mode = mode
+        self.key = key
+
+    # Wraps direct attribute, property and method access
+    def __getattr__(self, attr: str) -> Any:
+        with h5py.File(self.name, self.mode) as f:
+            h5data = f[self.key]
+            return getattr(h5data, attr)
+
+    # But dunder methods have to be wrapped manually: https://stackoverflow.com/a/3700899
+    def __getitem__(self, args) -> np.ndarray:
+        with h5py.File(self.name, self.mode) as f:
+            h5data = f[self.key]
+            return h5data[args]
+
+
 class PatchCreator(data.Dataset):
     """Dataset iterator class that creates 3D image patches from HDF5 files.
 
@@ -439,18 +467,22 @@ class PatchCreator(data.Dataset):
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_h5data, self.target_h5data, self.cube_meta):
-            inp_h5_file = h5py.File(inp_fname, 'r')
-            inp_h5_data = inp_h5_file[inp_key]#[:, 50:-50, 100:-100, 100:-100]
-            target_h5_file = h5py.File(target_fname, 'r')
-            target_h5_data = target_h5_file[target_key]
             if self.in_memory:
                 # Get copies of the dataset contents as in-memory numpy arrays
+                inp_h5_file = h5py.File(inp_fname, 'r')
+                inp_h5_data = inp_h5_file[inp_key]  # [:, 50:-50, 100:-100, 100:-100]
                 inp_h5_val = inp_h5_data[()]
                 inp_h5_file.close()
                 inp_h5_data = inp_h5_val
+
+                target_h5_file = h5py.File(target_fname, 'r')
+                target_h5_data = target_h5_file[target_key]
                 target_h5_val = target_h5_data[()]
                 target_h5_file.close()
                 target_h5_data = target_h5_val
+            else:
+                inp_h5_data = LazyH5(inp_fname, 'r', inp_key)
+                target_h5_data = LazyH5(target_fname, 'r', target_key)
 
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
