@@ -290,6 +290,14 @@ class Predictor:
             If your inference fails due to shape issues, as a rule of thumb,
             try adjusting your ``overlap_shape`` so that
             ``tile_shape + 2 * overlap`` is divisible by 16 or 32.
+
+            If ``offset`` (see below) is not ``None``, ``overlap_shape``
+            can't be specified but it is configured automatically.
+        offset:  Shape of the offset by which each the output tiles are smaller
+            than the input tiles
+            on each side. This applies for networks using valid convolutions.
+            If ``offset`` is specified, ``overlap_shape`` (see above) can't
+            be specified but is configured automatically.
         out_shape: Expected shape of the output tensor.
             It doesn't just refer to spatial shape, but to the actual tensor
             shape of one sample, including the channel dimension C, but
@@ -348,8 +356,8 @@ class Predictor:
             batch_size: Optional[int] = None,
             tile_shape: Optional[Tuple[int, ...]] = None,
             overlap_shape: Optional[Tuple[int, ...]] = None,
-            out_shape: Optional[Tuple[int, ...]] = None,
             offset: Optional[Tuple[int, ...]] = None,
+            out_shape: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
             transform: Optional[Transform] = None,
@@ -368,12 +376,21 @@ class Predictor:
         if tile_shape is not None:
             tile_shape = np.array(tile_shape)
         self.tile_shape = tile_shape
+        if overlap_shape is not None and offset is not None:
+            raise ValueError(
+                f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
+                'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
+                'or offset (if the output is smaller).'
+            )
         if overlap_shape is not None:
             overlap_shape = np.array(overlap_shape)
         if offset is not None:
             offset = np.array(offset)
+            # Set overlap to offset shape because IMO that's the only reasonable choice.
+            overlap_shape = offset
         self.overlap_shape = overlap_shape
         self.offset = offset
+
         if out_shape is not None:
             out_shape = np.array(out_shape)
         self.out_shape = out_shape

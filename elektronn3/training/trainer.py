@@ -135,6 +135,7 @@ class Trainer:
             disabled.
         preview_tile_shape
         preview_overlap_shape
+        preview_offset
         preview_interval: Determines how often to perform preview inference.
             Preview inference is performed every ``preview_interval`` epochs
             during training. Regardless of this value, preview predictions
@@ -230,6 +231,7 @@ class Trainer:
             preview_batch: Optional[torch.Tensor] = None,
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
             preview_overlap_shape: Optional[Tuple[int, ...]] = None,
+            preview_offset: Optional[Tuple[int, ...]] = None,
             preview_interval: int = 5,
             offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
@@ -250,11 +252,12 @@ class Trainer:
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
     ):
-        if preview_batch is not None and\
-                (preview_tile_shape is None or preview_overlap_shape is None):
+        if preview_batch is not None and (
+                preview_tile_shape is None or (
+                    preview_overlap_shape is None and preview_offset is None)):
             raise ValueError(
                 'If preview_batch is set, you will also need to specify '
-                'preview_tile_shape and preview_overlap_shape!'
+                'preview_tile_shape and preview_overlap_shape or preview_offset!'
             )
         if num_workers > 1 and 'PatchCreator' in str(type(train_dataset)) \
                 and not getattr(train_dataset, 'in_memory'):
@@ -291,6 +294,7 @@ class Trainer:
         self.preview_batch = preview_batch
         self.preview_tile_shape = preview_tile_shape
         self.preview_overlap_shape = preview_overlap_shape
+        self.preview_offset = preview_offset
         self.preview_interval = preview_interval
         self.offset = offset
         self.overlay_alpha = overlay_alpha
@@ -818,6 +822,7 @@ class Trainer:
             inp: np.ndarray,
             tile_shape: Optional[Tuple[int, ...]] = None,
             overlap_shape: Optional[Tuple[int, ...]] = None,
+            offset: Optional[Tuple[int, ...]] = None,
             verbose: bool = True,
     ) -> torch.Tensor:
         if self.num_classes is None:
@@ -829,6 +834,7 @@ class Trainer:
             batch_size=1,
             tile_shape=tile_shape,
             overlap_shape=overlap_shape,
+            offset=offset,
             verbose=verbose,
             out_shape=out_shape,
             apply_softmax=self.apply_softmax_for_prediction,

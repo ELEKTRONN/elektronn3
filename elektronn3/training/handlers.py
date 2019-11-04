@@ -109,7 +109,8 @@ def _tb_log_preview(
     out_batch = trainer._preview_inference(
         inp=inp_batch,
         tile_shape=trainer.preview_tile_shape,
-        overlap_shape=trainer.preview_overlap_shape
+        overlap_shape=trainer.preview_overlap_shape,
+        offset=trainer.preview_offset
     )
     inp_batch = inp_batch.numpy()
     if trainer.apply_softmax_for_prediction:
