@@ -97,6 +97,12 @@ model = UNet(
 # Example for a model-compatible input.
 example_input = torch.ones(1, 1, 32, 64, 64)
 
+from elektronn3.models.unet3d_lite import UNet3dLite
+model = UNet3dLite().to(device)
+
+example_input = torch.ones(1, 1, 20, 140, 140)
+
+
 enable_save_trace = False if args.jit == 'disabled' else True
 if args.jit == 'onsave':
     # Make sure that tracing works
@@ -189,8 +195,8 @@ valid_transform = transforms.Compose(common_transforms + [])
 aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
 common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': aniso_factor,
-    'patch_shape': (48, 96, 96),
-    # 'offset': (8, 20, 20),
+    'patch_shape': (22, 140, 140),
+    'offset': (6, 44, 44),
     'num_classes': 2,
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
@@ -295,8 +301,8 @@ trainer = Trainer(
     apply_softmax_for_prediction=True,
     num_classes=train_dataset.num_classes,
     # TODO: Tune these:
-    preview_tile_shape=(32, 64, 64),
-    preview_overlap_shape=(32, 64, 64),
+    preview_tile_shape=(20, 140, 140),
+    preview_offset=(6, 44, 44),
     ipython_shell=args.ipython,
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
