@@ -12,7 +12,7 @@ import sys
 import time
 import traceback
 from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable  # , Protocol
 
 import h5py
 import imageio
@@ -30,8 +30,12 @@ class _DefaultCubeMeta:
     def __getitem__(self, *args, **kwargs): return np.inf
 
 
-class LazyH5:
-    """A lazy h5py.Dataset wrapper for safe multiprocessing. Opens the file and
+class DataSource:  #(Protocol):  # Protocol requires Python 3.8...
+    def __getitem__(self, idx: Union[int, slice]) -> np.ndarray: ...
+
+
+class HDF5DataSource(DataSource):
+    """An h5py.Dataset wrapper for safe multiprocessing. Opens the file and
     the dataset on each read/property access and then immediately closes it.
 
     This is a workaround for this issue and related data corruptions:
@@ -40,22 +44,37 @@ class LazyH5:
     By avoiding open file handles before worker processes are forked,
     concurrency issues with HDF5's global state do not apply."""
 
-    def __init__(self, name: str, mode: str, key: str):
+    def __init__(self, name: str, key: str, in_memory: bool = False):
         self.name = name
-        self.mode = mode
         self.key = key
+        self.in_memory = in_memory
+
+        if self.in_memory:
+            self._data: np.ndarray
+            self._initialize_memory()
+
+    def _initialize_memory(self) -> None:
+        with h5py.File(self.name, 'r') as f:
+            h5data = f[self.key]
+            self._data = h5data[()]
 
     # Wraps direct attribute, property and method access
     def __getattr__(self, attr: str) -> Any:
-        with h5py.File(self.name, self.mode) as f:
+        if self.in_memory:
+            h5data = self._data
+            return getattr(h5data, attr)
+        with h5py.File(self.name, 'r') as f:
             h5data = f[self.key]
             return getattr(h5data, attr)
 
     # But dunder methods have to be wrapped manually: https://stackoverflow.com/a/3700899
-    def __getitem__(self, args) -> np.ndarray:
-        with h5py.File(self.name, self.mode) as f:
+    def __getitem__(self, idx: Union[int, slice]) -> np.ndarray:
+        if self.in_memory:
+            h5data = self._data
+            return h5data[idx]
+        with h5py.File(self.name, 'r') as f:
             h5data = f[self.key]
-            return h5data[args]
+            return h5data[idx]
 
 
 class PatchCreator(data.Dataset):
@@ -227,8 +246,8 @@ class PatchCreator(data.Dataset):
 
         # The following fields will be filled when reading data
         self.n_labelled_pixels = 0
-        self.inputs = []
-        self.targets = []
+        self.inputs: List[DataSource] = []
+        self.targets: List[DataSource] = []
         self._sampling_weight = None
 
         self.load_data()  # Open dataset files
@@ -398,7 +417,7 @@ class PatchCreator(data.Dataset):
 
         return inp, target
 
-    def _getcube(self) -> Tuple[h5py.Dataset, h5py.Dataset]:
+    def _getcube(self) -> Tuple[DataSource, DataSource, int]:
         """
         Draw an example cube according to sampling weight on training data,
         or randomly on valid data
@@ -435,7 +454,7 @@ class PatchCreator(data.Dataset):
         self._sampling_weight = prios / prios.sum()
         logger.debug(f'prios = {prios}, sampling_weight = {self._sampling_weight}')
 
-    def check_files(self) -> None:  # TODO: Update for cdhw version
+    def check_files(self) -> None:
         """
         Check if all files are accessible.
         """
@@ -460,39 +479,24 @@ class PatchCreator(data.Dataset):
             sys.stdout.flush()
             sys.exit(1)
 
-    def open_files(self) -> Tuple[List[h5py.Dataset], List[h5py.Dataset]]:
+    def open_files(self) -> Tuple[List[DataSource], List[DataSource]]:
         self.check_files()
-        inp_h5sets, target_h5sets = [], []
+        inp_sources, target_sources = [], []
         modestr = 'Training' if self.train else 'Validation'
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
         for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_h5data, self.target_h5data, self.cube_meta):
-            if self.in_memory:
-                # Get copies of the dataset contents as in-memory numpy arrays
-                inp_h5_file = h5py.File(inp_fname, 'r')
-                inp_h5_data = inp_h5_file[inp_key]  # [:, 50:-50, 100:-100, 100:-100]
-                inp_h5_val = inp_h5_data[()]
-                inp_h5_file.close()
-                inp_h5_data = inp_h5_val
-
-                target_h5_file = h5py.File(target_fname, 'r')
-                target_h5_data = target_h5_file[target_key]
-                target_h5_val = target_h5_data[()]
-                target_h5_file.close()
-                target_h5_data = target_h5_val
-            else:
-                inp_h5_data = LazyH5(inp_fname, 'r', inp_key)
-                target_h5_data = LazyH5(target_fname, 'r', target_key)
-
-            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_h5_data.shape} ({inp_h5_data.dtype})')
-            logger.info(f'  with target: {target_fname}[{target_key}]: {target_h5_data.shape} ({target_h5_data.dtype})')
+            inp_source = HDF5DataSource(name=inp_fname, key=inp_key, in_memory=self.in_memory)
+            target_source = HDF5DataSource(name=target_fname, key=target_key, in_memory=self.in_memory)
+            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_source.shape} ({inp_source.dtype})')
+            logger.info(f'  with target: {target_fname}[{target_key}]: {target_source.shape} ({target_source.dtype})')
             if not np.all(cube_meta == np.inf):
                 logger.info(f'  cube_meta:   {cube_meta}')
-            inp_h5sets.append(inp_h5_data)
-            target_h5sets.append(target_h5_data)
-        print()
+            inp_sources.append(inp_source)
+            target_sources.append(target_source)
+        logger.info('')
 
-        return inp_h5sets, target_h5sets
+        return inp_sources, target_sources
 
 
 def get_preview_batch(
