@@ -195,8 +195,8 @@ common_data_kwargs = {  # Common options for training and valid sets.
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
 train_dataset = PatchCreator(
-    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
     train=True,
     epoch_size=args.epoch_size,
     warp_prob=0.2,
@@ -209,8 +209,8 @@ train_dataset = PatchCreator(
     **common_data_kwargs
 )
 valid_dataset = None if not valid_indices else PatchCreator(
-    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
     epoch_size=10,  # How many samples to use for each validation run
     warp_prob=0,

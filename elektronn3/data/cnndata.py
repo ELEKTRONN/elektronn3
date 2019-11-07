@@ -9,10 +9,9 @@ __all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstructio
 import logging
 import os
 import sys
-import time
 import traceback
 from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable  # , Protocol
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 
 import h5py
 import imageio
@@ -21,7 +20,7 @@ import torch
 from torch.utils import data
 
 from elektronn3.data import coord_transforms, transforms
-from elektronn3.data.utils import slice_h5
+from elektronn3.data.sources import DataSource, HDF5DataSource, slice_3d
 
 logger = logging.getLogger('elektronn3log')
 
@@ -30,53 +29,7 @@ class _DefaultCubeMeta:
     def __getitem__(self, *args, **kwargs): return np.inf
 
 
-class DataSource:  #(Protocol):  # Protocol requires Python 3.8...
-    def __getitem__(self, idx: Union[int, slice]) -> np.ndarray: ...
-
-
-class HDF5DataSource(DataSource):
-    """An h5py.Dataset wrapper for safe multiprocessing. Opens the file and
-    the dataset on each read/property access and then immediately closes it.
-
-    This is a workaround for this issue and related data corruptions:
-    https://github.com/pytorch/pytorch/issues/11929.
-
-    By avoiding open file handles before worker processes are forked,
-    concurrency issues with HDF5's global state do not apply."""
-
-    def __init__(self, name: str, key: str, in_memory: bool = False):
-        self.name = name
-        self.key = key
-        self.in_memory = in_memory
-
-        if self.in_memory:
-            self._data: np.ndarray
-            self._initialize_memory()
-
-    def _initialize_memory(self) -> None:
-        with h5py.File(self.name, 'r') as f:
-            h5data = f[self.key]
-            self._data = h5data[()]
-
-    # Wraps direct attribute, property and method access
-    def __getattr__(self, attr: str) -> Any:
-        if self.in_memory:
-            h5data = self._data
-            return getattr(h5data, attr)
-        with h5py.File(self.name, 'r') as f:
-            h5data = f[self.key]
-            return getattr(h5data, attr)
-
-    # But dunder methods have to be wrapped manually: https://stackoverflow.com/a/3700899
-    def __getitem__(self, idx: Union[int, slice]) -> np.ndarray:
-        if self.in_memory:
-            h5data = self._data
-            return h5data[idx]
-        with h5py.File(self.name, 'r') as f:
-            h5data = f[self.key]
-            return h5data[idx]
-
-
+# TODO: Document passing DataSources directly
 class PatchCreator(data.Dataset):
     """Dataset iterator class that creates 3D image patches from HDF5 files.
 
@@ -107,10 +60,10 @@ class PatchCreator(data.Dataset):
     support is also planned.
 
     Args:
-        input_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
+        input_sources: Sequence of ``(filename, hdf5_key)`` tuples, where
             each item specifies the filename and
             the HDF5 dataset key under which the input data is stored.
-        target_h5data: Sequence of ``(filename, hdf5_key)`` tuples, where
+        target_sources: Sequence of ``(filename, hdf5_key)`` tuples, where
             each item specifies the filename and
             the HDF5 dataset key under which the target data is stored.
         patch_shape: Desired spatial shape of the samples that the iterator
@@ -189,8 +142,8 @@ class PatchCreator(data.Dataset):
     """
     def __init__(
             self,
-            input_h5data: List[Tuple[str, str]],
-            target_h5data: List[Tuple[str, str]],
+            input_sources: List[Tuple[str, str]],
+            target_sources: List[Tuple[str, str]],
             patch_shape: Sequence[int],
             offset: Sequence[int] = (0, 0, 0),
             cube_prios: Optional[Sequence[float]] = None,
@@ -207,7 +160,7 @@ class PatchCreator(data.Dataset):
             cube_meta=_DefaultCubeMeta(),
     ):
         # Early checks
-        if len(input_h5data) != len(target_h5data):
+        if len(input_sources) != len(target_sources):
             raise ValueError("input_h5data and target_h5data must be lists of same length!")
         if not train:
             if warp_prob > 0:
@@ -221,10 +174,8 @@ class PatchCreator(data.Dataset):
         self.warp_kwargs = warp_kwargs if warp_kwargs is not None else {}
 
         # general properties
-        input_h5data = [(expanduser(fn), key) for (fn, key) in input_h5data]
-        target_h5data = [(expanduser(fn), key) for (fn, key) in target_h5data]
-        self.input_h5data = input_h5data
-        self.target_h5data = target_h5data
+        self.input_sources = input_sources
+        self.target_sources = target_sources
         self.cube_meta = cube_meta
         self.cube_prios = cube_prios
         self.aniso_factor = aniso_factor
@@ -248,7 +199,6 @@ class PatchCreator(data.Dataset):
         self.n_labelled_pixels = 0
         self.inputs: List[DataSource] = []
         self.targets: List[DataSource] = []
-        self._sampling_weight = None
 
         self.load_data()  # Open dataset files
 
@@ -318,7 +268,7 @@ class PatchCreator(data.Dataset):
         inp = torch.as_tensor(inp)
         target = torch.as_tensor(target)
         cube_meta = torch.as_tensor(self.cube_meta[i])
-        fname = os.path.basename(self.input_h5data[i][0])
+        fname = os.path.basename(self.inputs[i].fname)
         sample = {
             'inp': inp,
             'target': target,
@@ -347,8 +297,8 @@ class PatchCreator(data.Dataset):
 
     def warp_cut(
             self,
-            inp_src: h5py.Dataset,
-            target_src: h5py.Dataset,
+            inp_src: DataSource,
+            target_src: DataSource,
             warp_prob: Union[float, bool],
             warp_kwargs: Dict[str, Any]
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -423,7 +373,10 @@ class PatchCreator(data.Dataset):
         or randomly on valid data
         """
         if self.train:
-            i = np.random.choice(np.arange(self._sampling_weight.size), p=self._sampling_weight)
+            i = np.random.choice(
+                np.arange(len(self.cube_prios)),
+                p=self.cube_prios / np.sum(self.cube_prios)
+            )
             inp_source, target_source = self.inputs[i], self.targets[i]
         else:
             if len(self.inputs) == 0:
@@ -436,23 +389,21 @@ class PatchCreator(data.Dataset):
         return inp_source, target_source, i
 
     def load_data(self) -> None:
-        inp_files, target_files = self.open_files()
-
-        prios = []
-        # Distribute Cubes into training and valid list
-        for k, (inp, target) in enumerate(zip(inp_files, target_files)):
-            self.inputs.append(inp)
-            self.targets.append(target)
-            # If no priorities are given: sample proportional to cube size
-            prios.append(target.size)
+        if len(self.inputs) == len(self.targets) == 0:
+            inp_files, target_files = self.open_files()
+            self.inputs.extend(inp_files)
+            self.targets.extend(target_files)
+        else:
+            logger.info('Using directly specified data sources.')
 
         if self.cube_prios is None:
-            prios = np.array(prios, dtype=np.float)
-        else:  # If priorities are given: sample irrespective of cube size
-            prios = np.array(self.cube_prios, dtype=np.float)
+            self.cube_prios = []
+            for inp, target in zip(self.inputs, self.targets):
+                # If no priorities are given: sample proportional to cube size
+                self.cube_prios.append(target.size)
+            self.cube_prios = np.array(self.cube_prios, dtype=np.float32) / np.sum(self.cube_prios)
 
-        self._sampling_weight = prios / prios.sum()
-        logger.debug(f'prios = {prios}, sampling_weight = {self._sampling_weight}')
+        logger.debug(f'cube_prios = {self.cube_prios}')
 
     def check_files(self) -> None:
         """
@@ -460,8 +411,8 @@ class PatchCreator(data.Dataset):
         """
         notfound = False
         give_neuro_data_hint = False
-        fullpaths = [f for f, _ in self.input_h5data] + \
-                    [f for f, _ in self.target_h5data]
+        fullpaths = [f for f, _ in self.input_sources] + \
+                    [f for f, _ in self.target_sources]
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -485,9 +436,9 @@ class PatchCreator(data.Dataset):
         modestr = 'Training' if self.train else 'Validation'
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
-        for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_h5data, self.target_h5data, self.cube_meta):
-            inp_source = HDF5DataSource(name=inp_fname, key=inp_key, in_memory=self.in_memory)
-            target_source = HDF5DataSource(name=target_fname, key=target_key, in_memory=self.in_memory)
+        for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_sources, self.target_sources, self.cube_meta):
+            inp_source = HDF5DataSource(fname=inp_fname, key=inp_key, in_memory=self.in_memory)
+            target_source = HDF5DataSource(fname=target_fname, key=target_key, in_memory=self.in_memory)
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_source.shape} ({inp_source.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_source.shape} ({target_source.dtype})')
             if not np.all(cube_meta == np.inf):
@@ -527,7 +478,7 @@ def get_preview_batch(
     memstr = ' (in memory)' if in_memory else ''
     logger.info(f'\nPreview data{memstr}:')
     logger.info(f'  input:       {fname}[{key}]: {inp_h5.shape} ({inp_h5.dtype})\n')
-    inp_np = slice_h5(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
+    inp_np = slice_3d(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
     if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
         inp_np = inp_np[:, None]  # Add missing C dim
     inp_np, _ = transform(inp_np, None)
