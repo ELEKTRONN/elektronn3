@@ -294,8 +294,6 @@ class WarpingSanityError(Exception):
 
     This can happen due to random numerical inaccuracies, but it shouldn't occur
     more often than every few hundred thousand warp_slice() calls."""
-    # TODO: Can we fix these errors? It's really hard to debug them because
-    #       they appear randomly, with a chance of ~ 1 in a million.
     pass
 
 
@@ -306,7 +304,7 @@ def warp_slice(
         target_src: Optional[DataSource] = None,
         target_patch_shape: Optional[Union[Tuple[int], np.ndarray]] = None,
         target_discrete_ix: Optional[Sequence[int]] = None,
-        debug: bool = True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
+        debug: bool = False
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
