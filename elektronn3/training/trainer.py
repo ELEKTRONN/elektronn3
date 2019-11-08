@@ -464,7 +464,17 @@ class Trainer:
 
             # forward pass
             dout = self.model(dinp)
-            dloss = self.criterion(dout, dtarget)
+
+            # modification for U-Net++ with deep supervision
+            if type(dout) == list:
+                loss = 0
+                for output in dout:
+                    loss += self.criterion(output, dtarget)
+                dloss = loss / len(dout)
+                dout = dout[-1]
+            else:
+                dloss = self.criterion(dout, dtarget)
+
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
@@ -594,7 +604,17 @@ class Trainer:
             dtarget = target.to(self.device, non_blocking=True)
             with torch.no_grad():
                 dout = self.model(dinp)
-                val_loss.append(self.criterion(dout, dtarget).item())
+
+                # modification for U-Net++ with deep supervision
+                if type(dout) == list:
+                    loss = 0
+                    for output in dout:
+                        loss += self.criterion(output, dtarget)
+                    loss = loss / len(dout)
+                    val_loss.append(loss.item())
+                    dout = dout[-1]
+                else:
+                    val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
                 for name, evaluator in self.valid_metrics.items():
                     stats[name].append(evaluator(target, out))
