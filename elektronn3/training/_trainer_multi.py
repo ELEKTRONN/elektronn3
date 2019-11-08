@@ -7,6 +7,7 @@ import datetime
 import inspect
 import logging
 from math import nan
+from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
 import IPython
@@ -248,6 +249,7 @@ class TrainerMulti(Trainer):
             if i == len(self.train_loader) - 1 or self.terminate:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
+                images['fname'] = Path(fname[0]).stem
                 images['inp'] = inp.numpy()
                 images['target'] = multi_class_target.numpy()
                 images['out'] = dout.detach().cpu().numpy()
@@ -296,6 +298,7 @@ class TrainerMulti(Trainer):
                 stats[name].append(evaluator(multi_class_target, out_class))
 
         images = {
+            'fname': Path(batch['fname'][0]).stem,
             'inp': inp.numpy(),
             'out': out.numpy(),
             'target': multi_class_target.numpy()

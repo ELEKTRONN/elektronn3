@@ -28,6 +28,7 @@ def plot_image(
         cmap=None,
         num_classes=None,
         colorbar=True,
+        filename=''
 ) -> matplotlib.figure.Figure:
     """Plots a 2D image to a malplotlib figure.
 
@@ -56,6 +57,7 @@ def plot_image(
 
     fig, ax = plt.subplots()
     aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.set_title(filename)
     if colorbar:
         fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
     return fig
@@ -210,6 +212,7 @@ def _tb_log_sample_images(
     inp_batch = images['inp'][:1]
     target_batch = images['target'][:1]
     out_batch = images['out'][:1]
+    name = images.get('fname', '')
 
     if trainer.apply_softmax_for_prediction:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
@@ -303,12 +306,12 @@ def _tb_log_sample_images(
 
     trainer.tb.add_figure(
         f'{group}/inp',
-        plot_image(inp_slice, cmap='gray'),
+        plot_image(inp_slice, cmap='gray', filename=name),
         global_step=trainer.step
     )
     trainer.tb.add_figure(
         f'{group}/target',
-        plot_image(target_slice, num_classes=trainer.num_classes, cmap=target_cmap),
+        plot_image(target_slice, num_classes=trainer.num_classes, cmap=target_cmap, filename=name),
         global_step=trainer.step
     )
 
@@ -318,14 +321,14 @@ def _tb_log_sample_images(
         for c in range(out_slice.shape[0]):
             trainer.tb.add_figure(
                 f'{group}/c{c}',
-                plot_image(out_slice[c], cmap='gray'),
+                plot_image(out_slice[c], cmap='gray', filename=name),
                 global_step=trainer.step
             )
 
         pred_slice = out_slice.argmax(0)
         trainer.tb.add_figure(
             f'{group}/pred_slice',
-            plot_image(pred_slice, num_classes=trainer.num_classes),
+            plot_image(pred_slice, num_classes=trainer.num_classes, filename=name),
             global_step=trainer.step
         )
         if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
@@ -347,7 +350,7 @@ def _tb_log_sample_images(
             pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
-                plot_image(target_slice_ov, colorbar=False),
+                plot_image(target_slice_ov, colorbar=False, filename=name),
                 global_step=trainer.step
             )
             trainer.tb.add_figure(
@@ -356,4 +359,4 @@ def _tb_log_sample_images(
                 global_step=trainer.step
             )
     elif is_regression:
-        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap), global_step=trainer.step)
+        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap, filename=name), global_step=trainer.step)
