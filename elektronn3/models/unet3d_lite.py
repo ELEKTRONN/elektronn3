@@ -5,6 +5,9 @@ from torch import nn
 from torch.nn import functional as F
 
 
+class PoolingError(Exception): pass
+
+
 class UNet3dLite(nn.Module):
     """(WIP) Re-implementation of the unet3d_lite model from ELEKTRONN2
 
@@ -19,7 +22,7 @@ class UNet3dLite(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.down = nn.MaxPool3d((1, 2, 2))
+        # self.down = nn.MaxPool3d((1, 2, 2))
 
         self.conv0 = nn.Conv3d(1, 32, (1, 3, 3))
         self.conv1 = nn.Conv3d(32, 32, (1, 3, 3))
@@ -44,7 +47,8 @@ class UNet3dLite(nn.Module):
 
         self.conv_final = nn.Conv3d(64, 2, 1)
 
-    def autocrop(self, from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    @staticmethod
+    def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         ds = from_down.shape[2:]
         us = from_up.shape[2:]
         from_down = from_down[
@@ -55,6 +59,19 @@ class UNet3dLite(nn.Module):
             ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
         ]
         return from_down, from_up
+
+    @staticmethod
+    def down(x, ks=(1, 2, 2)):
+        # Before pooling, we manually check if the tensor is divisible by the pooling kernel
+        #  size, because PyTorch doesn't throw an error if it's not divisible, but calculates
+        #  the output shape by floor division instead. While this may make sense for other
+        #  architectures, in U-Net this would lead to incorrect output shapes after upsampling.
+        sh = x.shape[2:]
+        if any([s % k != 0 for s, k in zip(sh, ks)]):
+            raise PoolingError(
+                f'Can\'t pool {sh} input by a {ks} kernel. Please adjust the input shape.'
+            )
+        return F.max_pool3d(x, ks)
 
     def forward(self, inp):
         conv0 = F.relu(self.conv0(inp))

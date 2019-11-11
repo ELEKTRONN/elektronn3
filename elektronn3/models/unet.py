@@ -43,6 +43,9 @@ from torch.utils.checkpoint import checkpoint
 import elektronn3.modules as em
 
 
+class PoolingError(Exception): pass
+
+
 class DownConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 MaxPool.
@@ -88,6 +91,18 @@ class DownConv(nn.Module):
         y = self.act2(y)
         before_pool = y
         if self.pooling:
+            # Before pooling, we manually check if the tensor is divisible by the pooling kernel
+            #  size, because PyTorch doesn't throw an error if it's not divisible, but calculates
+            #  the output shape by floor division instead. While this may make sense for other
+            #  architectures, in U-Net this would lead to incorrect output shapes after upsampling.
+            ks = self.pool.kernel_size
+            if isinstance(ks, int):  # given as scalar -> extend to spatial shape
+                ks = tuple([ks for _ in y.shape[2:]])
+            if any([s % k != 0 for s, k in zip(y.shape[2:], ks)]):
+                raise PoolingError(
+                    f'Can\'t pool {y.shape[2:]} input by a {ks}'
+                    ' kernel. Please adjust the input shape.'
+                )
             y = self.pool(y)
         return y, before_pool
 
