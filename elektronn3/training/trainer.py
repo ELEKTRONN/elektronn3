@@ -142,6 +142,10 @@ class Trainer:
             will also be performed once after epoch 1.
             (To disable preview predictions altogether, just set
             ``preview_batch = None``).
+        extra_save_steps: Permanent model snapshots are saved at the
+            training steps specified here. E.g. with
+            ``extra_save_at_steps = (0, 30, 3000)``, a snapshot is made at
+            steps 0 (before training begins), step 30 and step 3000.
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
             See :py:class:`torch.utils.data.DataLoader`
@@ -233,6 +237,7 @@ class Trainer:
             preview_overlap_shape: Optional[Tuple[int, ...]] = None,
             preview_offset: Optional[Tuple[int, ...]] = None,
             preview_interval: int = 5,
+            extra_save_steps: Sequence[int] = (),
             offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
@@ -286,6 +291,7 @@ class Trainer:
         self.preview_overlap_shape = preview_overlap_shape
         self.preview_offset = preview_offset
         self.preview_interval = preview_interval
+        self.extra_save_steps = extra_save_steps
         self.offset = offset
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
@@ -450,8 +456,11 @@ class Trainer:
 
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
-        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, batch in batch_iter:
+        batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
+        for i, batch in enumerate(batch_iter):
+            if self.step in self.extra_save_steps:
+                self._save_model(f'_step{self.step}', verbose=True)
+
             inp = batch['inp']
             target = batch['target']
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)

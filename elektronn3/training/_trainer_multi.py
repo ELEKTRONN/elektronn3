@@ -131,6 +131,8 @@ class TrainerMulti(Trainer):
         gc.collect()
         batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
         for i, batch in enumerate(batch_iter):
+            if self.step in self.extra_save_steps:
+                self._save_model(f'_step{self.step}', verbose=True)
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
             cube_meta = batch['weight']

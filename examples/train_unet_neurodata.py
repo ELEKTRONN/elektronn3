@@ -298,6 +298,7 @@ trainer = Trainer(
     preview_tile_shape=(32, 64, 64),
     preview_overlap_shape=(32, 64, 64),
     ipython_shell=args.ipython,
+    # extra_save_steps=range(0, max_steps, 10_000)
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
