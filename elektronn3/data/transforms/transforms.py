@@ -703,9 +703,9 @@ class ElasticTransform:
             if self.draw_debug_grid:
                 inp, target = _draw_debug_grid(inp, target)
             ish, tsh = np.array(inp.shape[-3:]), np.array(target.shape[-3:])
-            dz = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dy = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dx = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dz = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             z, y, x = np.array(
                 np.meshgrid(np.arange(ish[0]), np.arange(ish[1]), np.arange(ish[2]), indexing='ij'),
                 dtype=np.float64
@@ -734,8 +734,8 @@ class ElasticTransform:
                 target_indices = indices
         elif inp.ndim == 3:
             ish, tsh = np.array(inp.shape[-2:]), np.array(target.shape[-2:])
-            dy = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dx = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             y, x = np.array(
                 np.meshgrid(np.arange(ish[0]), np.arange(ish[1])),
                 dtype=np.float64
