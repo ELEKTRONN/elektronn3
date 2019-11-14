@@ -637,8 +637,9 @@ class ElasticTransform:
                 to less randomness and more spatial consistency.
                 Lower values
             alpha: Factor by which all random displacements are multiplied.
-                Each local displacement is in the range ``[0, alpha]``, so e.g.
-                for ``alpha=1`` you won't see much of an effect.
+                Each local displacement is drawn from the range
+                ``[-alpha, alpha]``, so e.g. for ``alpha=1`` you won't see
+                much of an effect.
             channels: If ``channels`` is ``None``, the change is applied to
                 all channels of the input tensor.
                 If ``channels`` is a ``Sequence[int]``, change is only applied
