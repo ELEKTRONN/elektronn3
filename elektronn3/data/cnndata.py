@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert
+# Authors: Martin Drawitsch, Philipp Schubert, Jonathan Klimesch
 
 __all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
 
@@ -13,7 +13,9 @@ import traceback
 from os.path import expanduser
 from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 
+import pickle
 import h5py
+import glob
 import imageio
 import numpy as np
 import torch
@@ -21,12 +23,82 @@ from torch.utils import data
 
 from elektronn3.data import coord_transforms, transforms
 from elektronn3.data.sources import DataSource, HDF5DataSource, slice_3d
+from morphx.classes.hybridcloud import HybridCloud
 
 logger = logging.getLogger('elektronn3log')
 
 
 class _DefaultCubeMeta:
     def __getitem__(self, *args, **kwargs): return np.inf
+
+
+def load_hybrid(self, path: str) -> HybridCloud:
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+    f.close()
+    hc = HybridCloud(data['skel_nodes'], data['skel_edges'], data['mesh_verts'], labels=data['vert_labels'])
+    return hc
+
+
+class PointCloudLoader(data.Dataset):
+    def __init__(self,
+                 data_path: str,
+                 radius_nm: int,
+                 sample_num: int,
+                 iterator_method: str = 'global_bfs',
+                 global_source: int = -1,
+                 epoch_size: int = 100):
+        """ Initializes Dataset.
+
+        Args:
+            data_path: Absolute path to data.
+            radius_nm: The size of the chunks in nanometers.
+            sample_num: The number of samples for each chunk.
+            iterator_method: The method with which each cell should be iterated.
+            global_source: The starting point of the iterator method.
+            epoch_size: Size of the data set
+        """
+
+        self.data_path = data_path
+        self.radius_nm = radius_nm
+        self.sample_num = sample_num
+        self.iterator_method = iterator_method
+        self.epoch_size = epoch_size
+
+        self.files = glob.glob(data_path + '*.pkl')
+        self.curr_hybrid = load_hybrid(self.files[0])
+
+        self.curr_index = 0
+
+        self.curr_hybrid.traverser(iterator_method, radius_nm*2, global_source)
+
+    def __len__(self):
+        return self.epoch_size
+
+    def __getitem__(self, index):
+        """ Index gets ignored. """
+        return 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # TODO: Document passing DataSources directly
