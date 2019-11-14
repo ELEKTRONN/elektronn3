@@ -592,6 +592,34 @@ class RandomCrop:
         return inp_cropped, target_cropped
 
 
+def _draw_debug_grid(
+        inp: np.ndarray,
+        target: Optional[np.ndarray] = None,
+        s: int = 16,
+        v: float = 0.,
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """Draw an ``s``-spaced grid of ``v`` values to visualize deformations."""
+    if target is not None and target.ndim == inp.ndim - 1:
+        target[::s] = v
+    if inp.ndim == 4:
+        inp[:, ::s] = v
+        inp[:, :, ::s] = v
+        inp[:, :, :, ::s] = v
+        if target is not None:
+            target[:, ::s] = v
+            target[:, :, ::s] = v
+            if target.ndim == 4:
+                target[:, :, :, ::s] = v
+    elif inp.ndim == 3:
+        inp[:, ::s] = v
+        inp[:, :, ::s] = v
+        if target is not None:
+            target[:, ::s] = v
+            if target.ndim == 3:
+                target[:, :, ::s] = v
+    return inp, target
+
+
 class ElasticTransform:
     """
     Based on https://gist.github.com/fmder/e28813c1e8721830ff9c
@@ -604,9 +632,13 @@ class ElasticTransform:
        Recognition, 2003.
 
         Args:
-            sigma: Sigma parameter of the gaussian distribution from which
-                the local displacements are drawn.
+            sigma: Sigma parameter of the gaussian smoothing performed on the
+                random displacement field. High ``sigma`` values (> 4) lead
+                to less randomness and more spatial consistency.
+                Lower values
             alpha: Factor by which all random displacements are multiplied.
+                Each local displacement is in the range ``[0, alpha]``, so e.g.
+                for ``alpha=1`` you won't see much of an effect.
             channels: If ``channels`` is ``None``, the change is applied to
                 all channels of the input tensor.
                 If ``channels`` is a ``Sequence[int]``, change is only applied
@@ -623,6 +655,13 @@ class ElasticTransform:
 
                     - discrete targets are obtained by nearest-neighbor interpolation
                     - non-discrete (continuous) targets are linearly interpolated.
+            aniso_factor: Factor by which to divide the deformation strength in the
+                z axis. E.g. if the data has half resolution in the z dimension, set
+                ``aniso_factor = 2``. By default it is ``1``, so every spatial
+                dimension is treated equally.
+            draw_debug_grid: If ``True``, draw a 16-spaced grid into the image to
+                visualize deformations. This is only for debugging purposes and
+                should never be enabled during training.
 
         The input image should be of dimensions (C, H, W) or (C, D, H, W).
         C must be included.
@@ -632,17 +671,20 @@ class ElasticTransform:
     def __init__(
             self,
             sigma: float = 4,
-            alpha: float = 10,
+            alpha: float = 40,
             channels: Optional[Sequence[int]] = None,
             prob: float = 0.25,
-            target_discrete_ix: Optional[list]= None,
-
+            target_discrete_ix: Optional[Sequence[int]] = None,
+            aniso_factor: float = 1.,
+            draw_debug_grid: bool = False
     ):
         self.sigma = sigma
         self.alpha = alpha
         self.channels = channels
         self.prob = prob
         self.target_discrete_ix = target_discrete_ix
+        self.aniso_factor = aniso_factor
+        self.draw_debug_grid = draw_debug_grid
 
     def __call__(
             self,
@@ -657,28 +699,69 @@ class ElasticTransform:
 
         # TODO (low priority): This could be written for n-d without explicit dimensions.
         if inp.ndim == 4:
-            shape = inp[0].shape
-            if target is not None and inp.shape[-3:] != target.shape[-3:]:
-                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
-            dz = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
-            indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+            if self.draw_debug_grid:
+                inp, target = _draw_debug_grid(inp, target)
+            ish, tsh = np.array(inp.shape[-3:]), np.array(target.shape[-3:])
+            dz = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dy = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            z, y, x = np.array(
+                np.meshgrid(np.arange(ish[0]), np.arange(ish[1]), np.arange(ish[2]), indexing='ij'),
+                dtype=np.float64
+            )
+            dz /= self.aniso_factor
+            z += dz
+            y += dy
+            x += dx
+            indices = np.reshape(z, (-1, 1)), np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
+
+            # If there is a target, apply the same deformation field to the target
+            if target is not None and np.any(ish != tsh):
+                if self.draw_debug_grid:
+                    inp, target = _draw_debug_grid(inp, target)
+                # Crop input re-indexing arrays to the target region and transform coordinates
+                #  to the target' own frame by subtracting the input-target offset
+                lo = (ish - tsh) // 2
+                hi = ish - lo
+                tcrop = tuple([slice(lo[i], hi[i]) for i in range(3)])
+                target_indices = (
+                    np.reshape(z[tcrop] - lo[0], (-1, 1)),
+                    np.reshape(y[tcrop] - lo[1], (-1, 1)),
+                    np.reshape(x[tcrop] - lo[2], (-1, 1))
+                )
+            else:
+                target_indices = indices
         elif inp.ndim == 3:
-            shape = inp[0].shape
-            if target is not None and inp.shape[-2:] != target.shape[-2:]:
-                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
-            dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
-            indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+            ish, tsh = np.array(inp.shape[-2:]), np.array(target.shape[-2:])
+            dy = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter((np.random.rand(*ish) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
+            y, x = np.array(
+                np.meshgrid(np.arange(ish[0]), np.arange(ish[1])),
+                dtype=np.float64
+            )
+            y += dy
+            x += dx
+            indices = np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
+
+            # If there is a target, apply the same deformation field to the target
+            if target is not None and np.any(ish != tsh):
+                # Crop input re-indexing arrays to the target region and transform coordinates
+                #  to the target' own frame by subtracting the input-target offset
+                lo = (ish - tsh) // 2
+                hi = ish - lo
+                tcrop = tuple([slice(lo[i], hi[i]) for i in range(2)])
+                target_indices = (
+                    np.reshape(y[tcrop] - lo[0], (-1, 1)),
+                    np.reshape(x[tcrop] - lo[1], (-1, 1))
+                )
+            else:
+                target_indices = indices
         else:
             raise ValueError("Input dimension not understood!")
 
         deformed_img = np.empty_like(inp)
         for c in channels:
-            deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
+            deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(ish)
 
         if target is None:
             return deformed_img, target
@@ -713,11 +796,10 @@ class ElasticTransform:
             if target_c:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
-                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order).reshape(target_shape)
+                    deformed_target[tc] = map_coordinates(target[tc], target_indices, order=target_order).reshape(target_shape)
             else:
                 target_order = 0 if self.target_discrete_ix[0] is True else 1
-                deformed_target = map_coordinates(target, indices, order=target_order).reshape(target_shape)
-
+                deformed_target = map_coordinates(target, target_indices, order=target_order).reshape(target_shape)
             return deformed_img, deformed_target
 
 
