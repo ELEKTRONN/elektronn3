@@ -71,7 +71,6 @@ class Compose:
         format_string += '\n)'
         return format_string
 
-
 class Lambda:
     """Wraps a function of the form f(x, y) = (x', y') into a transform.
 
@@ -828,6 +827,7 @@ class RandomRotate2d:
                     rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
 
         return rinp, rtarget
+
 
 
 # TODO: Support other image shapes
