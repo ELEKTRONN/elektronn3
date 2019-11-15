@@ -4,26 +4,26 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert, Jonathan Klimesch
 
-__all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
+__all__ = ['PointCloudLoader', 'PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
 
 import logging
 import os
 import sys
 import traceback
-from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
-
 import pickle
 import h5py
 import glob
 import imageio
 import numpy as np
 import torch
-from torch.utils import data
 
+from os.path import expanduser
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
+from torch.utils import data
 from elektronn3.data import coord_transforms, transforms
 from elektronn3.data.sources import DataSource, HDF5DataSource, slice_3d
 from morphx.classes.hybridcloud import HybridCloud
+from morphx.processing import graphs, hybrids, clouds
 
 logger = logging.getLogger('elektronn3log')
 
@@ -32,11 +32,12 @@ class _DefaultCubeMeta:
     def __getitem__(self, *args, **kwargs): return np.inf
 
 
-def load_hybrid(self, path: str) -> HybridCloud:
+def load_hybrid(path: str) -> HybridCloud:
     with open(path, "rb") as f:
-        data = pickle.load(f)
+        info_dict = pickle.load(f)
     f.close()
-    hc = HybridCloud(data['skel_nodes'], data['skel_edges'], data['mesh_verts'], labels=data['vert_labels'])
+    hc = HybridCloud(info_dict['skel_nodes'], info_dict['skel_edges'], info_dict['mesh_verts'],
+                     labels=info_dict['vert_labels'])
     return hc
 
 
@@ -64,41 +65,42 @@ class PointCloudLoader(data.Dataset):
         self.sample_num = sample_num
         self.iterator_method = iterator_method
         self.epoch_size = epoch_size
+        self.global_source = global_source
+
+        self.curr_hybrid_idx = 0
+        self.curr_node_idx = 0
 
         self.files = glob.glob(data_path + '*.pkl')
-        self.curr_hybrid = load_hybrid(self.files[0])
+        self.curr_hybrid = load_hybrid(self.files[self.curr_hybrid_idx])
 
-        self.curr_index = 0
-
-        self.curr_hybrid.traverser(iterator_method, radius_nm*2, global_source)
+        # radius of global BFS should be bigger than radius of local BFS as it represents the distance between
+        # sample points in the global BFS => Adjusts overlap.
+        self.curr_hybrid.traverser(iterator_method, radius_nm*1.5, global_source)
 
     def __len__(self):
         return self.epoch_size
 
     def __getitem__(self, index):
         """ Index gets ignored. """
-        return 1
+        # prepare new cell if current one is exhausted
+        if self.curr_node_idx >= len(self.curr_hybrid.traverser()):
+            self.curr_node_idx = 0
+            self.curr_hybrid_idx += 1
+            logger.info("Loading new cell at: ", self.files[self.curr_hybrid_idx])
+            self.curr_hybrid = load_hybrid(self.files[self.curr_hybrid_idx])
+            logger.info("Performing global BFS on new cell.")
+            self.curr_hybrid.traverser(self.iterator_method, self.radius_nm*2, self.global_source)
+            logger.info("Starting to process new cell.")
 
+        # perform local BFS, extract mesh at the respective nodes, sample this set and return it as a point cloud
+        spoint = self.curr_hybrid.traverser()[self.curr_node_idx]
+        local_bfs = graphs.local_bfs_dist(self.curr_hybrid.graph(), spoint, self.radius_nm)
+        subset = hybrids.extract_mesh_subset(self.curr_hybrid, local_bfs)
+        sample_cloud = clouds.sample_cloud(subset, self.sample_num)
 
+        # TODO: add augmentations
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return sample_cloud
 
 
 # TODO: Document passing DataSources directly
