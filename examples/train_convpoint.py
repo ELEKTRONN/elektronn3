@@ -18,6 +18,8 @@ elektronn3.select_mpl_backend('Agg')
 from elektronn3.training import Trainer, Backup
 from elektronn3.training import metrics
 from elektronn3.models.convpoint import ConvPoint
+from elektronn3.data.transforms import transforms3d
+from elektronn3.data.cnndata import PointCloudLoader
 
 
 # PARSE ARGUMENTS #
@@ -73,16 +75,20 @@ batch_size = 16
 
 # set paths
 save_root = os.path.expanduser('~/e3training/')
+train_path = os.path.expanduser('~/gt/gt_train/')
+valid_path = os.path.expanduser('~/gt/gt_valid')
 
 
 # PREPARE DATA SET #
 
 
-# TODO add transformations
+# Transformations to be applied to samples before feeding them to the network
+train_transform = transforms3d.Compose3d([transforms3d.RandomRotate3d(),
+                                          transforms3d.RandomVariation3d(),
+                                          transforms3d.Center3d()])
 
-# TODO set up data set
-train_dataset = 1
-valid_dataset = 1
+train_dataset = PointCloudLoader(train_path, 20000, 50000, train_transform, epoch_size=50)
+valid_dataset = PointCloudLoader(valid_path, 20000, 50000, epoch_size=10)
 
 
 # PREPARE AND START TRAINING #

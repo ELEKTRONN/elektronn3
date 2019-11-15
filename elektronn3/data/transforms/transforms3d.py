@@ -8,6 +8,11 @@ import numpy as np
 from scipy.spatial.transform import Rotation as Rot
 
 
+class Identity:
+    def __call__(self, points):
+        return points
+
+
 class Compose3d:
     """ Composes several transforms together. """
 

@@ -21,8 +21,10 @@ from os.path import expanduser
 from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 from torch.utils import data
 from elektronn3.data import coord_transforms, transforms
+from elektronn3.data.transforms import transforms3d
 from elektronn3.data.sources import DataSource, HDF5DataSource, slice_3d
 from morphx.classes.hybridcloud import HybridCloud
+from morphx.classes.pointcloud import PointCloud
 from morphx.processing import graphs, hybrids, clouds
 
 logger = logging.getLogger('elektronn3log')
@@ -33,6 +35,8 @@ class _DefaultCubeMeta:
 
 
 def load_hybrid(path: str) -> HybridCloud:
+    """ Loads morphx hybrid from a pickle file at the given path. """
+
     with open(path, "rb") as f:
         info_dict = pickle.load(f)
     f.close()
@@ -42,10 +46,15 @@ def load_hybrid(path: str) -> HybridCloud:
 
 
 class PointCloudLoader(data.Dataset):
+    """Dataset iterator class that creates point clouds from pickle files. Pickle files should contain a dict with the
+    keys: 'skel_nodes', 'skel_edges', 'mesh_verts' and 'vert_labels' representing skeleton nodes and edges and mesh
+    vertices and labels. """
+
     def __init__(self,
                  data_path: str,
                  radius_nm: int,
                  sample_num: int,
+                 transform: Callable = transforms3d.Identity(),
                  iterator_method: str = 'global_bfs',
                  global_source: int = -1,
                  epoch_size: int = 100):
@@ -55,6 +64,8 @@ class PointCloudLoader(data.Dataset):
             data_path: Absolute path to data.
             radius_nm: The size of the chunks in nanometers.
             sample_num: The number of samples for each chunk.
+            transform: Transformations from elektronn3.data.transform.transforms3d which should be applied to incoming
+                data.
             iterator_method: The method with which each cell should be iterated.
             global_source: The starting point of the iterator method.
             epoch_size: Size of the data set
@@ -66,6 +77,7 @@ class PointCloudLoader(data.Dataset):
         self.iterator_method = iterator_method
         self.epoch_size = epoch_size
         self.global_source = global_source
+        self.transform = transform
 
         self.curr_hybrid_idx = 0
         self.curr_node_idx = 0
@@ -83,10 +95,18 @@ class PointCloudLoader(data.Dataset):
     def __getitem__(self, index):
         """ Index gets ignored. """
         # prepare new cell if current one is exhausted
+        print(self.curr_hybrid_idx)
         if self.curr_node_idx >= len(self.curr_hybrid.traverser()):
             self.curr_node_idx = 0
             self.curr_hybrid_idx += 1
-            logger.info("Loading new cell at: ", self.files[self.curr_hybrid_idx])
+
+            # start over if all cells have been processed
+            if self.curr_hybrid_idx >= len(self.files):
+                self.curr_hybrid_idx = 0
+                logger.info("Processed all cells, starting over with first cell.")
+
+            # load and prepare new cell
+            logger.info("Loading new cell at: " + self.files[self.curr_hybrid_idx])
             self.curr_hybrid = load_hybrid(self.files[self.curr_hybrid_idx])
             logger.info("Performing global BFS on new cell.")
             self.curr_hybrid.traverser(self.iterator_method, self.radius_nm*2, self.global_source)
@@ -98,9 +118,13 @@ class PointCloudLoader(data.Dataset):
         subset = hybrids.extract_mesh_subset(self.curr_hybrid, local_bfs)
         sample_cloud = clouds.sample_cloud(subset, self.sample_num)
 
-        # TODO: add augmentations
+        # apply transformations from elektronn3.data.transform.transform3d
+        aug_cloud = self.transform(sample_cloud.vertices)
 
-        return sample_cloud
+        # Set pointer to next node of global BFS
+        self.curr_node_idx += 1
+
+        return PointCloud(aug_cloud, labels=sample_cloud.labels)
 
 
 # TODO: Document passing DataSources directly
