@@ -14,6 +14,7 @@ import h5py
 import numpy as np
 
 from elektronn3 import floatX
+from elektronn3.data.sources import DataSource
 
 logger = logging.getLogger("elektronn3log")
 
@@ -24,11 +25,13 @@ eps = 0.0001  # To avoid divisions by zero
 def _to_full_numpy(seq) -> np.ndarray:
     if isinstance(seq, np.ndarray):
         return seq
+    elif isinstance(seq, DataSource):
+        return seq[()]
     elif isinstance(seq[0], np.ndarray):
         return np.array(seq)
-    elif isinstance(seq[0], h5py.Dataset):
+    elif isinstance(seq[0], h5py.Dataset) or isinstance(seq[0], DataSource):
         # Explicitly pre-load all dataset values into ndarray format
-        return np.array([x.value for x in seq])
+        return np.array([x[()] for x in seq])
     else:
         raise ValueError('inputs must be an ndarray, a sequence of ndarrays '
                          'or a sequence of h5py.Datasets.')
