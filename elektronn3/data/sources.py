@@ -7,13 +7,10 @@
 # Authors: Martin Drawitsch
 
 import os
-import traceback
 from typing import Union, Any, Sequence
 
 import h5py
 import numpy as np
-
-from elektronn3.data.utils import logger
 
 
 class DataSource:  #(Protocol):  # Protocol requires Python 3.8 or typing_extensions...
@@ -71,7 +68,6 @@ def slice_3d(
         coords_hi: Sequence[int],
         dtype: type = np.float32,
         prepend_empty_axis: bool = False,
-        max_retries: int = 5,
         check_bounds=True,
 ) -> np.ndarray:
     """ Slice a patch of 3D image data out of a data source.
@@ -87,8 +83,6 @@ def slice_3d(
             doesn't already have this dtype.
         prepend_empty_axis: Prepends a new empty (1-sized) axis to the sliced
             array before returning it.
-        max_retries: Maximum retries if a read error occurs when reading from
-            the HDF5 file.
         check_bounds: If ``True`` (default), only indices that are within the
             bounds of ``src`` will be allowed (no negative indices or slices
             to indices that exceed the shape of ``src``, which would normally
@@ -102,11 +96,6 @@ def slice_3d(
             raise RuntimeError(f'coords_lo={coords_lo} exceeds src shape {src.shape[-3:]}')
         if np.any(np.array(coords_hi) > np.array(src.shape[-3:])):
             raise RuntimeError(f'coords_hi={coords_hi} exceeds src shape {src.shape[-3:]}')
-    if max_retries <= 0:
-        logger.error(
-            f'slice_h5(): max_retries exceeded at {coords_lo}, {coords_hi}. Aborting...'
-        )
-        raise ValueError
 
     # Generalized n-d slicing code (temporarily disabled because of the
     #  performance issue described in the comment below):
