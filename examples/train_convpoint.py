@@ -1,130 +1,104 @@
 # ELEKTRONN3 - Neural Network Toolkit
 #
-# Copyright (c) 2017 - now
+# Copyright (c) 2019 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Jonathan Klimesch
 
-import argparse
 import os
-import random
 import torch
-from torch import nn
+import torch.nn.functional as func
 import numpy as np
+import examples.metrics as metrics
 
-# Don't move this stuff, it needs to be run this early to work
-import elektronn3
-elektronn3.select_mpl_backend('Agg')
-
-from elektronn3.training import Trainer, Backup
-from elektronn3.training import metrics
+from sklearn.metrics import confusion_matrix
 from elektronn3.models.convpoint import ConvPoint
 from elektronn3.data.transforms import transforms3d
 from elektronn3.data.cnndata import PointCloudLoader
-
-
-# PARSE ARGUMENTS #
-
-
-parser = argparse.ArgumentParser(description='Train a network.')
-parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
-parser.add_argument('-r', '--resume', metavar='PATH',
-                    help='Path to pretrained model state dict from which to resume training.')
-parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
-
-args = parser.parse_args()
-
+from tqdm import tqdm
+from datetime import datetime
 
 # SET UP ENVIRONMENT #
 
-
-# Set up all RNG seeds, set level of determinism
-random_seed = args.seed
-torch.manual_seed(random_seed)
-np.random.seed(random_seed)
-random.seed(random_seed)
-deterministic = args.deterministic
-
-torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
-
-# Set up CUDA if needed
-if not args.disable_cuda and torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
+device = torch.device('cpu')
 
 print(f'Running on device: {device}')
 
-
 # CREATE NETWORK #
 
-
-# TODO change channels
 input_channels = 1
-output_channels = 1
+# dendrite, axon, soma, bouton, terminal
+output_channels = 5
 model = ConvPoint(input_channels, output_channels).to(device)
-
-# Load pretrained network if required
-if args.resume is not None:
-    model.load_state_dict(torch.load(os.path.expanduser(args.resume)))
 
 # define parameters
 epochs = 200
+epoch_size = 2000
 milestones = [60, 120]
 lr = 1e-3
 batch_size = 16
+npoints = 5000
+radius = 10000
+n_classes = 5
 
 # set paths
-save_root = os.path.expanduser('~/e3training/')
-train_path = os.path.expanduser('~/gt/gt_train/')
-valid_path = os.path.expanduser('~/gt/gt_valid')
-
+train_path = os.path.expanduser('~/gt/gt_results/')
+time_string = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+folder = os.path.join(train_path, "SegSmall_{}_{}_{}_{}".format(batch_size, npoints, radius, time_string))
+os.makedirs(folder, exist_ok=True)
+logs = open(os.path.join(folder, "log.txt"), "w")
 
 # PREPARE DATA SET #
 
-
 # Transformations to be applied to samples before feeding them to the network
 train_transform = transforms3d.Compose3d([transforms3d.RandomRotate3d(),
-                                          transforms3d.RandomVariation3d(),
+                                          transforms3d.RandomVariation3d(limits=(-10, 10)),
                                           transforms3d.Center3d()])
 
-train_dataset = PointCloudLoader(train_path, 20000, 50000, train_transform, epoch_size=50)
-valid_dataset = PointCloudLoader(valid_path, 20000, 50000, epoch_size=10)
-
+ds = PointCloudLoader(train_path, radius, npoints, train_transform, epoch_size=epoch_size)
+train_loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True,
+                                           num_workers=1)
 
 # PREPARE AND START TRAINING #
-
 
 # set up optimization
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones)
 
-valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
-}
+for epoch in range(epochs):
+    scheduler.step()
+    cm = np.zeros((n_classes, n_classes))
+    t = tqdm(train_loader, ncols=120, desc="Epoch {}".format(epoch))
+    for pts, features, lbs in t:
+        features.to(device)
+        pts.to(device)
+        lbs.to(device)
 
-criterion = nn.CrossEntropyLoss().to(device)
+        optimizer.zero_grad()
+        outputs = model(features, pts)
 
-trainer = Trainer(
-    model=model,
-    criterion=criterion,
-    optimizer=optimizer,
-    device=device,
-    train_dataset=train_dataset,
-    valid_dataset=valid_dataset,
-    batchsize=batch_size,
-    num_workers=1,
-    save_root=save_root,
-    exp_name=args.exp_name,
-    schedulers={"lr": scheduler},
-    valid_metrics=valid_metrics,
-)
+        loss = 0
+        for i in range(pts.size(0)):
+            loss = loss + func.cross_entropy(outputs[i], lbs[i])
 
-# Archiving training script, src folder, env info
-bk = Backup(script_path=__file__, save_path=trainer.save_path).archive_backup()
+        loss.backward()
+        optimizer.step()
 
-# Start training
-trainer.run(epochs)
+        outputs_np = outputs.cpu().detach().numpy()
+        output_np = np.argmax(outputs_np, axis=2).copy()
+        target_np = lbs.cpu().numpy().copy()
+
+        cm_ = confusion_matrix(target_np.ravel(), output_np.ravel(), labels=list(range(n_classes)))
+        cm += cm_
+
+        oa = "{:.3f}".format(metrics.stats_overall_accuracy(cm))
+        aa = "{:.3f}".format(metrics.stats_accuracy_per_class(cm)[0])
+        t.set_postfix(OA=oa, AA=aa)
+
+    # save the model
+    torch.save(model.state_dict(), os.path.join(folder, "state_dict.pth"))
+
+    # write the logs
+    logs.write("{} {} {} \n".format(epoch, oa, aa))
+    logs.flush()
+
+logs.close()

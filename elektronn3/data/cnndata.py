@@ -57,7 +57,8 @@ class PointCloudLoader(data.Dataset):
                  transform: Callable = transforms3d.Identity(),
                  iterator_method: str = 'global_bfs',
                  global_source: int = -1,
-                 epoch_size: int = 100):
+                 epoch_size: int = 1000,
+                 morphx: bool = False):
         """ Initializes Dataset.
 
         Args:
@@ -69,6 +70,7 @@ class PointCloudLoader(data.Dataset):
             iterator_method: The method with which each cell should be iterated.
             global_source: The starting point of the iterator method.
             epoch_size: Size of the data set
+            morphx: Flag to return morphx object instead of torch tensor.
         """
 
         self.data_path = data_path
@@ -78,6 +80,7 @@ class PointCloudLoader(data.Dataset):
         self.epoch_size = epoch_size
         self.global_source = global_source
         self.transform = transform
+        self.morphx = morphx
 
         self.curr_hybrid_idx = 0
         self.curr_node_idx = 0
@@ -95,22 +98,20 @@ class PointCloudLoader(data.Dataset):
     def __getitem__(self, index):
         """ Index gets ignored. """
         # prepare new cell if current one is exhausted
-        print(self.curr_hybrid_idx)
         if self.curr_node_idx >= len(self.curr_hybrid.traverser()):
             self.curr_node_idx = 0
             self.curr_hybrid_idx += 1
-
             # start over if all cells have been processed
             if self.curr_hybrid_idx >= len(self.files):
                 self.curr_hybrid_idx = 0
-                logger.info("Processed all cells, starting over with first cell.")
+                # logger.info("Processed all cells, starting over with first cell.")
 
             # load and prepare new cell
-            logger.info("Loading new cell at: " + self.files[self.curr_hybrid_idx])
+            # logger.info("Loading new cell at: " + self.files[self.curr_hybrid_idx])
             self.curr_hybrid = load_hybrid(self.files[self.curr_hybrid_idx])
-            logger.info("Performing global BFS on new cell.")
+            # logger.info("Performing global BFS on new cell.")
             self.curr_hybrid.traverser(self.iterator_method, self.radius_nm*2, self.global_source)
-            logger.info("Starting to process new cell.")
+            # logger.info("Starting to process new cell.")
 
         # perform local BFS, extract mesh at the respective nodes, sample this set and return it as a point cloud
         spoint = self.curr_hybrid.traverser()[self.curr_node_idx]
@@ -124,7 +125,17 @@ class PointCloudLoader(data.Dataset):
         # Set pointer to next node of global BFS
         self.curr_node_idx += 1
 
-        return PointCloud(aug_cloud, labels=sample_cloud.labels)
+        # pack all numpy arrays into torch tensors
+        pts = torch.from_numpy(aug_cloud).float()
+        labels = sample_cloud.labels
+        labels = labels.reshape(labels.shape[0])
+        lbs = torch.from_numpy(labels).long()
+        features = torch.ones(aug_cloud.shape[0], 1).float()
+
+        if self.morphx:
+            return PointCloud(aug_cloud, sample_cloud.labels), pts, features, lbs
+        else:
+            return pts, features, lbs
 
 
 # TODO: Document passing DataSources directly
