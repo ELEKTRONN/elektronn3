@@ -774,7 +774,7 @@ class Trainer:
     def _log_to_history_tracker(self, stats: Dict, misc: Dict) -> None:
         """Update history tracker and plot stats (kind of made obsolete by tensorboard)"""
         # TODO: Decide what to do with this, now that most things are already in tensorboard.
-        if self.step // len(self.train_dataset) > 1:
+        if self._tracker.history.length > 0:
             tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
         else:
             tr_loss_gain = 0
