@@ -43,14 +43,41 @@ def get_maxpool(dim=3):
         raise ValueError('dim has to be 2 or 3')
 
 
-def get_batchnorm(dim=3):
+def get_normalization(normtype: str, num_channels: int, dim: int = 3):
     """Chooses an implementation for a batch normalization layer."""
-    if dim == 3:
-        return nn.BatchNorm3d
-    elif dim == 2:
-        return nn.BatchNorm2d
+    if normtype is None or normtype == 'none':
+        return nn.Identity()
+    elif normtype.startswith('group'):
+        if normtype == 'group':
+            num_groups = 8
+        elif len(normtype) > len('group') and normtype[len('group'):].isdigit():
+            num_groups = int(normtype[len('group'):])
+        else:
+            raise ValueError(
+                f'normtype "{normtype}" not understood. It should be "group<G>",'
+                f' where <G> is the number of groups.'
+            )
+        return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)
+    elif normtype == 'instance':
+        if dim == 3:
+            return nn.InstanceNorm3d(num_channels)
+        elif dim == 2:
+            return nn.InstanceNorm2d(num_channels)
+        else:
+            raise ValueError('dim has to be 2 or 3')
+    elif normtype == 'batch':
+        if dim == 3:
+            return nn.BatchNorm3d(num_channels)
+        elif dim == 2:
+            return nn.BatchNorm2d(num_channels)
+        else:
+            raise ValueError('dim has to be 2 or 3')
     else:
-        raise ValueError('dim has to be 2 or 3')
+        raise ValueError(
+            f'Unknown normalization type "{normtype}".\n'
+            'Valid choices are "batch", "instance", "group" or "group<G>",'
+            'where <G> is the number of groups.'
+        )
 
 
 def planar_kernel(x):

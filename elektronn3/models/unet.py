@@ -52,13 +52,13 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 batch_norm=False, dim=3, conv_mode='same', adaptive=False):
+                 normalization=None, dim=3, conv_mode='same', adaptive=False):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
-        self.batch_norm = batch_norm
+        self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
         self.conv1 = em.conv3(
@@ -79,15 +79,15 @@ class DownConv(nn.Module):
         self.act1 = em.get_activation(activation)
         self.act2 = em.get_activation(activation)
 
-        if self.batch_norm:
-            self.bn = em.get_batchnorm(dim)(self.out_channels)
+        if self.normalization:
+            self.norm = em.get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, x):
         y = self.conv1(x)
         y = self.act1(y)
         y = self.conv2(y)
-        if self.batch_norm:
-            y = self.bn(y)
+        if self.normalization:
+            y = self.norm(y)
         y = self.act2(y)
         before_pool = y
         if self.pooling:
@@ -142,14 +142,14 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', batch_norm=False, dim=3, conv_mode='same', adaptive=False):
+                 activation='relu', normalization=None, dim=3, conv_mode='same', adaptive=False):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.merge_mode = merge_mode
         self.up_mode = up_mode
-        self.batch_norm = batch_norm
+        self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
         self.upconv = em.upconv2(self.in_channels, self.out_channels,
@@ -176,8 +176,8 @@ class UpConv(nn.Module):
         self.act1 = em.get_activation(activation)
         self.act2 = em.get_activation(activation)
 
-        if self.batch_norm:
-            self.bn = em.get_batchnorm(dim)(self.out_channels)
+        if self.normalization:
+            self.norm = em.get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -195,8 +195,8 @@ class UpConv(nn.Module):
         y = self.conv1(mrg)
         y = self.act1(y)
         y = self.conv2(y)
-        if self.batch_norm:
-            y = self.bn(y)
+        if self.normalization:
+            y = self.norm(y)
         y = self.act2(y)
         return y
 
@@ -323,12 +323,19 @@ class UNet(nn.Module):
               accuracy.
             - Or you can pass an nn.Module instance directly, e.g.
               ``activation=torch.nn.ReLU()``
-        batch_norm: If batch normalization should be applied at the end of
-            each block. Note that BN is applied after the activated conv
+        normalization:  Type of normalization that should be applied at the end
+            of each block. Note that it is applied after the activated conv
             layers, not before the activation. This scheme differs from the
             original batch normalization paper and the BN scheme of 3D U-Net,
             but it delivers better results this way
             (see https://redd.it/67gonq).
+            Choices:
+            - 'group' for group normalization (G=8)
+            - 'group<G>' for group normalization with <G> groups
+              (e.g. 'group16') for G=16
+            - 'instance' for instance normalization
+            - 'batch' for batch normalization
+            - 'none' or ``None`` for no normalization
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -400,8 +407,9 @@ class UNet(nn.Module):
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
             planar_blocks: Sequence = (),
+            batch_norm='unset',
             activation: Union[str, nn.Module] = 'relu',
-            batch_norm: bool = True,
+            normalization: str = 'group',
             dim: int = 3,
             conv_mode: str = 'same',
             adaptive: bool = False,
@@ -455,7 +463,7 @@ class UNet(nn.Module):
         self.in_channels = in_channels
         self.start_filts = start_filts
         self.n_blocks = n_blocks
-        self.batch_norm = batch_norm
+        self.normalization = normalization
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
@@ -465,6 +473,11 @@ class UNet(nn.Module):
         self.down_convs = []
         self.up_convs = []
 
+        if batch_norm != 'unset':
+            raise RuntimeError(
+                'The `batch_norm` option has been replaced with the more general `normalization` option.\n'
+                'If you still want to use batch normalization, set `normalization=batch` instead.'
+            )
         if adaptive:
             print('Warning: adaptive mode is no longer needed on newer PyTorch/CUDA/CuDNN setups and is therefore deprecated.')
 
@@ -489,7 +502,7 @@ class UNet(nn.Module):
                 pooling=pooling,
                 planar=planar,
                 activation=activation,
-                batch_norm=batch_norm,
+                normalization=normalization,
                 dim=dim,
                 conv_mode=conv_mode,
                 adaptive=adaptive
@@ -510,7 +523,7 @@ class UNet(nn.Module):
                 merge_mode=merge_mode,
                 planar=planar,
                 activation=activation,
-                batch_norm=batch_norm,
+                normalization=normalization,
                 dim=dim,
                 conv_mode=conv_mode,
                 adaptive=adaptive
