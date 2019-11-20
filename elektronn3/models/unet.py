@@ -32,6 +32,7 @@ Major differences of this version from Huang's code:
 
 __all__ = ['UNet']
 
+import copy
 import itertools
 
 from typing import Sequence, Union, Tuple
@@ -40,10 +41,165 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-import elektronn3.modules as em
+from elektronn3.modules import AdaptiveConv3d, AdaptiveConvTranspose3d
 
 
-class PoolingError(Exception): pass
+def get_conv(dim=3, adaptive=False):
+    """Chooses an implementation for a convolution layer."""
+    if dim == 3:
+        return AdaptiveConv3d if adaptive else nn.Conv3d
+    elif dim == 2:
+        return nn.Conv2d
+    else:
+        raise ValueError('dim has to be 2 or 3')
+
+
+def get_convtranspose(dim=3, adaptive=False):
+    """Chooses an implementation for a transposed convolution layer."""
+    if dim == 3:
+        return AdaptiveConvTranspose3d if adaptive else nn.ConvTranspose3d
+    elif dim == 2:
+        return nn.ConvTranspose2d
+    else:
+        raise ValueError('dim has to be 2 or 3')
+
+
+def get_maxpool(dim=3):
+    """Chooses an implementation for a max-pooling layer."""
+    if dim == 3:
+        return nn.MaxPool3d
+    elif dim == 2:
+        return nn.MaxPool2d
+    else:
+        raise ValueError('dim has to be 2 or 3')
+
+
+def get_normalization(normtype: str, num_channels: int, dim: int = 3):
+    """Chooses an implementation for a batch normalization layer."""
+    if normtype is None or normtype == 'none':
+        return nn.Identity()
+    elif normtype.startswith('group'):
+        if normtype == 'group':
+            num_groups = 8
+        elif len(normtype) > len('group') and normtype[len('group'):].isdigit():
+            num_groups = int(normtype[len('group'):])
+        else:
+            raise ValueError(
+                f'normtype "{normtype}" not understood. It should be "group<G>",'
+                f' where <G> is the number of groups.'
+            )
+        return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)
+    elif normtype == 'instance':
+        if dim == 3:
+            return nn.InstanceNorm3d(num_channels)
+        elif dim == 2:
+            return nn.InstanceNorm2d(num_channels)
+        else:
+            raise ValueError('dim has to be 2 or 3')
+    elif normtype == 'batch':
+        if dim == 3:
+            return nn.BatchNorm3d(num_channels)
+        elif dim == 2:
+            return nn.BatchNorm2d(num_channels)
+        else:
+            raise ValueError('dim has to be 2 or 3')
+    else:
+        raise ValueError(
+            f'Unknown normalization type "{normtype}".\n'
+            'Valid choices are "batch", "instance", "group" or "group<G>",'
+            'where <G> is the number of groups.'
+        )
+
+
+def planar_kernel(x):
+    """Returns a "planar" kernel shape (e.g. for 2D convolution in 3D space)
+    that doesn't consider the first spatial dim (D)."""
+    if isinstance(x, int):
+        return (1, x, x)
+    else:
+        return x
+
+
+def planar_pad(x):
+    """Returns a "planar" padding shape that doesn't pad along the first spatial dim (D)."""
+    if isinstance(x, int):
+        return (0, x, x)
+    else:
+        return x
+
+
+def conv3(in_channels, out_channels, kernel_size=3, stride=1,
+          padding=1, bias=True, planar=False, dim=3, adaptive=False):
+    """Returns an appropriate spatial convolution layer, depending on args.
+    - dim=2: Conv2d with 3x3 kernel
+    - dim=3 and planar=False: Conv3d with 3x3x3 kernel
+    - dim=3 and planar=True: Conv3d with 1x3x3 kernel
+      (if also adaptive=True, internally uses a Conv2d layer with 3x3 kernel)
+    """
+    if planar:
+        stride = planar_kernel(stride)
+        padding = planar_pad(padding)
+        kernel_size = planar_kernel(kernel_size)
+    return get_conv(dim, adaptive)(
+        in_channels,
+        out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        bias=bias
+    )
+
+
+def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, adaptive=False):
+    """Returns a learned upsampling operator depending on args."""
+    kernel_size = 2
+    stride = 2
+    if planar:
+        kernel_size = planar_kernel(kernel_size)
+        stride = planar_kernel(stride)
+    if mode == 'transpose':
+        return get_convtranspose(dim, adaptive)(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride
+        )
+    elif 'resizeconv' in mode:
+        if 'linear' in mode:
+            upsampling_mode = 'trilinear' if dim == 3 else 'bilinear'
+        else:
+            upsampling_mode = 'nearest'
+        rc_kernel_size = 1 if mode.endswith('1') else 3
+        return ResizeConv(
+            in_channels, out_channels, planar=planar, dim=dim, adaptive=adaptive,
+            upsampling_mode=upsampling_mode, kernel_size=rc_kernel_size
+        )
+
+
+def conv1(in_channels, out_channels, dim=3):
+    """Returns a 1x1 or 1x1x1 convolution, depending on dim"""
+    return get_conv(dim)(in_channels, out_channels, kernel_size=1)
+
+
+def get_activation(activation):
+    if isinstance(activation, str):
+        if activation == 'relu':
+            return nn.ReLU()
+        elif activation == 'leaky':
+            return nn.LeakyReLU(negative_slope=0.1)
+        elif activation == 'prelu':
+            return nn.PReLU(num_parameters=1)
+        elif activation == 'rrelu':
+            return nn.RReLU()
+        elif activation == 'lin':
+            return nn.Identity()
+    else:
+        # Deep copy is necessary in case of paremtrized activations
+        return copy.deepcopy(activation)
+
+
+class PoolingError(Exception):
+    pass
 
 
 class DownConv(nn.Module):
@@ -61,11 +217,11 @@ class DownConv(nn.Module):
         self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = em.conv3(
+        self.conv1 = conv3(
             self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
-        self.conv2 = em.conv3(
+        self.conv2 = conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
@@ -73,14 +229,14 @@ class DownConv(nn.Module):
         if self.pooling:
             kernel_size = 2
             if planar:
-                kernel_size = em.planar_kernel(kernel_size)
-            self.pool = em.get_maxpool(dim)(kernel_size=kernel_size)
+                kernel_size = planar_kernel(kernel_size)
+            self.pool = get_maxpool(dim)(kernel_size=kernel_size)
 
-        self.act1 = em.get_activation(activation)
-        self.act2 = em.get_activation(activation)
+        self.act1 = get_activation(activation)
+        self.act2 = get_activation(activation)
 
         if self.normalization:
-            self.norm = em.get_normalization(normalization, self.out_channels, dim=dim)
+            self.norm = get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, x):
         y = self.conv1(x)
@@ -152,32 +308,32 @@ class UpConv(nn.Module):
         self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
-        self.upconv = em.upconv2(self.in_channels, self.out_channels,
-            mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
-        )
+        self.upconv = upconv2(self.in_channels, self.out_channels,
+                              mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
+                              )
 
         if self.merge_mode == 'concat':
-            self.conv1 = em.conv3(
+            self.conv1 = conv3(
                 2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
                 adaptive=adaptive
             )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = em.conv3(
+            self.conv1 = conv3(
                 self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
                 adaptive=adaptive
             )
-        self.conv2 = em.conv3(
+        self.conv2 = conv3(
             self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
             adaptive=adaptive
         )
 
-        self.act0 = em.get_activation(activation)
-        self.act1 = em.get_activation(activation)
-        self.act2 = em.get_activation(activation)
+        self.act0 = get_activation(activation)
+        self.act1 = get_activation(activation)
+        self.act2 = get_activation(activation)
 
         if self.normalization:
-            self.norm = em.get_normalization(normalization, self.out_channels, dim=dim)
+            self.norm = get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -199,6 +355,48 @@ class UpConv(nn.Module):
             y = self.norm(y)
         y = self.act2(y)
         return y
+
+
+class ResizeConv(nn.Module):
+    """Upsamples by 2x and applies a convolution.
+
+    This is meant as a replacement for transposed convolution to avoid
+    checkerboard artifacts. See
+
+    - https://distill.pub/2016/deconv-checkerboard/
+    - https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
+    """
+    def __init__(self, in_channels, out_channels, kernel_size=3, planar=False, dim=3, adaptive=False,
+                 upsampling_mode='nearest'):
+        super().__init__()
+        self.upsampling_mode = upsampling_mode
+        self.scale_factor = 2
+        if dim == 3 and planar:  # Only interpolate (H, W) dims, leave D as is
+            self.scale_factor = planar_kernel(self.scale_factor)
+        self.dim = dim
+        self.upsample = nn.Upsample(scale_factor=self.scale_factor, mode=self.upsampling_mode)
+        # TODO: Investigate if 3x3 or 1x1 conv makes more sense here and choose default accordingly
+        # Preliminary notes:
+        # - conv3 increases global parameter count by ~10%, compared to conv1 and is slower overall
+        # - conv1 is the simplest way of aligning feature dimensions
+        # - conv1 may be enough because in all common models later layers will apply conv3
+        #   eventually, which could learn to perform the same task...
+        #   But not exactly the same thing, because this layer operates on
+        #   higher-dimensional features, which subsequent layers can't access
+        #   (at least in U-Net out_channels == in_channels // 2).
+        # --> Needs empirical evaluation
+        if kernel_size == 3:
+            self.conv = conv3(
+                in_channels, out_channels, padding=1,
+                planar=planar, dim=dim, adaptive=adaptive
+            )
+        elif kernel_size == 1:
+            self.conv = conv1(in_channels, out_channels, dim=dim)
+        else:
+            raise ValueError(f'kernel_size={kernel_size} is not supported. Choose 1 or 3.')
+
+    def forward(self, x):
+        return self.conv(self.upsample(x))
 
 
 # TODO: Pre-calculate output sizes when using valid convolutions
@@ -530,7 +728,7 @@ class UNet(nn.Module):
             )
             self.up_convs.append(up_conv)
 
-        self.conv_final = em.conv1(outs, self.out_channels, dim=dim)
+        self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
