@@ -102,7 +102,7 @@ class TrainerMulti(Trainer):
 
             def evaluator(target, out):
                 #pred = metrics._argmax(out)
-                m = metric(target, out, num_classes=num_classes, mean=mean)
+                m = metric(target, out, num_classes=num_classes, ignore=num_classes - 1, mean=mean)
                 return m[c]
 
             return evaluator
