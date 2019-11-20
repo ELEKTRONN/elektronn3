@@ -41,23 +41,21 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
-from elektronn3.modules import AdaptiveConv3d, AdaptiveConvTranspose3d
 
-
-def get_conv(dim=3, adaptive=False):
+def get_conv(dim=3):
     """Chooses an implementation for a convolution layer."""
     if dim == 3:
-        return AdaptiveConv3d if adaptive else nn.Conv3d
+        return nn.Conv3d
     elif dim == 2:
         return nn.Conv2d
     else:
         raise ValueError('dim has to be 2 or 3')
 
 
-def get_convtranspose(dim=3, adaptive=False):
+def get_convtranspose(dim=3):
     """Chooses an implementation for a transposed convolution layer."""
     if dim == 3:
-        return AdaptiveConvTranspose3d if adaptive else nn.ConvTranspose3d
+        return nn.ConvTranspose3d
     elif dim == 2:
         return nn.ConvTranspose2d
     else:
@@ -129,18 +127,17 @@ def planar_pad(x):
 
 
 def conv3(in_channels, out_channels, kernel_size=3, stride=1,
-          padding=1, bias=True, planar=False, dim=3, adaptive=False):
+          padding=1, bias=True, planar=False, dim=3):
     """Returns an appropriate spatial convolution layer, depending on args.
     - dim=2: Conv2d with 3x3 kernel
     - dim=3 and planar=False: Conv3d with 3x3x3 kernel
     - dim=3 and planar=True: Conv3d with 1x3x3 kernel
-      (if also adaptive=True, internally uses a Conv2d layer with 3x3 kernel)
     """
     if planar:
         stride = planar_kernel(stride)
         padding = planar_pad(padding)
         kernel_size = planar_kernel(kernel_size)
-    return get_conv(dim, adaptive)(
+    return get_conv(dim)(
         in_channels,
         out_channels,
         kernel_size=kernel_size,
@@ -150,7 +147,7 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
     )
 
 
-def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, adaptive=False):
+def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
     """Returns a learned upsampling operator depending on args."""
     kernel_size = 2
     stride = 2
@@ -158,7 +155,7 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
         kernel_size = planar_kernel(kernel_size)
         stride = planar_kernel(stride)
     if mode == 'transpose':
-        return get_convtranspose(dim, adaptive)(
+        return get_convtranspose(dim)(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
@@ -171,7 +168,7 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3, ad
             upsampling_mode = 'nearest'
         rc_kernel_size = 1 if mode.endswith('1') else 3
         return ResizeConv(
-            in_channels, out_channels, planar=planar, dim=dim, adaptive=adaptive,
+            in_channels, out_channels, planar=planar, dim=dim,
             upsampling_mode=upsampling_mode, kernel_size=rc_kernel_size
         )
 
@@ -208,7 +205,7 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, dim=3, conv_mode='same', adaptive=False):
+                 normalization=None, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
@@ -218,12 +215,10 @@ class DownConv(nn.Module):
         padding = 1 if 'same' in conv_mode else 0
 
         self.conv1 = conv3(
-            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-            adaptive=adaptive
+            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
         self.conv2 = conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-            adaptive=adaptive
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
 
         if self.pooling:
@@ -298,7 +293,7 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', normalization=None, dim=3, conv_mode='same', adaptive=False):
+                 activation='relu', normalization=None, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
@@ -309,23 +304,19 @@ class UpConv(nn.Module):
         padding = 1 if 'same' in conv_mode else 0
 
         self.upconv = upconv2(self.in_channels, self.out_channels,
-                              mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
-                              )
+                              mode=self.up_mode, planar=planar, dim=dim)
 
         if self.merge_mode == 'concat':
             self.conv1 = conv3(
-                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-                adaptive=adaptive
+                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
             )
         else:
             # num of input channels to conv2 is same
             self.conv1 = conv3(
-                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-                adaptive=adaptive
+                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
             )
         self.conv2 = conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-            adaptive=adaptive
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
 
         self.act0 = get_activation(activation)
@@ -366,7 +357,7 @@ class ResizeConv(nn.Module):
     - https://distill.pub/2016/deconv-checkerboard/
     - https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
     """
-    def __init__(self, in_channels, out_channels, kernel_size=3, planar=False, dim=3, adaptive=False,
+    def __init__(self, in_channels, out_channels, kernel_size=3, planar=False, dim=3,
                  upsampling_mode='nearest'):
         super().__init__()
         self.upsampling_mode = upsampling_mode
@@ -387,8 +378,7 @@ class ResizeConv(nn.Module):
         # --> Needs empirical evaluation
         if kernel_size == 3:
             self.conv = conv3(
-                in_channels, out_channels, padding=1,
-                planar=planar, dim=dim, adaptive=adaptive
+                in_channels, out_channels, padding=1, planar=planar, dim=dim
             )
         elif kernel_size == 1:
             self.conv = conv1(in_channels, out_channels, dim=dim)
@@ -582,11 +572,6 @@ class UNet(nn.Module):
                 the borders. Most notably this is the case if you do training
                 and inference not on small patches, but on complete images in
                 a single step.
-        adaptive: If ``True``, use custom convolution/transposed
-            convolution layers for improved performance in planar blocks.
-            This is an experimental feature and it is not guaranteed to give
-            the same results as the native PyTorch convolution/transposed
-            convolution implementations.
         checkpointing: If ``True``, use gradient checkpointing to reduce memory
             consumption while training. This makes the backward pass a bit
             slower, but the memory savings can be huge (usually around
@@ -610,7 +595,6 @@ class UNet(nn.Module):
             normalization: str = 'group',
             dim: int = 3,
             conv_mode: str = 'same',
-            adaptive: bool = False,
             checkpointing: bool = False
     ):
         super().__init__()
@@ -665,7 +649,6 @@ class UNet(nn.Module):
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
-        self.adaptive = adaptive
         self.checkpointing = checkpointing
 
         self.down_convs = []
@@ -676,16 +659,10 @@ class UNet(nn.Module):
                 'The `batch_norm` option has been replaced with the more general `normalization` option.\n'
                 'If you still want to use batch normalization, set `normalization=batch` instead.'
             )
-        if adaptive:
-            print('Warning: adaptive mode is no longer needed on newer PyTorch/CUDA/CuDNN setups and is therefore deprecated.')
 
         # Indices of blocks that should operate in 2D instead of 3D mode,
         # to save resources
         self.planar_blocks = planar_blocks
-        if not planar_blocks:
-            # Adaptive Convolutions only make sense if a part of the network
-            #  operates in 2D (planar mode)
-            self.adaptive = False
 
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
@@ -703,7 +680,6 @@ class UNet(nn.Module):
                 normalization=normalization,
                 dim=dim,
                 conv_mode=conv_mode,
-                adaptive=adaptive
             )
             self.down_convs.append(down_conv)
 
@@ -724,7 +700,6 @@ class UNet(nn.Module):
                 normalization=normalization,
                 dim=dim,
                 conv_mode=conv_mode,
-                adaptive=adaptive
             )
             self.up_convs.append(up_conv)
 
