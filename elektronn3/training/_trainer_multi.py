@@ -69,7 +69,7 @@ class TrainerMulti(Trainer):
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
+                    self._save_model(suffix=f'_best{self.step}', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
