@@ -33,6 +33,7 @@ class TrainerMulti(Trainer):
         super().__init__(*args, **kwargs)
         self.optimizer_iterations = optimizer_iterations
         assert(optimizer_iterations > 0)
+        self.loss_crop = 16 # crop sample for loss calcuation by this amount
 
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
@@ -138,7 +139,7 @@ class TrainerMulti(Trainer):
             cube_meta = batch['cube_meta']
             fname = batch['fname']
             dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dtarget = target[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop].to(self.device, non_blocking=True) if self.loss_crop else target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight = weight
@@ -151,7 +152,7 @@ class TrainerMulti(Trainer):
                 self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             # forward pass
-            dout = self.model(dinp)
+            dout = self.model(dinp)[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop] if self.loss_crop else self.model(dinp)
 
             #print(dout.dtype, dout.shape, dtarget.dtype, dtarget.shape, dout.min(), dout.max())
             dloss = self.criterion(dout, dtarget)
@@ -183,6 +184,8 @@ class TrainerMulti(Trainer):
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
                 multi_class_target = target.argmax(1) if len(target.shape) > 4 else target  # TODO
+                if self.loss_crop:
+                    multi_class_target = multi_class_target[:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop]
                 acc = metrics.accuracy(multi_class_target, out_class, num_classes, mean=False).numpy()
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
@@ -277,7 +280,7 @@ class TrainerMulti(Trainer):
             inp, target = batch['inp'], batch['target']
             cube_meta = batch['cube_meta']
             dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dtarget = target[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop].to(self.device, non_blocking=True) if self.loss_crop else target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight *= weight
@@ -290,15 +293,16 @@ class TrainerMulti(Trainer):
                 needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
                 self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
-            dout = self.model(dinp)
+            dout = self.model(dinp)[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop] if self.loss_crop else self.model(dinp)
             multi_class_target = target.argmax(1) if len(target.shape) > 4 else target
+            if self.loss_crop:
+                multi_class_target = multi_class_target[:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop]
             val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             out_class = out.argmax(dim=1)
             self.criterion.weight = prev_weight
             for name, evaluator in self.valid_metrics.items():
                 stats[name].append(evaluator(multi_class_target, out_class))
-
         images = {
             'fname': Path(batch['fname'][0]).stem,
             'inp': inp.numpy(),
