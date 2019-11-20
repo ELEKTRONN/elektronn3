@@ -135,8 +135,8 @@ class TrainerMulti(Trainer):
                 self._save_model(f'_step{self.step}', verbose=True)
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
-            cube_meta = batch['weight']
-            fname = batch['file_stats']
+            cube_meta = batch['cube_meta']
+            fname = batch['fname']
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
