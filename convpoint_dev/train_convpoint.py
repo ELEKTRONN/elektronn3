@@ -8,7 +8,7 @@ import os
 import torch
 import torch.nn.functional as func
 import numpy as np
-import examples.metrics as metrics
+import convpoint_dev.metrics as metrics
 
 from sklearn.metrics import confusion_matrix
 from elektronn3.models.convpoint import ConvPoint
