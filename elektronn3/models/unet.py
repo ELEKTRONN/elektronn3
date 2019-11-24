@@ -601,7 +601,7 @@ class UNet(nn.Module):
             in_channels: int = 1,
             out_channels: int = 2,
             n_blocks: int = 3,
-            start_filts: int = 64,
+            start_filts: int = 32,
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
             planar_blocks: Sequence = (),
