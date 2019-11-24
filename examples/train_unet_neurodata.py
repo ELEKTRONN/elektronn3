@@ -90,8 +90,9 @@ model = UNet(
     start_filts=32,
     planar_blocks=(0,),
     activation='relu',
-    batch_norm=True,
+    normalization='group',
     # conv_mode='valid',
+    # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
 ).to(device)
 # Example for a model-compatible input.

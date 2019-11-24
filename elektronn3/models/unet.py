@@ -205,7 +205,7 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, dim=3, conv_mode='same'):
+                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
@@ -230,15 +230,18 @@ class DownConv(nn.Module):
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
 
-        if self.normalization:
-            self.norm = get_normalization(normalization, self.out_channels, dim=dim)
+        if full_norm:
+            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
+        else:
+            self.norm0 = nn.Identity()
+        self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, x):
         y = self.conv1(x)
+        y = self.norm0(y)
         y = self.act1(y)
         y = self.conv2(y)
-        if self.normalization:
-            y = self.norm(y)
+        y = self.norm1(y)
         y = self.act2(y)
         before_pool = y
         if self.pooling:
@@ -293,7 +296,7 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', normalization=None, dim=3, conv_mode='same'):
+                 activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
@@ -323,8 +326,13 @@ class UpConv(nn.Module):
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
 
-        if self.normalization:
-            self.norm = get_normalization(normalization, self.out_channels, dim=dim)
+        if full_norm:
+            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
+            self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+        else:
+            self.norm0 = nn.Identity()
+            self.norm1 = nn.Identity()
+        self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -334,16 +342,17 @@ class UpConv(nn.Module):
         """
         updec = self.upconv(dec)
         crenc, upcdec = autocrop(enc, updec)
+        updec = self.norm0(upcdec)
         updec = self.act0(updec)
         if self.merge_mode == 'concat':
             mrg = torch.cat((updec, crenc), 1)
         else:
             mrg = updec + crenc
         y = self.conv1(mrg)
+        y = self.norm1(y)
         y = self.act1(y)
         y = self.conv2(y)
-        if self.normalization:
-            y = self.norm(y)
+        y = self.norm2(y)
         y = self.act2(y)
         return y
 
@@ -511,7 +520,7 @@ class UNet(nn.Module):
               accuracy.
             - Or you can pass an nn.Module instance directly, e.g.
               ``activation=torch.nn.ReLU()``
-        normalization:  Type of normalization that should be applied at the end
+        normalization: Type of normalization that should be applied at the end
             of each block. Note that it is applied after the activated conv
             layers, not before the activation. This scheme differs from the
             original batch normalization paper and the BN scheme of 3D U-Net,
@@ -524,6 +533,12 @@ class UNet(nn.Module):
             - 'instance' for instance normalization
             - 'batch' for batch normalization
             - 'none' or ``None`` for no normalization
+        full_norm: If ``True`` (default), perform normalization after each
+            (transposed) convolution in the network (which is what almost
+            all published neural network architectures do).
+            If ``False``, only normalize after the last convolution
+            layer of each block, in order to save resources. This was also
+            the default behavior before this option was introduced.
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -593,6 +608,7 @@ class UNet(nn.Module):
             batch_norm='unset',
             activation: Union[str, nn.Module] = 'relu',
             normalization: str = 'group',
+            full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
             checkpointing: bool = False
@@ -678,6 +694,7 @@ class UNet(nn.Module):
                 planar=planar,
                 activation=activation,
                 normalization=normalization,
+                full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
             )
@@ -698,6 +715,7 @@ class UNet(nn.Module):
                 planar=planar,
                 activation=activation,
                 normalization=normalization,
+                full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
             )
