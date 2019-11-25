@@ -226,6 +226,8 @@ class DownConv(nn.Module):
             if planar:
                 kernel_size = planar_kernel(kernel_size)
             self.pool = get_maxpool(dim)(kernel_size=kernel_size)
+        else:
+            self.pool = nn.Identity()
 
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
@@ -236,6 +238,22 @@ class DownConv(nn.Module):
             self.norm0 = nn.Identity()
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
+    @torch.jit.unused
+    def check_poolable(self, y: torch.Tensor):
+        """Before pooling, we manually check if the tensor is divisible by the pooling kernel
+        size, because PyTorch doesn't throw an error if it's not divisible, but calculates
+        the output shape by floor division instead. While this may make sense for other
+        architectures, in U-Net this would lead to incorrect output shapes after upsampling.
+        """
+        ks = self.pool.kernel_size
+        if isinstance(ks, int):  # given as scalar -> extend to spatial shape
+            ks = tuple([ks for _ in y.shape[2:]])
+        if any([s % k != 0 for s, k in zip(y.shape[2:], ks)]):
+            raise PoolingError(
+                f'Can\'t pool {y.shape[2:]} input by a {ks}'
+                ' kernel. Please adjust the input shape.'
+            )
+
     def forward(self, x):
         y = self.conv1(x)
         y = self.norm0(y)
@@ -244,20 +262,9 @@ class DownConv(nn.Module):
         y = self.norm1(y)
         y = self.act2(y)
         before_pool = y
-        if self.pooling:
-            # Before pooling, we manually check if the tensor is divisible by the pooling kernel
-            #  size, because PyTorch doesn't throw an error if it's not divisible, but calculates
-            #  the output shape by floor division instead. While this may make sense for other
-            #  architectures, in U-Net this would lead to incorrect output shapes after upsampling.
-            ks = self.pool.kernel_size
-            if isinstance(ks, int):  # given as scalar -> extend to spatial shape
-                ks = tuple([ks for _ in y.shape[2:]])
-            if any([s % k != 0 for s, k in zip(y.shape[2:], ks)]):
-                raise PoolingError(
-                    f'Can\'t pool {y.shape[2:]} input by a {ks}'
-                    ' kernel. Please adjust the input shape.'
-                )
-            y = self.pool(y)
+        if self.pooling and not torch.jit.is_scripting():
+            self.check_poolable(y)
+        y = self.pool(y)
         return y, before_pool
 
 
@@ -596,6 +603,8 @@ class UNet(nn.Module):
             https://arxiv.org/abs/1604.06174 for more details.
     """
 
+    __constants__ = ['down_convs', 'up_convs']
+
     def __init__(
             self,
             in_channels: int = 1,
@@ -667,8 +676,8 @@ class UNet(nn.Module):
         self.dim = dim
         self.checkpointing = checkpointing
 
-        self.down_convs = []
-        self.up_convs = []
+        self.down_convs = nn.ModuleList()
+        self.up_convs = nn.ModuleList()
 
         if batch_norm != 'unset':
             raise RuntimeError(
@@ -723,10 +732,6 @@ class UNet(nn.Module):
 
         self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
-        # add the list of modules to current module
-        self.down_convs = nn.ModuleList(self.down_convs)
-        self.up_convs = nn.ModuleList(self.up_convs)
-
         self.reset_params()
 
     @staticmethod
@@ -744,20 +749,24 @@ class UNet(nn.Module):
         encoder_outs = []
 
         # Encoder pathway, save outputs for merging
-        for i, module in enumerate(self.down_convs):
+        i = 0  # Can't enumerate because of https://github.com/pytorch/pytorch/issues/16123
+        for module in self.down_convs:
             if self.checkpointing:
                 x, before_pool = checkpoint(module, x)
             else:
                 x, before_pool = module(x)
             encoder_outs.append(before_pool)
+            i += 1
 
         # Decoding by UpConv and merging with saved outputs of encoder
-        for i, module in enumerate(self.up_convs):
+        i = 0
+        for module in self.up_convs:
             before_pool = encoder_outs[-(i+2)]
             if self.checkpointing:
                 x = checkpoint(module, before_pool, x)
             else:
                 x = module(before_pool, x)
+            i += 1
 
         # No softmax is used, so you need to apply it in the loss.
         x = self.conv_final(x)
