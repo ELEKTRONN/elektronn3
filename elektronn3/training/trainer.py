@@ -456,7 +456,9 @@ class Trainer:
 
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
-        batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
+        batch_iter = tqdm(
+            self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
+        )
         for i, batch in enumerate(batch_iter):
             if self.step in self.extra_save_steps:
                 self._save_model(f'_step{self.step}', verbose=True)
@@ -593,7 +595,10 @@ class Trainer:
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
+        batch_iter = tqdm(
+            enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
+            dynamic_ncols=True
+        )
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']

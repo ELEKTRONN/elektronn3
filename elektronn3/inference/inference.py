@@ -162,7 +162,7 @@ def tiled_apply(
     # TODO: Handle fractional inputshape-to-tile ratio
     pbar = tqdm(
         itertools.product(*tile_ranges), 'Predicting',
-        total=num_tiles, disable=not verbose
+        total=num_tiles, disable=not verbose, dynamic_ncols=True
     )
     for tile_pos in pbar:
         tile_pos = np.array(tile_pos)
