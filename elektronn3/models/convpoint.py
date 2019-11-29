@@ -95,7 +95,7 @@ class PtConv(LayerBase):
         self.l2 = nn.Linear(2*n_centers, n_centers)
         self.l3 = nn.Linear(n_centers, n_centers)
 
-    def forward(self, input, points, K, next_pts=None, normalize=True, indices_=None, return_indices=False, dilation=1):
+    def forward(self, input, points, K, next_pts=None, normalize=False, indices_=None, return_indices=False, dilation=1):
         if indices_ is None:
             if isinstance(next_pts, int) and points.size(1) != next_pts:
                 # convolution with reduction

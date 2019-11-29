@@ -3,6 +3,7 @@
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
+
 import datetime
 from collections import deque
 import ipdb
@@ -85,7 +86,7 @@ def _change_log_file_to(
     file_handler.baseFilename = new_path
 
 
-class Trainer:
+class Trainer3d:
     """ Training loop abstraction with IPython and tensorboard integration.
 
     Hitting Ctrl-C anytime during the training will drop you to the IPython
@@ -391,20 +392,19 @@ class Trainer:
         self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:
             try:
-                stats, misc, tr_sample_images = self._train(max_steps, max_runtime)
+                stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
                 if self.valid_dataset is None:
                     stats['val_loss'] = nan
-                    val_sample_images = None
                 else:
-                    valid_stats, val_sample_images = self._validate()
+                    valid_stats = self._validate()
                     stats.update(valid_stats)
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
-                self._log_to_tensorboard(stats, misc, tr_sample_images, val_sample_images)
+                self._log_to_tensorboard(stats, misc)
                 # Legacy non-tensorboard logging to files
                 self._log_to_history_tracker(stats, misc)
 
@@ -446,21 +446,29 @@ class Trainer:
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
-        # Hold image tensors for real-time training sample visualization in tensorboard
-        images: Dict[str, np.ndarray] = {}
 
-        running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, batch in batch_iter:
-            inp = batch['inp']
+            inp = batch['pts']
+            feats = batch['feats']
             target = batch['target']
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
+            dfeats = feats.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
 
             # forward pass
-            dout = self.model(dinp)
+            dout = self.model(dfeats, dinp)
+
+            # dout has shape of (batch_size, point_number, classes)
+            # dtarget has shape of (batch_size, point_number)
+            # transform dout to shape (batch_size*point_number, classes) and dtarget to (batch_size*point_number)
+            # => shape conform to (N,C) and (N) instead of (N,C,d1) and (N,d1)
+            dout = dout.view(-1, 5)
+            dtarget = dtarget.view(-1)
+
+            # takes input with form (N,C) or (N,C,d1,d2,...) and target with (N) or (N,d1,d2,...)
             dloss = self.criterion(dout, dtarget)
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -475,9 +483,6 @@ class Trainer:
                 dloss.backward()
             self.optimizer.step()
             # End of core training loop on self.device
-
-            # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
-            out = dout.detach().cpu()  # Copy model output to host memory for metrics, visualization
 
             with torch.no_grad():
                 loss = float(dloss)
@@ -501,8 +506,6 @@ class Trainer:
             self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
             self._handle_lr()
 
-            running_vx_size += inp.numel()
-
             self.step += 1
             if self.step >= max_steps:
                 logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
@@ -510,21 +513,14 @@ class Trainer:
             if datetime.datetime.now() >= self.end_time:
                 logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
                 self.terminate = True
-            if i == len(self.train_loader) - 1 or self.terminate:
-                # Last step in this epoch or in the whole training
-                # Preserve last training batch and network output for later visualization
-                images['inp'] = inp.numpy()
-                images['target'] = target.numpy()
-                images['out'] = out.numpy()
 
             if self.terminate:
                 break
 
         stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
-        misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
-        return stats, misc, images
+        return stats, misc
 
     def _handle_lr(self) -> None:
         r"""Handle quasi-periodic learning rate schedulers that lower the
@@ -588,20 +584,24 @@ class Trainer:
         batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            inp, target = batch['inp'], batch['target']
+            inp, feats, target = batch['pts'], batch['feats'], batch['target']
             dinp = inp.to(self.device, non_blocking=True)
+            dfeats = feats.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            dout = self.model(dinp)
+            dout = self.model(dfeats, dinp)
+
+            # dout has shape of (batch_size, point_number, classes)
+            # dtarget has shape of (batch_size, point_number)
+            # transform dout to shape (batch_size*point_number, classes) and dtarget to (batch_size*point_number)
+            # => shape conform to (N,C) and (N) instead of (N,C,d1) and (N,d1)
+            dout = dout.view(-1, 5)
+            dtarget = dtarget.view(-1)
+
             val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
+            target = target.view(-1)
             for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(target, out))
-
-        images = {
-            'inp': inp.numpy(),
-            'out': out.numpy(),
-            'target': target.numpy()
-        }
+                stats[name].append(evaluator(target, out, num_classes=self.num_classes))
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
@@ -610,7 +610,7 @@ class Trainer:
 
         self.model.train()  # Reset model to training mode
 
-        return stats, images
+        return stats
 
 # TODO: Instead of using specific keys like val_loss, enable passing info as an
 #       extra dict whose contents will be added to the state_dict
@@ -731,18 +731,15 @@ class Trainer:
         val_loss = np.mean(stats['val_loss'])
         lr = misc['learning_rate']
         tr_speed = misc['tr_speed']
-        tr_speed_vx = misc['tr_speed_vx']
         t = pretty_string_time(self._timer.t_passed)
         text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
-        text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {tr_speed_vx:.2f} MVx/s, {t}'
+        text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {t}'
         logger.info(text)
 
     def _log_to_tensorboard(
             self,
             stats: Dict,
             misc: Dict,
-            tr_images: Dict,
-            val_images: Optional[Dict] = None,
             file_stats: Optional[Dict] = None,
     ) -> None:
         """Create visualizations, make preview predictions, log and plot to tensorboard"""
@@ -754,9 +751,6 @@ class Trainer:
                     if self.epoch % self.preview_interval == 0 or self.epoch == 1:
                         # TODO: Also save preview inference results in a (3D) HDF5 file
                         self.preview_plotting_handler(self)
-                self.sample_plotting_handler(self, tr_images, group='tr_samples')
-                if val_images is not None:
-                    self.sample_plotting_handler(self, val_images, group='val_samples')
                 if file_stats is not None:
                     self._tb_log_scalars(file_stats, 'file_stats')
                 self._tb_log_histograms()
