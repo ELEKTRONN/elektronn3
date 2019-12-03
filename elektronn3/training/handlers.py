@@ -322,7 +322,7 @@ def _tb_log_sample_images(
     )
     trainer.tb.add_figure(
         f'{group}/target',
-        plot_image(target_slice, num_classes=trainer.num_classes, cmap=target_cmap, filename=name),
+        plot_image(target_slice, num_classes=trainer.num_classes, filename=name),
         global_step=trainer.step
     )
 
