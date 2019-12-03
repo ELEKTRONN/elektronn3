@@ -25,6 +25,8 @@ def get_colors(num_classes: int, cmap: str = E3_CMAP) -> np.ndarray:
 
 def plot_image(
         image: np.ndarray,
+        overlay: np.ndarray=None,
+        overlay_alpha=0.5,
         cmap=None,
         num_classes=None,
         colorbar=True,
@@ -57,12 +59,18 @@ def plot_image(
         vmax = num_classes
 
     fig, ax = plt.subplots()
-    aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+    if overlay is None:
+        aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+    else:
+        ax.imshow(image, cmap='gray')
+        masked_overlay = np.ma.masked_where(overlay == 0, overlay)
+        aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha)
     ax.set_title(filename)
     if colorbar:
         bar = fig.colorbar(aximg, ticks=ticks)
         if ticklabels is not None:
             bar.set_ticklabels(ticklabels)
+        bar.solids.set(alpha=1) # otherwise uses image’s opacity
     return fig
 
 
@@ -335,30 +343,14 @@ def _tb_log_sample_images(
             global_step=trainer.step
         )
         if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
-            inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-            target_slice_ov = label2rgb(
-                target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha,
-                colors=get_colors(trainer.num_classes)[1:]
-            )
-            # Replace zero-labelled regions in blended overlay img with original image contents
-            # to avoid darkening effects of alpha blending with 0.
-            target_slice_ov[target_slice == 0, :] = inp01[target_slice == 0, None]
-            pred_slice_ov = label2rgb(
-                pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha,
-                colors=get_colors(trainer.num_classes)[1:]
-            )
-            pred_slice_ov[pred_slice == 0, :] = inp01[pred_slice == 0, None]
-            # Ensure the value range remains [0, 1]
-            target_slice_ov = np.clip(target_slice_ov, 0, 1)
-            pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
-                plot_image(target_slice_ov, colorbar=False, filename=name),
+                plot_image(inp_slice, overlay=target_slice, overlay_alpha=trainer.overlay_alpha, num_classes=trainer.num_classes, filename=name),
                 global_step=trainer.step
             )
             trainer.tb.add_figure(
                 f'{group}/pred_overlay',
-                plot_image(pred_slice_ov, colorbar=False, filename=name),
+                plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, num_classes=trainer.num_classes, filename=name),
                 global_step=trainer.step
             )
     elif is_regression:
