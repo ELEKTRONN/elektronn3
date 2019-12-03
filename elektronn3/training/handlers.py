@@ -358,7 +358,7 @@ def _tb_log_sample_images(
             )
             trainer.tb.add_figure(
                 f'{group}/pred_overlay',
-                plot_image(pred_slice_ov, colorbar=False),
+                plot_image(pred_slice_ov, colorbar=False, filename=name),
                 global_step=trainer.step
             )
     elif is_regression:
