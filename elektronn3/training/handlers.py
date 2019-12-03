@@ -10,22 +10,34 @@ import matplotlib.pyplot as plt
 import matplotlib.cm
 import numpy as np
 import torch
-from skimage.color import label2rgb
 from torch.nn import functional as F
 
 from elektronn3.data.utils import squash01
 
 
-E3_CMAP = os.getenv('E3_CMAP', 'viridis')
+E3_CMAP: str = os.getenv('E3_CMAP')
 
 
-def get_colors(num_classes: int, cmap: str = E3_CMAP) -> np.ndarray:
-    return matplotlib.cm.get_cmap(cmap, num_classes).colors
+def get_cmap(num_classes: int):
+    if E3_CMAP is not None:
+        cmname = E3_CMAP
+    # Else, use defaults:
+    elif num_classes <= 10:
+        cmname = 'tab10'
+    elif num_classes <= 20:
+        cmname = 'tab20'
+    else:
+        raise RuntimeError(
+            f'Default cmaps only support up to 20 colors, which are not enough to label '
+            f'{num_classes} different output channels.\nPlease set a different cmap '
+            'with the E3_CMAP envvar.'
+        )
+    return matplotlib.cm.get_cmap(cmname, num_classes)
 
 
 def plot_image(
         image: np.ndarray,
-        overlay: np.ndarray=None,
+        overlay: Optional[np.ndarray] = None,
         overlay_alpha=0.5,
         cmap=None,
         num_classes=None,
@@ -44,9 +56,13 @@ def plot_image(
     ticklabels = None
     if cmap is None and num_classes is not None:
         # Assume label matrix with qualitative classes, no meaningful order
-        # Using rainbow because IMHO all actually qualitative colormaps
-        #  are incredibly ugly.
-        cmap = plt.cm.get_cmap(E3_CMAP, num_classes)
+        if cmap is not None:
+            raise ValueError('If num_classes is not None, manually setting cmap is not supported.')
+
+        if num_classes > 20:
+            raise NotImplementedError('num_classes > 20 is not supported for plotting.')
+        cmap = get_cmap(num_classes)
+
         ticks = np.linspace(0.5, num_classes - 0.5, num_classes) # 0.5 for centered ticks
         ticklabels = np.arange(num_classes)
     if num_classes is not None:  # For label matrices
@@ -181,15 +197,9 @@ def _tb_log_preview(
         trainer.step
     )
     inp_slice = batch2img(inp_batch)[0]
-    inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-    pred_slice_ov = label2rgb(
-        pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha,
-        colors=get_colors(trainer.num_classes)[1:]
-    )
-    pred_slice_ov[pred_slice == 0, :] = inp01[pred_slice == 0, None]
     trainer.tb.add_figure(
         f'{group}/pred_overlay',
-        plot_image(pred_slice_ov, colorbar=False),
+        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, num_classes=trainer.num_classes),
         global_step=trainer.step
     )
 
@@ -278,6 +288,7 @@ def _tb_log_sample_images(
         # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
         target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
         out_slice = np.moveaxis(out_slice, 0, -1)
+        target_cmap = None
     elif target_slice.shape[0] == 1:
         target_slice = target_slice[0]
         out_slice = out_slice[0]
