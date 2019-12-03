@@ -268,7 +268,7 @@ def _tb_log_sample_images(
         padded_target_batch[slc] = target_batch
         target_batch = padded_target_batch
 
-    target_cmap = None
+    target_cmap = E3_CMAP
     batch2img = _get_batch2img_function(out_batch, z_plane)
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
