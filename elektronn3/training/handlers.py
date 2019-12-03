@@ -39,13 +39,14 @@ def plot_image(
     # Determine colormap and set discrete color values if needed.
     vmin, vmax = None, None
     ticks = None
+    ticklabels = None
     if cmap is None and num_classes is not None:
         # Assume label matrix with qualitative classes, no meaningful order
         # Using rainbow because IMHO all actually qualitative colormaps
         #  are incredibly ugly.
         cmap = plt.cm.get_cmap(E3_CMAP, num_classes)
-        ticks = np.arange(num_classes)
-
+        ticks = np.linspace(0.5, num_classes - 0.5, num_classes) # 0.5 for centered ticks
+        ticklabels = np.arange(num_classes)
     if num_classes is not None:  # For label matrices
         # Prevent colormap normalization. If vmax is not set, the colormap
         #  is dynamically rescaled to fit between the minimum and maximum
@@ -59,7 +60,9 @@ def plot_image(
     aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_title(filename)
     if colorbar:
-        fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
+        bar = fig.colorbar(aximg, ticks=ticks)
+        if ticklabels is not None:
+            bar.set_ticklabels(ticklabels)
     return fig
 
 
