@@ -155,7 +155,7 @@ for epoch in range(epochs):
                 results.append(orig)
                 results.append(pred)
 
-            clouds.save_cloudlist(results, train_examples, 'epoch_{}_batch_{}.pkl'.format(epoch, batch_num))
+            clouds.save_cloudlist(results, train_examples, 'epoch_{}_batch_{}'.format(epoch, batch_num))
         batch_num += 1
 
     # save the model
