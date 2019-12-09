@@ -11,8 +11,9 @@ Important note: The transformations here have a similar interface to
 torchvision.transforms, but there are two key differences:
 
 1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
-  pairs instead of just inp to transformed_inp. Most transforms don't change the target, though.
+   pairs instead of just inp to transformed_inp. Most transforms don't change the target, though.
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
+
 """
 
 from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
@@ -440,6 +441,7 @@ class RandomGaussianBlur:
             of ``1 - prob``.
         aniso_factor: a tuple or an array to apply the anisotropy, must
             match the dimension of the input.
+
     """
 
     def __init__(
@@ -518,6 +520,7 @@ class RandomBlurring:  # Warning: This operates in-place!
 
 class AdditiveGaussianNoise:
     """Adds random gaussian noise to the input.
+
         Args:
             sigma: Sigma parameter of the gaussian distribution to draw from
             channels: If ``channels`` is ``None``, the noise is applied to
@@ -527,6 +530,7 @@ class AdditiveGaussianNoise:
             prob: probability (between 0 and 1) with which to perform this
                 augmentation. The input is returned unmodified with a probability
                 of ``1 - prob``.
+
     """
 
     def __init__(
@@ -625,48 +629,44 @@ class ElasticTransform:
     Based on https://gist.github.com/fmder/e28813c1e8721830ff9c
 
 
-    Elastic deformation of images as described in [Simard2003]_.
-    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
-       Convolutional Neural Networks applied to Visual Document Analysis", in
-       Proc. of the International Conference on Document Analysis and
-       Recognition, 2003.
+    Elastic deformation of images as described in Simard, 2003
+    (DOI 10.1109/ICDAR.2003.1227801)
 
-        Args:
-            sigma: Sigma parameter of the gaussian smoothing performed on the
-                random displacement field. High ``sigma`` values (> 4) lead
-                to less randomness and more spatial consistency.
-                Lower values
-            alpha: Factor by which all random displacements are multiplied.
-                Each local displacement is drawn from the range
-                ``[-alpha, alpha]``, so e.g. for ``alpha=1`` you won't see
-                much of an effect.
-            channels: If ``channels`` is ``None``, the change is applied to
-                all channels of the input tensor.
-                If ``channels`` is a ``Sequence[int]``, change is only applied
-                to the specified channels.
-            prob: probability (between 0 and 1) with which to perform this
-                augmentation. The input is returned unmodified with a probability
-                of ``1 - prob``
-            target_discrete_ix: list
-                List of target channels that contain discrete values.
-                By default (``None``), every channel is is seen as discrete (this is
-                generally the case for classification tasks).
-                This information is used to decide what kind of interpolation should
-                be used for reading target data:
+    Args:
+        sigma: Sigma parameter of the gaussian smoothing performed on the
+            random displacement field. High ``sigma`` values (> 4) lead
+            to less randomness and more spatial consistency.
+            Lower values
+        alpha: Factor by which all random displacements are multiplied.
+            Each local displacement is drawn from the range
+            ``[-alpha, alpha]``, so e.g. for ``alpha=1`` you won't see
+            much of an effect.
+        channels: If ``channels`` is ``None``, the change is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, change is only applied
+            to the specified channels.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``
+        target_discrete_ix: list
+            List of target channels that contain discrete values.
+            By default (``None``), every channel is is seen as discrete (this is
+            generally the case for classification tasks).
+            This information is used to decide what kind of interpolation should
+            be used for reading target data:
 
-                    - discrete targets are obtained by nearest-neighbor interpolation
-                    - non-discrete (continuous) targets are linearly interpolated.
-            aniso_factor: Factor by which to divide the deformation strength in the
-                z axis. E.g. if the data has half resolution in the z dimension, set
-                ``aniso_factor = 2``. By default it is ``1``, so every spatial
-                dimension is treated equally.
-            draw_debug_grid: If ``True``, draw a 16-spaced grid into the image to
-                visualize deformations. This is only for debugging purposes and
-                should never be enabled during training.
+                - discrete targets are obtained by nearest-neighbor interpolation
+                - non-discrete (continuous) targets are linearly interpolated.
+        aniso_factor: Factor by which to divide the deformation strength in the
+            z axis. E.g. if the data has half resolution in the z dimension, set
+            ``aniso_factor = 2``. By default it is ``1``, so every spatial
+            dimension is treated equally.
+        draw_debug_grid: If ``True``, draw a 16-spaced grid into the image to
+            visualize deformations. This is only for debugging purposes and
+            should never be enabled during training.
 
-        The input image should be of dimensions (C, H, W) or (C, D, H, W).
-        C must be included.
-
+    The input image should be of dimensions (C, H, W) or (C, D, H, W).
+    C must be included.
     """
 
     def __init__(
@@ -828,6 +828,7 @@ class RandomFlip:
     Args:
         ndim_spatial: Number of spatial dimension in input, e.g.
             ``ndim_spatial=2`` for input shape (N, C, H, W)
+
     """
     def __init__(
             self,

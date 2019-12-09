@@ -19,13 +19,14 @@ which implements (2D) U-Net with user-defined network depth
 and a few other improvements of the original architecture.
 
 Major differences of this version from Huang's code:
+
 - Operates on 3D image data (5D tensors) instead of 2D data
 - Uses 3D convolution, 3D pooling etc. by default
 - planar_blocks architecture parameter for mixed 2D/3D convnets
   (see UNet class docstring for details)
 - Improved tests (see the bottom of the file)
 - Cleaned up parameter/variable names and formatting, changed default params
-- Updated for PyTorch 1.0.1 and Python 3.6 (earlier versions unsupported)
+- Updated for PyTorch 1.3 and Python 3.6 (earlier versions unsupported)
 - (Optional DEBUG mode for optional printing of debug information)
 - Extended documentation
 """
@@ -466,8 +467,8 @@ class UNet(nn.Module):
               contextual information will be available for the network,
               enhancing the effective visual receptive field.
               (n + 1 -> receptive field is approximately doubled in each
-                  dimension, except in planar blocks, in which it is only
-                  doubled in the H and W image dimensions)
+              dimension, except in planar blocks, in which it is only
+              doubled in the H and W image dimensions)
 
             **Important note**: Always make sure that the spatial shape of
             your input is divisible by the number of blocks, because
@@ -534,6 +535,7 @@ class UNet(nn.Module):
             but it delivers better results this way
             (see https://redd.it/67gonq).
             Choices:
+
             - 'group' for group normalization (G=8)
             - 'group<G>' for group normalization with <G> groups
               (e.g. 'group16') for G=16

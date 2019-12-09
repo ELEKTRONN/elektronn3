@@ -51,8 +51,8 @@ def tiled_apply(
     Each tile of the output results from applying a callable ``func`` on an
     input tile which is sliced from a region that has the same center but a
     larger extent (overlapping with other input regions in the vicinity).
-    Input tensors are also padded with zeros to at the boundaries according to
-    the `overlap_shape``to enable consistent tile shapes.
+    Input tensors are also padded with zeros at the boundaries according to
+    the ``overlap_shape`` to enable consistent tile shapes.
 
     The overlapping behavior prevents imprecisions of CNNs (and image
     processing algorithms in general) that appear near the boundaries of

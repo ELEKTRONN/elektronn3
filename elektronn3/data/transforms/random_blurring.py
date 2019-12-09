@@ -54,7 +54,8 @@ class ScalarScheduler(object):
         """
         Initializes all necessary variables and checks that
         the initial value is less than the maximum one and
-        growth type is chosen correctly
+        growth type is chosen correctly.
+
         Parameters
         ----------
         value - a scalar value at the beginning of a scheduled process
@@ -168,6 +169,9 @@ def check_random_data_blurring_config(patch_shape: list,
     function calls. The function raises exceptions if a conflict is
     detected. Use this function before a training procedure to be sure the config
     fulfills the requirements posed by the apply_random_blurring function
+
+    Parameters
+    ----------
 
     patch_shape - shape of input samples
     probability - probability of applying the random blurring algorithm
