@@ -1,23 +1,24 @@
 # Requirements for building the sphinx documentation.
+# Commented-out requirements are mocked during the doc build.
 
 # Small CPU-only package:
-https://download.pytorch.org/whl/cpu/torch-1.2.0%2Bcpu-cp37-cp37m-manylinux1_x86_64.whl
+#https://download.pytorch.org/whl/cpu/torch-1.2.0%2Bcpu-cp37-cp37m-manylinux1_x86_64.whl
 
 numpy
 scipy
-h5py
+#h5py
 matplotlib
-seaborn
-numba
-scikit-learn
-scikit-image
-ipython
+#seaborn
+#numba
+#scikit-learn
+#scikit-image
+#ipython
 tqdm
 pillow
 colorlog
-tensorboardX
+#tensorboardX
 
 # For building documentation:
-sphinx>=2.0
+sphinx>=2.2
 sphinx_rtd_theme
 sphinx-autodoc-typehints
