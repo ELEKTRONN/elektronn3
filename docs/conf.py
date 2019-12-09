@@ -52,7 +52,7 @@ autodoc_mock_imports = [
     'torchvision',
     'numba',
     'seaborn',
-    'ipython',
+    'IPython',
     'imageio',
     'sklearn',
     'skimage',
