@@ -58,6 +58,10 @@ autodoc_mock_imports = [
     'skimage',
     'h5py',
     'tensorboardX',
+    'colorlog',
+    # Optional requirements
+    'albumentations',
+    'receptivefield',
 ]
 
 
