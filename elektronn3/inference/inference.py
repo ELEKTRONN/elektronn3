@@ -376,7 +376,7 @@ class Predictor:
         if tile_shape is not None:
             tile_shape = np.array(tile_shape)
         self.tile_shape = tile_shape
-        if overlap_shape is not None and offset is not None:
+        if (overlap_shape is not None or np.any(overlap_shape)) and (offset is not None or np.any(offset)):
             raise ValueError(
                 f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
                 'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
