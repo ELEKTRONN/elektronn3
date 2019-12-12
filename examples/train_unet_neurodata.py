@@ -257,17 +257,20 @@ else:
     if lr_sched_state_dict is not None:
         lr_sched.load_state_dict(lr_sched_state_dict)
 
-# All these metrics assume a binary classification problem. If you have
-#  non-binary targets, remember to adapt the metrics!
-# TODO: Default to mean metrics instead of binary versions?
-valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
+# Validation metrics
+valid_metrics = {  # mean metrics
+    'val_accuracy_mean': metrics.Accuracy(),
+    'val_precision_mean': metrics.Precision(),
+    'val_recall_mean': metrics.Recall(),
+    'val_DSC_mean': metrics.DSC(),
+    'val_IoU_mean': metrics.IoU(),
 }
-
+if train_dataset.num_classes > 2:
+    # Add separate per-class accuracy metrics only if there are more than 2 classes
+    valid_metrics.update({
+        f'val_IoU_c{i}': metrics.Accuracy(i)
+        for i in range(train_dataset.num_classes)
+    })
 
 crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
