@@ -594,7 +594,7 @@ class Predictor:
             else:
                 orig_shape = inp.shape
                 padded_shape = np.array(inp.shape)
-                padded_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+                padded_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
                 padded_inp = np.zeros(padded_shape)
                 # Define the relevant region (that is: without the padding that was just added)
                 relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
