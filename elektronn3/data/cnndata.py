@@ -129,9 +129,6 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-        out_channels: The total number of different target classes that exist
-            in the data set. Setting this is optional, but some features might
-            only work if this is specified.
         in_memory: If ``True``, all data set files are immediately loaded
             into host memory and are permanently kept there as numpy arrays.
             If this is disabled (default), file contents are always read from
@@ -155,7 +152,6 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
-            out_channels: Optional[int] = None,
             in_memory: bool = False,
             cube_meta=_DefaultCubeMeta(),
     ):
@@ -182,7 +178,6 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
-        self.out_channels = out_channels
         self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)

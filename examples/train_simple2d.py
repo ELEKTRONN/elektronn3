@@ -73,7 +73,9 @@ else:
 
 print(f'Running on device: {device}')
 
+out_channels = 2
 model = UNet(
+    out_channels=out_channels,
     n_blocks=4,
     start_filts=32,
     activation='relu',
@@ -114,9 +116,9 @@ valid_transform = transforms.Compose(common_transforms + [
 ])
 # Specify data set
 train_dataset = SimpleNeuroData2d(train=True, transform=train_transform,
-                                  out_channels=2)
+                                  out_channels=out_channels)
 valid_dataset = SimpleNeuroData2d(train=False, transform=valid_transform,
-                                  out_channels=2)
+                                  out_channels=out_channels)
 
 # Set up optimization
 optimizer = optim.Adam(
@@ -153,6 +155,7 @@ trainer = Trainer(
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched},
     valid_metrics=valid_metrics,
+    out_channels=out_channels,
 )
 
 # Archiving training script, src folder, env info
