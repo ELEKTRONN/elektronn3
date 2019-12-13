@@ -41,6 +41,7 @@ from typing import Sequence, Union, Tuple
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
+from torch.nn import functional as F
 
 
 def get_conv(dim=3):
@@ -304,7 +305,8 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same'):
+                 activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
+                 attention=False):
         super().__init__()
 
         self.in_channels = in_channels
@@ -341,6 +343,12 @@ class UpConv(nn.Module):
             self.norm0 = nn.Identity()
             self.norm1 = nn.Identity()
         self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
+        if attention:
+            self.attention = GridAttention(
+                in_channels=in_channels // 2, gating_channels=in_channels, dim=dim
+            )
+        else:
+            self.attention = nn.Identity()
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -348,14 +356,16 @@ class UpConv(nn.Module):
             enc: Tensor from the encoder pathway
             dec: Tensor from the decoder pathway (to be upconv'd)
         """
+
         updec = self.upconv(dec)
-        crenc, upcdec = autocrop(enc, updec)
-        updec = self.norm0(upcdec)
+        enc, updec = autocrop(enc, updec)
+        genc, att = self.attention(enc, dec)
+        updec = self.norm0(updec)
         updec = self.act0(updec)
         if self.merge_mode == 'concat':
-            mrg = torch.cat((updec, crenc), 1)
+            mrg = torch.cat((updec, genc), 1)
         else:
-            mrg = updec + crenc
+            mrg = updec + genc
         y = self.conv1(mrg)
         y = self.norm1(y)
         y = self.act1(y)
@@ -404,6 +414,98 @@ class ResizeConv(nn.Module):
 
     def forward(self, x):
         return self.conv(self.upsample(x))
+
+
+class GridAttention(nn.Module):
+    """Based on https://github.com/ozan-oktay/Attention-Gated-Networks
+
+    Published in https://arxiv.org/abs/1804.03999"""
+    def __init__(self, in_channels, gating_channels, inter_channels=None, dim=3, sub_sample_factor=2):
+        super().__init__()
+
+        assert dim in [2, 3]
+
+        # Downsampling rate for the input featuremap
+        if isinstance(sub_sample_factor, tuple): self.sub_sample_factor = sub_sample_factor
+        elif isinstance(sub_sample_factor, list): self.sub_sample_factor = tuple(sub_sample_factor)
+        else: self.sub_sample_factor = tuple([sub_sample_factor]) * dim
+
+        # Default parameter set
+        self.dim = dim
+        self.sub_sample_kernel_size = self.sub_sample_factor
+
+        # Number of channels (pixel dimensions)
+        self.in_channels = in_channels
+        self.gating_channels = gating_channels
+        self.inter_channels = inter_channels
+
+        if self.inter_channels is None:
+            self.inter_channels = in_channels // 2
+            if self.inter_channels == 0:
+                self.inter_channels = 1
+
+        if dim == 3:
+            conv_nd = nn.Conv3d
+            bn = nn.BatchNorm3d
+            self.upsample_mode = 'trilinear'
+        elif dim == 2:
+            conv_nd = nn.Conv2d
+            bn = nn.BatchNorm2d
+            self.upsample_mode = 'bilinear'
+        else:
+            raise NotImplementedError
+
+        # Output transform
+        self.w = nn.Sequential(
+            conv_nd(in_channels=self.in_channels, out_channels=self.in_channels, kernel_size=1),
+            bn(self.in_channels),
+        )
+        # Theta^T * x_ij + Phi^T * gating_signal + bias
+        self.theta = conv_nd(
+            in_channels=self.in_channels, out_channels=self.inter_channels,
+            kernel_size=self.sub_sample_kernel_size, stride=self.sub_sample_factor, bias=False
+        )
+        self.phi = conv_nd(
+            in_channels=self.gating_channels, out_channels=self.inter_channels,
+            kernel_size=1, stride=1, padding=0, bias=True
+        )
+        self.psi = conv_nd(
+            in_channels=self.inter_channels, out_channels=1, kernel_size=1, stride=1, bias=True
+        )
+
+        self.init_weights()
+
+    def forward(self, x, g):
+        # theta => (b, c, t, h, w) -> (b, i_c, t, h, w) -> (b, i_c, thw)
+        # phi   => (b, g_d) -> (b, i_c)
+        theta_x = self.theta(x)
+
+        # g (b, c, t', h', w') -> phi_g (b, i_c, t', h', w')
+        #  Relu(theta_x + phi_g + bias) -> f = (b, i_c, thw) -> (b, i_c, t/s1, h/s2, w/s3)
+        phi_g = F.interpolate(self.phi(g), size=theta_x.shape[2:], mode=self.upsample_mode, align_corners=False)
+        f = F.relu(theta_x + phi_g, inplace=True)
+
+        #  psi^T * f -> (b, psi_i_c, t/s1, h/s2, w/s3)
+        sigm_psi_f = torch.sigmoid(self.psi(f))
+
+        # upsample the attentions and multiply
+        sigm_psi_f = F.interpolate(sigm_psi_f, size=x.shape[2:], mode=self.upsample_mode, align_corners=False)
+        y = sigm_psi_f.expand_as(x) * x
+        wy = self.w(y)
+
+        return wy, sigm_psi_f
+
+    def init_weights(self):
+        def weight_init(m):
+            classname = m.__class__.__name__
+            if classname.find('Conv') != -1:
+                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif classname.find('Linear') != -1:
+                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif classname.find('BatchNorm') != -1:
+                nn.init.normal_(m.weight.data, 1.0, 0.02)
+                nn.init.constant_(m.bias.data, 0.0)
+        self.apply(weight_init)
 
 
 # TODO: Pre-calculate output sizes when using valid convolutions
@@ -543,6 +645,9 @@ class UNet(nn.Module):
             - 'instance' for instance normalization
             - 'batch' for batch normalization
             - 'none' or ``None`` for no normalization
+        attention: If ``True``, use grid attention in the decoding pathway,
+            as proposed in https://arxiv.org/abs/1804.03999.
+            Default: ``False``.
         full_norm: If ``True`` (default), perform normalization after each
             (transposed) convolution in the network (which is what almost
             all published neural network architectures do).
@@ -618,6 +723,7 @@ class UNet(nn.Module):
             merge_mode: str = 'concat',
             planar_blocks: Sequence = (),
             batch_norm='unset',
+            attention=False,
             activation: Union[str, nn.Module] = 'relu',
             normalization: str = 'group',
             full_norm: bool = True,
@@ -674,6 +780,7 @@ class UNet(nn.Module):
         self.start_filts = start_filts
         self.n_blocks = n_blocks
         self.normalization = normalization
+        self.attention = attention
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
@@ -727,6 +834,7 @@ class UNet(nn.Module):
                 planar=planar,
                 activation=activation,
                 normalization=normalization,
+                attention=attention,
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
@@ -735,17 +843,16 @@ class UNet(nn.Module):
 
         self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
-        self.reset_params()
+        self.apply(self.weight_init)
 
     @staticmethod
     def weight_init(m):
+        if isinstance(m, GridAttention):
+            return
         if isinstance(m, (nn.Conv3d, nn.Conv2d, nn.ConvTranspose3d, nn.ConvTranspose2d)):
             nn.init.xavier_normal_(m.weight)
-            nn.init.constant_(m.bias, 0)
-
-    def reset_params(self):
-        for i, m in enumerate(self.modules()):
-            self.weight_init(m)
+            if getattr(m, 'bias') is not None:
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         sh = x.shape[2:]
