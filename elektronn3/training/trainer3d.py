@@ -156,8 +156,6 @@ class Trainer3d:
             `py:mod:`torch.optim.lr_scheduler`.
         overlay_alpha: Alpha (transparency) value for alpha-blending of
             overlay image plots.
-        enable_videos: Enables video visualizations for 3D image data
-            in tensorboard. Requires the moviepy package.
         enable_tensorboard: If ``True``, tensorboard logging/plotting is
             enabled during training.
         tensorboard_root_path: Path to the root directory under which
@@ -243,7 +241,6 @@ class Trainer3d:
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.4,
-            enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
             apply_softmax_for_prediction: bool = True,
@@ -336,13 +333,6 @@ class Trainer3d:
         self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
         self.num_classes = num_classes
-        if enable_videos:
-            try:
-                import moviepy
-            except:
-                logger.warning('moviepy is not installed. Disabling video logs.')
-                enable_videos = False
-        self.enable_videos = enable_videos
         self.tb = None  # Tensorboard handler
         if enable_tensorboard:
             if self.sample_plotting_handler is None:
@@ -451,8 +441,8 @@ class Trainer3d:
         batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, batch in batch_iter:
             inp = batch['pts']
-            feats = batch['feats']
-            target = batch['target']
+            feats = batch['features']
+            target = batch['lbs']
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = inp.to(self.device, non_blocking=True)
             dfeats = feats.to(self.device, non_blocking=True)
@@ -584,7 +574,7 @@ class Trainer3d:
         batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            inp, feats, target = batch['pts'], batch['feats'], batch['target']
+            inp, feats, target = batch['pts'], batch['features'], batch['lbs']
             dinp = inp.to(self.device, non_blocking=True)
             dfeats = feats.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
@@ -600,8 +590,9 @@ class Trainer3d:
             val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             target = target.view(-1)
+            target = target.reshape(len(target),1)
             for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(target, out, num_classes=self.num_classes))
+                stats[name].append(evaluator(target, out, self.num_classes))
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)

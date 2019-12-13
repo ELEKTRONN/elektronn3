@@ -7,11 +7,11 @@
 import os
 import torch
 import argparse
+import logging
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 import morphx.processing.clouds as clouds
-from torch import nn
 from morphx.data.torchset import TorchSet
 from elektronn3.models.convpoint import SegSmall, SegBig
 from elektronn3.training import Trainer3d, Backup
@@ -23,6 +23,7 @@ from elektronn3.training import metrics
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--na', type=str, required=True, help='Experiment name')
 parser.add_argument('--tp', type=str, required=True, help='Train path')
+parser.add_argument('--vp', type=str, required=True, help='Validation path')
 parser.add_argument('--sr', type=str, required=True, help='Save root')
 parser.add_argument('--bs', type=int, default=16, help='Batch size')
 parser.add_argument('--sp', type=int, default=1000, help='Number of sample points')
@@ -37,6 +38,13 @@ args = parser.parse_args()
 # SET UP ENVIRONMENT #
 
 use_cuda = not args.co
+if use_cuda:
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+
+logger = logging.getLogger('elektronn3log')
+logger.info(f'Running on device: {device}')
 
 # define parameters
 name = args.na
@@ -50,49 +58,47 @@ lr_stepsize = 1000
 lr_dec = 0.995
 max_steps = 500000
 
-if use_cuda:
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
-
-print(f'Running on device: {device}')
-
 # set paths
 save_root = os.path.expanduser(args.sr)
 train_path = os.path.expanduser(args.tp)
+val_path = os.path.expanduser(args.vp)
 
 
 # CREATE NETWORK AND PREPARE DATA SET#
 
 input_channels = 1
 if args.big:
-    model = SegBig(input_channels, num_classes)
+    model = SegBig(input_channels, num_classes).to(device)
 else:
-    model = SegSmall(input_channels, num_classes)
-
-if use_cuda:
-    if torch.cuda.device_count() > 1:
-        print("Let's use", torch.cuda.device_count(), "GPUs!")
-        batch_size = batch_size * torch.cuda.device_count()
-        model = nn.DataParallel(model)
-    model.to(device)
+    model = SegSmall(input_channels, num_classes).to(device)
 
 # Transformations to be applied to samples before feeding them to the network
 train_transform = clouds.Compose([clouds.RandomRotate(), clouds.Center()])
+val_transform = clouds.Center()
 
 train_ds = TorchSet(train_path, radius, npoints, train_transform,
+                    class_num=num_classes,
+                    elektronn3=True)
+
+valid_ds = TorchSet(val_path, radius, npoints, val_transform,
                     class_num=num_classes,
                     elektronn3=True)
 
 # PREPARE AND START TRAINING #
 
 # set up optimization
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
+optimizer = torch.optim.Adam(model.parameters(),
+                             weight_decay=0.5e-4,
+                             lr=lr,
+                             amsgrad=True)
+lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 
-criterion = torch.nn.CrossEntropyLoss()
-if use_cuda:
-    criterion.cuda()
+valid_metrics = {
+    'val_accuracy': metrics.accuracy,
+    'val_precision': metrics.precision,
+}
+
+criterion = torch.nn.CrossEntropyLoss().to(device)
 
 # Create trainer
 trainer = Trainer3d(
@@ -101,11 +107,14 @@ trainer = Trainer3d(
     optimizer=optimizer,
     device=device,
     train_dataset=train_ds,
+    valid_dataset=valid_ds,
     batchsize=batch_size,
     num_workers=1,
     save_root=save_root,
     exp_name=name,
-    schedulers={"lr": scheduler},
+    schedulers={"lr": lr_sched},
+    valid_metrics=valid_metrics,
+    num_classes=num_classes
 )
 
 # Archiving training script, src folder, env info

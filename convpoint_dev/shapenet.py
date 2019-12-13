@@ -14,7 +14,7 @@ from datetime import datetime
 from tqdm import tqdm
 from sklearn.metrics import confusion_matrix
 from sklearn.neighbors import BallTree
-from elektronn3.models.convpoint import ConvPoint as Net
+from elektronn3.models.convpoint import SegSmall as Net
 
 
 class PartNormalDataset(torch.utils.data.Dataset):

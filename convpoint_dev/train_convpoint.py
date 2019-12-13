@@ -12,9 +12,9 @@ import torch.nn.functional as func
 import numpy as np
 import convpoint_dev.metrics as metrics
 from morphx.classes.pointcloud import PointCloud
-from morphx.processing import clouds, analyse
+from morphx.processing import clouds
 from sklearn.metrics import confusion_matrix
-from elektronn3.models.convpoint import ConvPoint
+from elektronn3.models.convpoint import SegSmall, SegBig
 from elektronn3.training.trainer import Backup
 from morphx.data.torchset import TorchSet
 from tqdm import tqdm
@@ -31,6 +31,7 @@ parser.add_argument('--sp', type=int, default=1000, help='Number of sample point
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=2, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
+parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 
 args = parser.parse_args()
 
@@ -46,9 +47,12 @@ else:
 # CREATE NETWORK #
 
 input_channels = 1
-# dendrite, axon, soma, bouton, terminal
 output_channels = args.cl
-model = ConvPoint(input_channels, output_channels).to(device)
+
+if args.big:
+    model = SegBig(input_channels, output_channels).to(device)
+else:
+    model = SegSmall(input_channels, output_channels).to(device)
 
 if use_cuda:
     model.cuda()
@@ -74,6 +78,9 @@ else:
 train_examples = folder + 'train_examples/'
 os.makedirs(train_examples)
 
+print(folder)
+print(train_path)
+
 logs = open(folder + "log.txt", "a")
 
 logs.write("Name: " + name + '\n')
@@ -95,6 +102,7 @@ train_transform = clouds.Compose([clouds.RandomRotate(),
                                   clouds.RandomVariation(limits=(-10, 10)),
                                   clouds.Center()])
 
+# create dataset with filter for axon, bouton and terminal
 ds = TorchSet(train_path, radius, npoints, train_transform, class_num=n_classes)
 train_loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=1)
 
@@ -126,7 +134,7 @@ for epoch in range(epochs):
 
         loss = 0
         for i in range(pts.size(0)):
-            loss = loss + func.cross_entropy(outputs[i], lbs[i], weight=t_weights)
+            loss = loss + func.cross_entropy(outputs[i], lbs[i])
 
         loss.backward()
         optimizer.step()
@@ -143,11 +151,11 @@ for epoch in range(epochs):
         t.set_postfix(OA=oa, AA=aa)
 
         # save random sample results for later visualization
-        if random.random() > 0.7:
+        if random.random() > 0.9:
             results = []
             for i in range(pts.size(0)):
                 orig = PointCloud(pts[i].cpu().numpy(), labels=target_np[i])
-                var = analyse.get_variation(orig)
+                var = clouds.get_variation(orig)
                 # don't save if sample has only one label
                 if max(var) == 1:
                     continue

@@ -13,7 +13,7 @@ import convpoint_dev.metrics as metrics
 import morphx.processing.clouds as clouds
 from morphx.classes.pointcloud import PointCloud
 from sklearn.metrics import confusion_matrix
-from elektronn3.models.convpoint import ConvPoint
+from elektronn3.models.convpoint import SegSmall, SegBig
 from morphx.data.torchset import TorchSet
 from tqdm import tqdm
 
@@ -23,12 +23,13 @@ parser = argparse.ArgumentParser(description='Validate a network.')
 parser.add_argument('--na', type=str, required=True, help='Experiment name')
 parser.add_argument('--vp', type=str, required=True, help='Validation path')
 parser.add_argument('--sr', type=str, required=True, help='Save root')
-parser.add_argument('--ep', type=int, default=200, help='Number of epochs')
+parser.add_argument('--sd', type=str, required=True, help='State dict name')
 parser.add_argument('--bs', type=int, default=16, help='Batch size')
 parser.add_argument('--sp', type=int, default=1000, help='Number of sample points')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=2, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
+parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 
 args = parser.parse_args()
 
@@ -43,7 +44,6 @@ else:
 
 # define parameters
 name = args.na
-epochs = args.ep
 batch_size = args.bs
 npoints = args.sp
 radius = args.ra
@@ -71,8 +71,14 @@ logs.flush()
 input_channels = 1
 # dendrite, axon, soma, bouton, terminal
 output_channels = args.cl
-model = ConvPoint(input_channels, output_channels).to(device)
-model.load_state_dict(torch.load(os.path.join(folder, "state_dict.pth")))
+
+if args.big:
+    model = SegBig(input_channels, output_channels).to(device)
+else:
+    model = SegSmall(input_channels, output_channels).to(device)
+
+full = torch.load(os.path.join(folder, args.sd))
+model.load_state_dict(full['model_state_dict'])
 
 if use_cuda:
     model.cuda()
