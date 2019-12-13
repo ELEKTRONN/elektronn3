@@ -233,6 +233,7 @@ inference_kwargs = {
     'tile_shape': (32, 64, 64),
     'overlap_shape': (32, 64, 64),
     'offset': None,
+    'apply_softmax': True,
 }
 
 optimizer = optim.SGD(

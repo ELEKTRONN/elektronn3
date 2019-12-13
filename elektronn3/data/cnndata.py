@@ -448,7 +448,7 @@ class PatchCreator(data.Dataset):
 def get_preview_batch(
         h5data: Tuple[str, str],
         preview_shape: Optional[Tuple[int, ...]] = None,
-        transform: Callable = transforms.Identity(),
+        transform: Optional[Callable] = None,
         in_memory: bool = False
 ) -> torch.Tensor:
     fname, key = h5data
@@ -476,7 +476,8 @@ def get_preview_batch(
     inp_np = slice_3d(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
     if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
         inp_np = inp_np[:, None]  # Add missing C dim
-    inp_np, _ = transform(inp_np, None)
+    if transform is not None:
+        inp_np, _ = transform(inp_np, None)
     inp = torch.from_numpy(inp_np)
     return inp
 
