@@ -256,22 +256,11 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
+        model.to(device)
+
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
-        try:
-            model.to(device)
-        except RuntimeError as exc:
-            if isinstance(model, torch.jit.ScriptModule):
-                # "RuntimeError: to is not supported on TracedModules"
-                # But .cuda() works for some reason. Using this messy
-                # workaround in the hope that we can drop it soon.
-                # TODO: Remove this when ScriptModule.to() is supported
-                # See https://github.com/pytorch/pytorch/issues/7354
-                if 'cuda' in str(self.device):  # (Ignoring device number!)
-                    model.cuda()
-            else:
-                raise exc
         self.model = model
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
