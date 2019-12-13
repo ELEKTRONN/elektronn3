@@ -78,7 +78,7 @@ if __name__ == '__main__':
         'aniso_factor': aniso_factor,
         'patch_shape': (44, 88, 88),
         # 'offset': (8, 20, 20),
-        'num_classes': 2,
+        'out_channels': 2,
         # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
     }
     norm_mean = (155.291411,)
@@ -106,11 +106,11 @@ if __name__ == '__main__':
         'val_DSC_mean': metrics.DSC(),
         'val_IoU_mean': metrics.IoU(),
     }
-    if valid_dataset.num_classes > 2:
+    if valid_dataset.out_channels > 2:
         # Add separate per-class accuracy metrics only if there are more than 2 classes
         valid_metrics.update({
             f'val_IoU_c{i}': metrics.Accuracy(i)
-            for i in range(valid_dataset.num_classes)
+            for i in range(valid_dataset.out_channels)
         })
 
     print('Loading model...')

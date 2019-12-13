@@ -180,13 +180,13 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
-        num_classes: Optionally specifies the total number of different target
+        out_channels: Optionally specifies the total number of different target
             classes for classification tasks. If this is not set manually,
             the ``Trainer`` checks if the ``train_dataset`` provides this
-            value. If available, ``self.num_classes`` is set to
-            ``self.train_dataset.num_classes``. Otherwise, it is set to
+            value. If available, ``self.out_channels`` is set to
+            ``self.train_dataset.out_channels``. Otherwise, it is set to
             ``None``.
-            The ``num_classes`` attribute is used for plotting purposes and is
+            The ``out_channels`` attribute is used for plotting purposes and is
             not strictly required for training.
         sample_plotting_handler: Function that receives training and
             validation samples and is responsible for visualizing them by
@@ -215,7 +215,7 @@ class Trainer:
     valid_loader: torch.utils.data.DataLoader
     exp_name: str
     save_path: str  # Full path to where training files are stored
-    num_classes: Optional[int]  # Number of different target classes in the train_dataset
+    out_channels: Optional[int]  # Number of channels of the network outputs
 
     def __init__(
             self,
@@ -243,7 +243,7 @@ class Trainer:
             tensorboard_root_path: Optional[str] = None,
             ignore_errors: bool = False,
             ipython_shell: bool = False,
-            num_classes: Optional[int] = None,
+            out_channels: Optional[int] = None,
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
@@ -331,7 +331,7 @@ class Trainer:
         self.__lr_closetozero_alreadytriggered = False  # Used in periodic scheduler handling
         self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         if enable_videos:
             try:
                 import moviepy
@@ -818,9 +818,9 @@ class Trainer:
             inp: np.ndarray,
             inference_kwargs: Dict[str, Any],
     ) -> torch.Tensor:
-        if self.num_classes is None:
-            raise RuntimeError('Can\'t do preview prediction if Trainer.num_classes is not set.')
-        out_shape = (self.num_classes, *inp.shape[2:])
+        if self.out_channels is None:
+            raise RuntimeError('Can\'t do preview prediction if Trainer.out_channels is not set.')
+        out_shape = (self.out_channels, *inp.shape[2:])
         predictor = Predictor(
             model=self.model,
             device=self.device,

@@ -114,9 +114,9 @@ valid_transform = transforms.Compose(common_transforms + [
 ])
 # Specify data set
 train_dataset = SimpleNeuroData2d(train=True, transform=train_transform,
-                                  num_classes=2)
+                                  out_channels=2)
 valid_dataset = SimpleNeuroData2d(train=False, transform=valid_transform,
-                                  num_classes=2)
+                                  out_channels=2)
 
 # Set up optimization
 optimizer = optim.Adam(

@@ -95,25 +95,25 @@ class TrainerMulti(Trainer):
 
     def _train(self, max_steps, max_runtime):
 
-        num_classes = self.num_classes
+        out_channels = self.out_channels
 
-        def _channel_metric(metric, c, num_classes=num_classes, mean=False):
+        def _channel_metric(metric, c, out_channels=out_channels, mean=False):
             """Returns an evaluator that calculates the ``metric``
             and selects its value for channel ``c``."""
 
             def evaluator(target, out):
                 #pred = metrics._argmax(out)
-                m = metric(target, out, num_classes=num_classes, ignore=num_classes - 1, mean=mean)
+                m = metric(target, out, out_channels=out_channels, ignore=out_channels - 1, mean=mean)
                 return m[c]
 
             return evaluator
 
         tr_evaluators = {**{
-            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c) for c in range(num_classes)
+            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c) for c in range(out_channels)
         }, **{
-            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c) for c in range(num_classes)
+            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c) for c in range(out_channels)
         }, **{
-            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c) for c in range(num_classes)
+            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c) for c in range(out_channels)
         }}
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
@@ -186,12 +186,12 @@ class TrainerMulti(Trainer):
                 multi_class_target = target.argmax(1) if len(target.shape) > 4 else target  # TODO
                 if self.loss_crop:
                     multi_class_target = multi_class_target[:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop]
-                acc = metrics.accuracy(multi_class_target, out_class, num_classes, mean=False).numpy()
+                acc = metrics.accuracy(multi_class_target, out_class, out_channels, mean=False).numpy()
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
 
                 # import h5py
-                # dsc5 = channel_metric(metrics.dice_coefficient, c=5, num_classes=num_classes)(multi_class_target, out_class)
+                # dsc5 = channel_metric(metrics.dice_coefficient, c=5, out_channels=out_channels)(multi_class_target, out_class)
                 # after_step = '+' if i % self.optimizer_iterations == 0 else ''
                 # with h5py.File(os.path.join(self.save_path, f'batch {self.step}{after_step} loss={float(dloss)} dsc5={dsc5}.h5'), "w") as f:
                 #     f.create_dataset('raw', data=inp.squeeze(dim=0), compression="gzip")

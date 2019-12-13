@@ -18,21 +18,21 @@ from elektronn3.data.utils import squash01
 E3_CMAP: str = os.getenv('E3_CMAP')
 
 
-def get_cmap(num_classes: int):
+def get_cmap(out_channels: int):
     if E3_CMAP is not None:
         cmname = E3_CMAP
     # Else, use defaults:
-    elif num_classes <= 10:
+    elif out_channels <= 10:
         cmname = 'tab10'
-    elif num_classes <= 20:
+    elif out_channels <= 20:
         cmname = 'tab20'
     else:
         raise RuntimeError(
             f'Default cmaps only support up to 20 colors, which are not enough to label '
-            f'{num_classes} different output channels.\nPlease set a different cmap '
+            f'{out_channels} different output channels.\nPlease set a different cmap '
             'with the E3_CMAP envvar.'
         )
-    return matplotlib.cm.get_cmap(cmname, num_classes)
+    return matplotlib.cm.get_cmap(cmname, out_channels)
 
 
 def plot_image(
@@ -40,7 +40,7 @@ def plot_image(
         overlay: Optional[np.ndarray] = None,
         overlay_alpha=0.5,
         cmap=None,
-        num_classes=None,
+        out_channels=None,
         colorbar=True,
         filename=''
 ) -> matplotlib.figure.Figure:
@@ -48,31 +48,31 @@ def plot_image(
 
     For gray-scale images, use ``cmap='gray'``.
     For label matrices (segmentation targets or class predictions),
-    specify the global number of possible classes in ``num_classes``."""
+    specify the global number of possible classes in ``out_channels``."""
 
     # Determine colormap and set discrete color values if needed.
     vmin, vmax = None, None
     ticks = None
     ticklabels = None
-    if cmap is None and num_classes is not None:
+    if cmap is None and out_channels is not None:
         # Assume label matrix with qualitative classes, no meaningful order
         if cmap is not None:
-            raise ValueError('If num_classes is not None, manually setting cmap is not supported.')
+            raise ValueError('If out_channels is not None, manually setting cmap is not supported.')
 
-        if num_classes > 20:
-            raise NotImplementedError('num_classes > 20 is not supported for plotting.')
-        cmap = get_cmap(num_classes)
+        if out_channels > 20:
+            raise NotImplementedError('out_channels > 20 is not supported for plotting.')
+        cmap = get_cmap(out_channels)
 
-        ticks = np.linspace(0.5, num_classes - 0.5, num_classes) # 0.5 for centered ticks
-        ticklabels = np.arange(num_classes)
-    if num_classes is not None:  # For label matrices
+        ticks = np.linspace(0.5, out_channels - 0.5, out_channels) # 0.5 for centered ticks
+        ticklabels = np.arange(out_channels)
+    if out_channels is not None:  # For label matrices
         # Prevent colormap normalization. If vmax is not set, the colormap
         #  is dynamically rescaled to fit between the minimum and maximum
         #  values of the image to be plotted. This could lead to misleading
         #  visualizations if the maximum value of the array to be plotted
         #  is less than the global maximum of classes.
         vmin = 0
-        vmax = num_classes
+        vmax = out_channels
 
     fig, ax = plt.subplots()
     if overlay is None:
@@ -191,13 +191,13 @@ def _tb_log_preview(
         )
     trainer.tb.add_figure(
         f'{group}/pred',
-        plot_image(pred_slice, num_classes=trainer.num_classes),
+        plot_image(pred_slice, out_channels=trainer.out_channels),
         trainer.step
     )
     inp_slice = batch2img(inp_batch)[0]
     trainer.tb.add_figure(
         f'{group}/pred_overlay',
-        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, num_classes=trainer.num_classes),
+        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels),
         global_step=trainer.step
     )
 
@@ -331,7 +331,7 @@ def _tb_log_sample_images(
     )
     trainer.tb.add_figure(
         f'{group}/target',
-        plot_image(target_slice, num_classes=trainer.num_classes, filename=name),
+        plot_image(target_slice, out_channels=trainer.out_channels, filename=name),
         global_step=trainer.step
     )
 
@@ -348,18 +348,18 @@ def _tb_log_sample_images(
         pred_slice = out_slice.argmax(0)
         trainer.tb.add_figure(
             f'{group}/pred_slice',
-            plot_image(pred_slice, num_classes=trainer.num_classes, filename=name),
+            plot_image(pred_slice, out_channels=trainer.out_channels, filename=name),
             global_step=trainer.step
         )
         if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
-                plot_image(inp_slice, overlay=target_slice, overlay_alpha=trainer.overlay_alpha, num_classes=trainer.num_classes, filename=name),
+                plot_image(inp_slice, overlay=target_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
                 global_step=trainer.step
             )
             trainer.tb.add_figure(
                 f'{group}/pred_overlay',
-                plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, num_classes=trainer.num_classes, filename=name),
+                plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
                 global_step=trainer.step
             )
     elif is_regression:

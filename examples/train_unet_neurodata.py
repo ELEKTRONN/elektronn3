@@ -192,7 +192,7 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': aniso_factor,
     'patch_shape': (44, 88, 88),
     # 'offset': (8, 20, 20),
-    'num_classes': 2,
+    'out_channels': 2,
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
 train_dataset = PatchCreator(
@@ -272,11 +272,11 @@ valid_metrics = {  # mean metrics
     'val_DSC_mean': metrics.DSC(),
     'val_IoU_mean': metrics.IoU(),
 }
-if train_dataset.num_classes > 2:
+if train_dataset.out_channels > 2:
     # Add separate per-class accuracy metrics only if there are more than 2 classes
     valid_metrics.update({
         f'val_IoU_c{i}': metrics.Accuracy(i)
-        for i in range(train_dataset.num_classes)
+        for i in range(train_dataset.out_channels)
     })
 
 crossentropy = nn.CrossEntropyLoss(weight=class_weights)
@@ -303,7 +303,7 @@ trainer = Trainer(
     preview_interval=5,
     inference_kwargs=inference_kwargs,
     # enable_videos=True,  # Uncomment to enable videos in tensorboard
-    num_classes=train_dataset.num_classes,
+    out_channels=train_dataset.out_channels,
     ipython_shell=args.ipython,
     # extra_save_steps=range(0, max_steps, 10_000),
     # mixed_precision=True,  # Enable to use Apex for mixed precision training

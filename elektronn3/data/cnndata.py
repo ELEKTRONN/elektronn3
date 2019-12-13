@@ -129,7 +129,7 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-        num_classes: The total number of different target classes that exist
+        out_channels: The total number of different target classes that exist
             in the data set. Setting this is optional, but some features might
             only work if this is specified.
         in_memory: If ``True``, all data set files are immediately loaded
@@ -155,7 +155,7 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
-            num_classes: Optional[int] = None,
+            out_channels: Optional[int] = None,
             in_memory: bool = False,
             cube_meta=_DefaultCubeMeta(),
     ):
@@ -182,7 +182,7 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
@@ -504,11 +504,11 @@ class SimpleNeuroData2d(data.Dataset):
             # offset=(0, 0, 0),
             pool=(1, 1, 1),
             transform: Callable = transforms.Identity(),
-            num_classes: Optional[int] = None,
+            out_channels: Optional[int] = None,
     ):
         super().__init__()
         self.transform = transform
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         cube_id = 0 if train else 2
         if inp_path is None:
             inp_path = expanduser(f'~/neuro_data_cdhw/raw_{cube_id}.h5')

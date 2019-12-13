@@ -454,7 +454,8 @@ class UNet(nn.Module):
         in_channels: Number of input channels
             (e.g. 1 for single-grayscale inputs, 3 for RGB images)
             Default: 1
-        out_channels: Number of output channels (number of classes).
+        out_channels: Number of output channels (in classification/semantic
+            segmentation, this is the number of different classes).
             Default: 2
         n_blocks: Number of downsampling/convolution blocks (max-pooling)
             in the encoder pathway. The decoder (upsampling/upconvolution)
