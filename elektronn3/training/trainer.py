@@ -129,7 +129,7 @@ class Trainer:
             ``model``. This is used for JIT tracing during model serialization.
         enable_save_trace: If ``True``, the model is JIT-traced with
             ``example_input`` every time it is serialized to disk.
-        batchsize: Desired batch size of training samples.
+        batch_size: Desired batch size of training samples.
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
             disabled.
@@ -234,7 +234,7 @@ class Trainer:
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
             enable_save_trace: bool = False,
-            batchsize: int = 1,  # TODO: Rename to batch_size
+            batch_size: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.4,
@@ -286,7 +286,7 @@ class Trainer:
         self.save_root = os.path.expanduser(save_root)
         self.example_input = example_input
         self.enable_save_trace = enable_save_trace
-        self.batchsize = batchsize
+        self.batch_size = batch_size
         self.num_workers = num_workers
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
@@ -355,7 +355,7 @@ class Trainer:
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
 
         self.train_loader = DataLoader(
-            self.train_dataset, batch_size=self.batchsize, shuffle=True,
+            self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
@@ -368,7 +368,7 @@ class Trainer:
         # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
-                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
+                self.valid_dataset, self.batch_size, shuffle=True, num_workers=0, pin_memory=True,
                 worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
