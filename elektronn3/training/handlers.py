@@ -335,6 +335,14 @@ def _tb_log_sample_images(
         global_step=trainer.step
     )
 
+    for key, img in images.items():
+        if key.startswith('att'):
+            trainer.tb.add_figure(
+                f'{group}/{key}',
+                plot_image(img, cmap='viridis'),
+                global_step=trainer.step
+            )
+
     # Only make pred and overlay plots in classification scenarios
     if is_classification:
         # Plot each class probmap individually

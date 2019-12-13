@@ -349,6 +349,7 @@ class UpConv(nn.Module):
             )
         else:
             self.attention = nn.Identity()
+        self.att = None  # Field to store attention mask for later analysis
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -360,6 +361,7 @@ class UpConv(nn.Module):
         updec = self.upconv(dec)
         enc, updec = autocrop(enc, updec)
         genc, att = self.attention(enc, dec)
+        self.att = att
         updec = self.norm0(updec)
         updec = self.act0(updec)
         if self.merge_mode == 'concat':

@@ -492,6 +492,7 @@ class Trainer:
                 images['inp'] = batch['inp'].numpy()
                 images['target'] = batch['target'].numpy()
                 images['out'] = dout.detach().cpu().numpy()
+                self._put_current_attention_maps_into(images)
 
             if self.terminate:
                 break
@@ -501,6 +502,14 @@ class Trainer:
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
         return stats, misc, images
+
+    def _put_current_attention_maps_into(self, images):
+        if getattr(self.model, 'attention'):
+            for i in range(len(self.model.up_convs)):
+                att = self.model.up_convs[i].att[0][0].detach().cpu().numpy()
+                if att.ndim == 3:
+                    att = att[att.shape[0] // 2]
+                images[f'att{i}'] = att
 
     def _incr_step(self, max_runtime, max_steps):
         """Increment the current training step counter"""
@@ -604,6 +613,7 @@ class Trainer:
             'out': out.numpy(),
             'target': target.numpy()
         }
+        self._put_current_attention_maps_into(images)
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
