@@ -425,7 +425,31 @@ class Trainer:
         if self.tb is not None:
             self.tb.close()  # Ensure that everything is flushed
 
+    def _train_step(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Core training step on self.device"""
+        inp = batch['inp']
+        target = batch['target']
+        # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+        dinp = inp.to(self.device, non_blocking=True)
+        dtarget = target.to(self.device, non_blocking=True)
+        # forward pass
+        dout = self.model(dinp)
+        dloss = self.criterion(dout, dtarget)
+        if torch.isnan(dloss):
+            logger.error('NaN loss detected! Aborting training.')
+            raise NaNException
+        # update step
+        self.optimizer.zero_grad()
+        if self.mixed_precision:
+            with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            dloss.backward()
+        self.optimizer.step()
+        return dloss, dout
+
     def _train(self, max_steps, max_runtime):
+        """Train for one epoch or until max_steps or max_runtime is reached"""
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
@@ -444,32 +468,9 @@ class Trainer:
             if self.step in self.extra_save_steps:
                 self._save_model(f'_step{self.step}', verbose=True)
 
-            inp = batch['inp']
+            dloss, dout = self._train_step(batch)
+
             target = batch['target']
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
-
-            # forward pass
-            dout = self.model(dinp)
-            dloss = self.criterion(dout, dtarget)
-            if torch.isnan(dloss):
-                logger.error('NaN loss detected! Aborting training.')
-                raise NaNException
-
-            # update step
-            self.optimizer.zero_grad()
-            if self.mixed_precision:
-                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                dloss.backward()
-            self.optimizer.step()
-            # End of core training loop on self.device
-
-            # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
-            out = dout.detach().cpu()  # Copy model output to host memory for metrics, visualization
-
             with torch.no_grad():
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
@@ -480,33 +481,17 @@ class Trainer:
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
             misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
-            # update schedules
-            for sched in self.schedulers.values():
-                # support ReduceLROnPlateau; doc. uses validation loss instead
-                # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
-                if "metrics" in inspect.signature(sched.step).parameters:
-                    sched.step(metrics=loss)
-                else:
-                    sched.step()
-            # Append LR of the next iteration (after sched.step()) for local LR minima detection
-            self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
-            self._handle_lr()
+            self._scheduler_step(loss)
 
-            running_vx_size += inp.numel()
+            running_vx_size += batch['inp'].numel()
 
-            self.step += 1
-            if self.step >= max_steps:
-                logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
-                self.terminate = True
-            if datetime.datetime.now() >= self.end_time:
-                logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
-                self.terminate = True
+            self._incr_step(max_runtime, max_steps)
             if i == len(self.train_loader) - 1 or self.terminate:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
-                images['inp'] = inp.numpy()
-                images['target'] = target.numpy()
-                images['out'] = out.numpy()
+                images['inp'] = batch['inp'].numpy()
+                images['target'] = batch['target'].numpy()
+                images['out'] = dout.detach().cpu().numpy()
 
             if self.terminate:
                 break
@@ -516,6 +501,29 @@ class Trainer:
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
         return stats, misc, images
+
+    def _incr_step(self, max_runtime, max_steps):
+        """Increment the current training step counter"""
+        self.step += 1
+        if self.step >= max_steps:
+            logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
+            self.terminate = True
+        if datetime.datetime.now() >= self.end_time:
+            logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
+            self.terminate = True
+
+    def _scheduler_step(self, loss):
+        """Update schedules"""
+        for sched in self.schedulers.values():
+            # support ReduceLROnPlateau; doc. uses validation loss instead
+            # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
+            if 'metrics' in inspect.signature(sched.step).parameters:
+                sched.step(metrics=loss)
+            else:
+                sched.step()
+        # Append LR of the next iteration (after sched.step()) for local LR minima detection
+        self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
+        self._handle_lr()
 
     def _handle_lr(self) -> None:
         r"""Handle quasi-periodic learning rate schedulers that lower the
