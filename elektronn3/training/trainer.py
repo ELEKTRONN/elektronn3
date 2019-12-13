@@ -133,15 +133,16 @@ class Trainer:
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
             disabled.
-        preview_tile_shape
-        preview_overlap_shape
-        preview_offset
         preview_interval: Determines how often to perform preview inference.
             Preview inference is performed every ``preview_interval`` epochs
             during training. Regardless of this value, preview predictions
             will also be performed once after epoch 1.
             (To disable preview predictions altogether, just set
             ``preview_batch = None``).
+        inference_kwargs: Additional options that are supplied to the
+            :py:class:`elektronn3.inference.Predictor` instance
+            that is used for periodic preview inference on the
+            ``preview_batch``.
         extra_save_steps: Permanent model snapshots are saved at the
             training steps specified here. E.g. with
             ``extra_save_at_steps = (0, 30, 3000)``, a snapshot is made at
@@ -168,12 +169,6 @@ class Trainer:
             ``exp_name``.
             If ``tensorboard_root_path`` is not set, tensorboard logs are
             written to ``save_path`` (next to model checkpoints, plots etc.).
-        apply_softmax_for_prediction: If ``True`` (default),
-            the softmax operation is performed on network outputs before
-            plotting them, so raw network outputs get converted into predicted
-            class probabilities.
-            Set this to ``False`` if the output of ``model`` is already a
-            softmax output or if you don't want softmax outputs at all.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -233,23 +228,19 @@ class Trainer:
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
-            preview_tile_shape: Optional[Tuple[int, ...]] = None,
-            preview_overlap_shape: Optional[Tuple[int, ...]] = None,
-            preview_offset: Optional[Tuple[int, ...]] = None,
             preview_interval: int = 5,
+            inference_kwargs: Optional[Dict[str, Any]] = None,
             extra_save_steps: Sequence[int] = (),
-            offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
             enable_save_trace: bool = False,
-            batchsize: int = 1,
+            batchsize: int = 1,  # TODO: Rename to batch_size
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.4,
             enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
-            apply_softmax_for_prediction: bool = True,
             ignore_errors: bool = False,
             ipython_shell: bool = False,
             num_classes: Optional[int] = None,
@@ -257,12 +248,13 @@ class Trainer:
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
     ):
+        inference_kwargs = {} if inference_kwargs is None else inference_kwargs
         if preview_batch is not None and (
-                preview_tile_shape is None or (
-                    preview_overlap_shape is None and preview_offset is None)):
+                'tile_shape' not in inference_kwargs or (
+                    'overlap_shape' not in inference_kwargs and 'offset' not in inference_kwargs)):
             raise ValueError(
                 'If preview_batch is set, you will also need to specify '
-                'preview_tile_shape and preview_overlap_shape or preview_offset!'
+                'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
@@ -287,19 +279,15 @@ class Trainer:
         self.valid_dataset = valid_dataset
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
-        self.preview_tile_shape = preview_tile_shape
-        self.preview_overlap_shape = preview_overlap_shape
-        self.preview_offset = preview_offset
         self.preview_interval = preview_interval
+        self.inference_kwargs = inference_kwargs
         self.extra_save_steps = extra_save_steps
-        self.offset = offset
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.example_input = example_input
         self.enable_save_trace = enable_save_trace
         self.batchsize = batchsize
         self.num_workers = num_workers
-        self.apply_softmax_for_prediction = apply_softmax_for_prediction
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
@@ -311,6 +299,10 @@ class Trainer:
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
+
+        self.inference_kwargs.setdefault('batch_size', 1)
+        self.inference_kwargs.setdefault('verbose', True)
+        self.inference_kwargs.setdefault('apply_softmax', True)
 
         if self.mixed_precision:
             from apex import amp
@@ -824,10 +816,7 @@ class Trainer:
     def _preview_inference(
             self,
             inp: np.ndarray,
-            tile_shape: Optional[Tuple[int, ...]] = None,
-            overlap_shape: Optional[Tuple[int, ...]] = None,
-            offset: Optional[Tuple[int, ...]] = None,
-            verbose: bool = True,
+            inference_kwargs: Dict[str, Any],
     ) -> torch.Tensor:
         if self.num_classes is None:
             raise RuntimeError('Can\'t do preview prediction if Trainer.num_classes is not set.')
@@ -835,13 +824,8 @@ class Trainer:
         predictor = Predictor(
             model=self.model,
             device=self.device,
-            batch_size=1,
-            tile_shape=tile_shape,
-            overlap_shape=overlap_shape,
-            offset=offset,
-            verbose=verbose,
             out_shape=out_shape,
-            apply_softmax=self.apply_softmax_for_prediction,
+            **inference_kwargs,
         )
         out = predictor.predict(inp)
         return out

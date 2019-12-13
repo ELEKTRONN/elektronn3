@@ -137,12 +137,10 @@ def _tb_log_preview(
     inp_batch = trainer.preview_batch
     out_batch = trainer._preview_inference(
         inp=inp_batch,
-        tile_shape=trainer.preview_tile_shape,
-        overlap_shape=trainer.preview_overlap_shape,
-        offset=trainer.preview_offset
+        inference_kwargs=trainer.inference_kwargs,
     )
     inp_batch = inp_batch.numpy()
-    if trainer.apply_softmax_for_prediction:
+    if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(out_batch, 1).numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
@@ -235,7 +233,7 @@ def _tb_log_sample_images(
     out_batch = images['out'][:1]
     name = images.get('fname', '')
 
-    if trainer.apply_softmax_for_prediction:
+    if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)

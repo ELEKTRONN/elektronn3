@@ -226,6 +226,13 @@ preview_batch = get_preview_batch(
     preview_shape=(32, 320, 320),
     transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
+# Options for the preview inference (see elektronn3.inference.Predictor).
+# Attention: These values are highly dependent on model and data shapes!
+inference_kwargs = {
+    'tile_shape': (32, 64, 64),
+    'overlap_shape': (32, 64, 64),
+    'offset': None,
+}
 
 optimizer = optim.SGD(
     model.parameters(),
@@ -294,15 +301,11 @@ trainer = Trainer(
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
+    inference_kwargs=inference_kwargs,
     # enable_videos=True,  # Uncomment to enable videos in tensorboard
-    offset=train_dataset.offset,
-    apply_softmax_for_prediction=True,
     num_classes=train_dataset.num_classes,
-    # TODO: Tune these:
-    preview_tile_shape=(32, 64, 64),
-    preview_overlap_shape=(32, 64, 64),
     ipython_shell=args.ipython,
-    # extra_save_steps=range(0, max_steps, 10_000)
+    # extra_save_steps=range(0, max_steps, 10_000),
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
