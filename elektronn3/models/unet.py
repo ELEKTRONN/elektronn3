@@ -348,7 +348,7 @@ class UpConv(nn.Module):
                 in_channels=in_channels // 2, gating_channels=in_channels, dim=dim
             )
         else:
-            self.attention = nn.Identity()
+            self.attention = DummyAttention()
         self.att = None  # Field to store attention mask for later analysis
 
     def forward(self, enc, dec):
@@ -508,6 +508,11 @@ class GridAttention(nn.Module):
                 nn.init.normal_(m.weight.data, 1.0, 0.02)
                 nn.init.constant_(m.bias.data, 0.0)
         self.apply(weight_init)
+
+
+class DummyAttention(nn.Module):
+    def forward(self, x, g):
+        return x, None
 
 
 # TODO: Pre-calculate output sizes when using valid convolutions
