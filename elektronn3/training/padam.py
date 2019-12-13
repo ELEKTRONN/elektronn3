@@ -11,6 +11,8 @@ import numpy as np
 
 class Padam(Optimizer):
     """Implements Partially adaptive momentum estimation (Padam) algorithm.
+
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-1)
@@ -32,7 +34,8 @@ class Padam(Optimizer):
 
     def step(self, closure=None):
         """Performs a single optimization step.
-        Arguments:
+
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """

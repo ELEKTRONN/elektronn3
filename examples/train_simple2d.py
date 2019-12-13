@@ -73,7 +73,9 @@ else:
 
 print(f'Running on device: {device}')
 
+out_channels = 2
 model = UNet(
+    out_channels=out_channels,
     n_blocks=4,
     start_filts=32,
     activation='relu',
@@ -102,7 +104,7 @@ dataset_std = (44.264744,)
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
 ]
 train_transform = transforms.Compose(common_transforms + [
     transforms.RandomCrop((128, 128)),  # Use smaller patches for training
@@ -114,9 +116,9 @@ valid_transform = transforms.Compose(common_transforms + [
 ])
 # Specify data set
 train_dataset = SimpleNeuroData2d(train=True, transform=train_transform,
-                                  num_classes=2)
+                                  out_channels=out_channels)
 valid_dataset = SimpleNeuroData2d(train=False, transform=valid_transform,
-                                  num_classes=2)
+                                  out_channels=out_channels)
 
 # Set up optimization
 optimizer = optim.Adam(
@@ -147,12 +149,13 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batchsize=batch_size,
+    batch_size=batch_size,
     num_workers=1,
     save_root=save_root,
     exp_name=args.exp_name,
     schedulers={"lr": lr_sched},
     valid_metrics=valid_metrics,
+    out_channels=out_channels,
 )
 
 # Archiving training script, src folder, env info

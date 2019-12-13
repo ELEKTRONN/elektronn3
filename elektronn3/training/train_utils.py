@@ -5,23 +5,14 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Marius Killinger, Philipp Schubert, Martin Drawitsch
 
-import signal
 import time
 import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
-from torch.utils.data.dataloader import DataLoader
-
-# TODO: Clean up
-try:
-    from torch.utils.data.dataloader import _DataLoaderIter as DataLoaderIter
-except ImportError:
-    from torch.utils.data.dataloader import DataLoaderIter
 
 from elektronn3.training import plotting
 from elektronn3 import floatX
-from elektronn3.data.utils import DelayedInterrupt
 
 
 class HistoryTracker:
@@ -217,35 +208,3 @@ def pretty_string_time(t):
     else:
         s = 't=%.0fs' % (t)
     return s
-
-
-class DelayedDataLoaderIter(DataLoaderIter):
-    def __init__(self, loader):
-        try:
-            with DelayedInterrupt([signal.SIGTERM, signal.SIGINT]):
-                super(DelayedDataLoaderIter, self).__init__(loader)
-        except KeyboardInterrupt:
-            self.shutdown = True
-            self._shutdown_workers()
-            if hasattr(self, 'workers'):
-                for w in self.workers:
-                    w.terminate()
-            raise KeyboardInterrupt
-
-    def __next__(self):
-        try:
-            with DelayedInterrupt([signal.SIGTERM, signal.SIGINT]):
-                nxt = super(DelayedDataLoaderIter, self).__next__()
-            return nxt
-        except KeyboardInterrupt:
-            self.shutdown = True
-            self._shutdown_workers()
-            if hasattr(self, 'workers'):
-                for w in self.workers:
-                    w.terminate()
-            raise KeyboardInterrupt
-
-
-class DelayedDataLoader(DataLoader):
-    def __iter__(self):
-        return DelayedDataLoaderIter(self)

@@ -9,11 +9,11 @@ __all__ = ['warp_slice', 'get_warped_coord_transform', 'WarpingOOBError']
 import itertools
 from typing import Tuple, Union, Optional, Sequence
 from functools import reduce, lru_cache
-import h5py
 import numpy as np
 import numba
+from scipy.ndimage import gaussian_filter
 from elektronn3 import floatX
-from elektronn3.data.utils import slice_h5
+from elektronn3.data.sources import DataSource, slice_3d
 
 # TODO: A major refactoring is required here:
 #  This module should not perform any data I/O itself. Instead it should provide a
@@ -295,19 +295,17 @@ class WarpingSanityError(Exception):
 
     This can happen due to random numerical inaccuracies, but it shouldn't occur
     more often than every few hundred thousand warp_slice() calls."""
-    # TODO: Can we fix these errors? It's really hard to debug them because
-    #       they appear randomly, with a chance of ~ 1 in a million.
     pass
 
 
 def warp_slice(
-        inp_src: Union[h5py.Dataset, np.ndarray],
-        patch_shape: Union[Tuple[int], np.ndarray],
+        inp_src: DataSource,
+        patch_shape: Union[Tuple[int, ...], np.ndarray],
         M: np.ndarray,
-        target_src: Optional[Union[h5py.Dataset, np.ndarray]] = None,
+        target_src: Optional[DataSource] = None,
         target_patch_shape: Optional[Union[Tuple[int], np.ndarray]] = None,
         target_discrete_ix: Optional[Sequence[int]] = None,
-        debug: bool = True  # TODO: This has some performance impact. Switch this off by default when we're sure everything works.
+        debug: bool = False
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """
     Cuts a warped slice out of the input image and out of the target_src image.
@@ -379,6 +377,8 @@ def warp_slice(
 
     # check corners
     src_corners = src_corners[:,:3]
+    lo = np.min(np.floor(src_corners), 0).astype(np.int)
+    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int)
     # compute/transform dense coords
     dest_coords = make_dest_coords(patch_shape)
     src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1], [1]])
@@ -386,6 +386,31 @@ def warp_slice(
         src_coords /= src_coords[..., 3][..., None]
     # cut patch
     src_coords = src_coords[..., :3]
+
+    # TODO: WIP code, integrate this into the warping pipeline with config options
+    # Perform elastic deformation on warped coordinates so we don't have
+    #  to interpolate twice.
+    # For more details, see elektronn3.data.transforms.ElasticTransform
+    elastic = False
+    if elastic:
+        sigma = 4
+        alpha = 40
+        aniso_factor = 2
+
+        for i in range(3):
+            # For each coordinate of dimension i, build a random displacement,
+            #  smooth it with sigma and multiply it by alpha
+            elastic_displacement = gaussian_filter(
+                np.random.rand(*patch_shape) * 2 - 1, sigma, mode='constant', cval=0
+            ) * alpha
+            # Apply anisotropy correction
+            if i == 0 and aniso_factor != 1:
+                elastic_displacement /= aniso_factor
+            # Apply deformation
+            src_coords[..., i] += elastic_displacement
+            # Clip out-of-bounds coordinates back to original cube edges to
+            #  prevent out-of-bounds reading
+            np.clip(src_coords[..., i], lo[i], hi[i] - 1, out=src_coords[..., i])
 
     if target_src is not None:
         target_patch_shape = tuple(target_patch_shape)
@@ -420,14 +445,12 @@ def warp_slice(
         if np.any(lo_targ < 0) or np.any(hi_targ >= target_src_shape - 1):
             raise WarpingOOBError("Out of bounds for target_src")
 
-    lo = np.min(np.floor(src_corners), 0).astype(np.int)
-    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int)
     if np.any(lo < 0) or np.any(hi >= inp_src_shape - 1):
         raise WarpingOOBError("Out of bounds for inp_src")
 
     # Slice and interpolate input
     # Slice to hi + 1 because interpolation potentially needs this value.
-    img_cut = slice_h5(inp_src, lo, hi + 1, dtype=floatX)
+    img_cut = slice_3d(inp_src, lo, hi + 1, dtype=floatX)
     if img_cut.ndim == 3:
         img_cut = img_cut[None]
     inp = np.zeros((n_f,) + patch_shape, dtype=floatX)
@@ -446,7 +469,7 @@ def warp_slice(
         # dtype is float as well here because of the static typing of the
         # numba-compiled map_coordinates functions
         # Slice to hi + 1 because interpolation potentially needs this value.
-        target_cut = slice_h5(target_src, lo_targ, hi_targ + 1, dtype=floatX)
+        target_cut = slice_3d(target_src, lo_targ, hi_targ + 1, dtype=floatX)
         if target_cut.ndim == 3:
             target_cut = target_cut[None]
         src_coords_target = np.ascontiguousarray(src_coords_target, dtype=floatX)

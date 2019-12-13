@@ -22,6 +22,12 @@ from tqdm import tqdm
 
 logger = logging.getLogger('elektronn3log')
 
+# Alias for type hinting
+Transform = Callable[
+    [np.ndarray, Optional[np.ndarray]],
+    Tuple[np.ndarray, Optional[np.ndarray]]
+]
+
 
 def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
     """Extend a spatial slice ([D,] H, W) to also include the non-spatial (N, C) dims."""
@@ -37,6 +43,7 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
+        argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
 ) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -44,8 +51,8 @@ def tiled_apply(
     Each tile of the output results from applying a callable ``func`` on an
     input tile which is sliced from a region that has the same center but a
     larger extent (overlapping with other input regions in the vicinity).
-    Input tensors are also padded with zeros to at the boundaries according to
-    the `overlap_shape``to enable consistent tile shapes.
+    Input tensors are also padded with zeros at the boundaries according to
+    the ``overlap_shape`` to enable consistent tile shapes.
 
     The overlapping behavior prevents imprecisions of CNNs (and image
     processing algorithms in general) that appear near the boundaries of
@@ -96,7 +103,8 @@ def tiled_apply(
             later.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
-Tensor
+        argmax_with_threshold
+
     Returns:
         Output tensor, as a torch tensor of the same shape as the input tensor.
     """
@@ -111,13 +119,19 @@ Tensor
             f'spatial inp shape {tuple(inp.shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
+    if out_shape[1] > 255 and argmax_with_threshold is not None:
+        raise NotImplementedError(
+            f'C = out_shape[1] = {out_shape[1]}, but '
+            f'argmax_with_threshold with C > 255 is not supported due to uint8 storage.'
+        )
 
     if offset is None:
         offset = np.zeros_like(tile_shape)
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out = torch.empty(out_shape, dtype=inp.dtype)
+    out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
+    out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
@@ -149,7 +163,7 @@ Tensor
     # TODO: Handle fractional inputshape-to-tile ratio
     pbar = tqdm(
         itertools.product(*tile_ranges), 'Predicting',
-        total=num_tiles, disable=not verbose
+        total=num_tiles, disable=not verbose, dynamic_ncols=True
     )
     for tile_pos in pbar:
         tile_pos = np.array(tile_pos)
@@ -183,8 +197,44 @@ Tensor
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
         out_tile = out_tile[final_crop_slice]
-        out[out_slice] = out_tile
+        # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
+        if argmax_with_threshold is not None:
+            out[out_slice] = (out_tile > argmax_with_threshold).to(out_dtype).argmax(dim=1).to(out_dtype)
+        else:
+            out[out_slice] = out_tile
+
     return out
+
+
+class FlipAugment:
+    def __init__(self, dims):
+        self.dims = tuple(np.array(dims) + 2)  # Dim offset to skip (N, C) dims
+
+    def forward(self, inp):
+        return torch.flip(inp, dims=self.dims)
+
+    def backward(self, inp):
+        return self.forward(inp)
+
+
+# TODO
+# class Rot90Augment:
+#     def __init__(self, k, dims):
+#         self.k = k
+#         self.dims = dims
+#
+#     def forward(self, inp):
+#         return torch.rot90(inp, k=self.k, dims=self.dims)
+#
+#     def backward(self, inp):
+#         return torch.rot90(inp, k=-self.k, dims=self.dims)
+
+
+DEFAULT_AUGMENTATIONS_3D = [  # Flip every dim
+    FlipAugment(dims)
+    for dims in [(0,), (1,), (0, 1), (2,), (0, 2), (1, 2), (0, 1, 2)]
+]
+DEFAULT_AUGMENTATIONS_2D = DEFAULT_AUGMENTATIONS_3D[:3]  # Limit flips to first 2 dims
 
 
 class Predictor:
@@ -243,6 +293,14 @@ class Predictor:
             If your inference fails due to shape issues, as a rule of thumb,
             try adjusting your ``overlap_shape`` so that
             ``tile_shape + 2 * overlap`` is divisible by 16 or 32.
+
+            If ``offset`` (see below) is not ``None``, ``overlap_shape``
+            can't be specified but it is configured automatically.
+        offset:  Shape of the offset by which each the output tiles are smaller
+            than the input tiles
+            on each side. This applies for networks using valid convolutions.
+            If ``offset`` is specified, ``overlap_shape`` (see above) can't
+            be specified but is configured automatically.
         out_shape: Expected shape of the output tensor.
             It doesn't just refer to spatial shape, but to the actual tensor
             shape of one sample, including the channel dimension C, but
@@ -251,17 +309,30 @@ class Predictor:
             – ``out_shape`` is merely used to pre-allocate the output tensor so
             it can be filled later.
             If you know how many channels your model output has
-            (``num_classes``, ``num_out_channels``) and if your model
+            (``out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
             yourself as follows:
 
-            >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
-            >>> out_shape = (num_out_channels, *inp.shape[2:])
+            >>> out_channels: int = ?  # E.g. for binary classification it's 2
+            >>> out_shape = (out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        transform: Transformation function to be applied to inputs before
+            performing inference. The primary use of this is for normalization.
+            Make sure to use the same normalization parameters for inference as
+            the ones that were used for training of the ``model``.
+            See :py:mod:`elektronn3.data.transforms`. for some implementations.
+            For pure input normalization you can use this template::
+
+            >>> from elektronn3.data import transforms
+            >>> # m, s are mean, std of the inputs the model was trained on
+            >>> transform = transforms.Normalize(mean=m, std=s, inplace=True)
+        augmentations: List of test-time augmentations or integer that
+            specifies the number of different flips to be performed as test-
+            time augmentations.
         strict_shapes: If ``False`` (default), force the ``output_shape`` to be
             a multiple of the ``tile_shape`` by padding the input. This allows
             for greater flexibility of the ``tile_shape`` but potentially wastes
@@ -269,6 +340,7 @@ class Predictor:
             but will later be discarded from the output tensor).
             If ``True``, incompatible shapes will result in an error.
         verbose: If ``True``, report inference speed.
+        report_inp_stats
 
     Examples:
         >>> model = nn.Sequential(
@@ -287,12 +359,16 @@ class Predictor:
             batch_size: Optional[int] = None,
             tile_shape: Optional[Tuple[int, ...]] = None,
             overlap_shape: Optional[Tuple[int, ...]] = None,
-            out_shape: Optional[Tuple[int, ...]] = None,
             offset: Optional[Tuple[int, ...]] = None,
+            out_shape: Optional[Tuple[int, ...]] = None,
             float16: bool = False,
             apply_softmax: bool = True,
+            transform: Optional[Transform] = None,
+            augmentations: Union[int, Optional[Sequence]] = None,
             strict_shapes: bool = False,
+            argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
+            report_inp_stats = False
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -303,12 +379,21 @@ class Predictor:
         if tile_shape is not None:
             tile_shape = np.array(tile_shape)
         self.tile_shape = tile_shape
+        if (overlap_shape is not None or np.any(overlap_shape)) and (offset is not None or np.any(offset)):
+            raise ValueError(
+                f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
+                'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
+                'or offset (if the output is smaller).'
+            )
         if overlap_shape is not None:
             overlap_shape = np.array(overlap_shape)
         if offset is not None:
             offset = np.array(offset)
+            # Set overlap to offset shape because IMO that's the only reasonable choice.
+            overlap_shape = offset
         self.overlap_shape = overlap_shape
         self.offset = offset
+
         if out_shape is not None:
             out_shape = np.array(out_shape)
         self.out_shape = out_shape
@@ -319,8 +404,14 @@ class Predictor:
                 'that are passed as file paths (strings).'
             )
         self.dtype = torch.float16 if float16 else torch.float32
+        self.transform = transform
+        if isinstance(augmentations, int):
+            augmentations = DEFAULT_AUGMENTATIONS_3D[:augmentations]
+        self.augmentations = augmentations
         self.strict_shapes = strict_shapes
+        self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
+        self.report_inp_stats = report_inp_stats
         if isinstance(model, str):
             if os.path.isfile(model):
                 # TorchScript serialization can be identified by checking if
@@ -356,9 +447,26 @@ class Predictor:
             self.enable_tiling = True
         self.model.eval()
 
-    def _predict(self, inp: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            return self.model(inp)
+    @torch.no_grad()
+    def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
+        dout = self.model(dinp)
+        if not self.augmentations:
+            return dout
+
+        # Else, apply test-time augmentations and take average
+        # Directly transferring to cpu after each augmented forward pass to save GPU memory
+        # TODO: Investigate if optionally keeping tensors on GPU makes sense for better speed.
+        inp = dinp.cpu()
+        out = dout.cpu()
+        outs = [out]
+        for aug in self.augmentations:
+            inp_aug = aug.forward(inp)
+            out_aug = self.model(inp_aug.to(self.device)).cpu()
+            out = aug.backward(out_aug)
+            outs.append(out)
+        outs = torch.stack(outs)
+        out = torch.mean(outs, dim=0)
+        return out
 
     def _tiled_predict(
             self,
@@ -369,8 +477,10 @@ class Predictor:
 
         Tiling is not used if ``tile_shape`` and ``overlap_shape`` are
         undefined."""
-        out_shape = (inp.shape[0], *out_shape)
         if self.enable_tiling:
+            if self.out_shape is None:
+                raise ValueError('If you use tiling, you also need to supply out_shape.')
+            out_shape = (inp.shape[0], *out_shape)
             return tiled_apply(
                 self._predict,
                 inp=inp,
@@ -378,6 +488,7 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
+                argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
@@ -416,10 +527,23 @@ class Predictor:
         Returns:
             Model output
         """
+        if self.report_inp_stats:
+            from elektronn3.data import utils
+            try:
+                print('input dist', utils.calculate_means(inp.numpy()), utils.calculate_stds(inp.numpy()))
+            except:
+                print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
+        if self.transform is not None:
+            for i in range(inp.shape[0]):  # Apply transform for each sample of the batch separately
+                inp[i], _ = self.transform(inp[i], None)  # target=None because we don't have any here
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
-        inp, out_shape, relevant_slice = self._ensure_matching_shapes(inp)
+        if self.enable_tiling:
+            inp, out_shape, relevant_slice = self._ensure_matching_shapes(inp)
+        else:
+            relevant_slice = None
+            out_shape = self.out_shape
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
         if self.device.type == 'cuda':
             inp.pin_memory()
@@ -473,7 +597,7 @@ class Predictor:
             else:
                 orig_shape = inp.shape
                 padded_shape = np.array(inp.shape)
-                padded_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+                padded_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
                 padded_inp = np.zeros(padded_shape)
                 # Define the relevant region (that is: without the padding that was just added)
                 relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
@@ -489,8 +613,9 @@ class Predictor:
                         f'Adapting out_shape {tuple(self.out_shape[1:])} to '
                         f'tile_shape {tuple(self.tile_shape)} '
                         f'by padding out_shape to {tuple(padded_out_shape[1:])}.\n'
-                        f'At least {wasted_percentage:.2f}% of total compute will be '
-                        f'wasted by this padding.'
+                        f'Suboptimal shapes will reduce execution speed.'
+                        # f'At least {wasted_percentage:.2f}% of total compute will be '
+                        # f'wasted by this padding.'
                     )
                     # TODO: Calculate exact compute waste by looking at increased tile overlaps
                     #  (the current estimation omits the (potentially high-impact) added per-tile
@@ -504,7 +629,6 @@ class Predictor:
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
         return self.predict(inp)
-
 
 
 # TODO: This can be replaced with a single model.load_state_dict(state_dict) call
