@@ -19,12 +19,12 @@ import numpy as np
 import tensorboardX
 import torch
 import torch.utils.data
+from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from elektronn3.training import handlers
 from elektronn3.training.train_utils import Timer, pretty_string_time
-from elektronn3.training.train_utils import DelayedDataLoader
 from elektronn3.training.train_utils import HistoryTracker
 
 from torch.utils import collect_env
@@ -318,10 +318,10 @@ class Trainer:
             # TODO: Make always_flush user-configurable here:
             self.tb = tensorboardX.SummaryWriter(log_dir=tb_path)
 
-        self.train_loader = DelayedDataLoader(
+        self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60
+            timeout=60 if self.num_workers > 0 else 0
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
@@ -330,9 +330,8 @@ class Trainer:
         # because the validation loader doesn't perform expensive augmentations, but just reads
         # data from hdf5s.
         if valid_dataset is not None:
-            self.valid_loader = DelayedDataLoader(
+            self.valid_loader = DataLoader(
                 self.valid_dataset, self.batchsize, num_workers=0, pin_memory=True,
-                timeout=60
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
 
