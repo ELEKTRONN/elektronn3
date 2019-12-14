@@ -435,6 +435,10 @@ class Trainer:
         # forward pass
         dout = self.model(dinp)
         dloss = self.criterion(dout, dtarget)
+        if getattr(self.model, 'deep_supervision'):
+            dsfactor = 0.2  # TODO
+            for i, dfeat in enumerate(self.model.deep_feats):
+                dloss += dsfactor * self.criterion(dfeat, dtarget)
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException

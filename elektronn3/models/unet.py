@@ -149,10 +149,10 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
     )
 
 
-def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
+def upconv2(in_channels, out_channels, kernel_size=2, mode='transpose', planar=False, dim=3):
     """Returns a learned upsampling operator depending on args."""
-    kernel_size = 2
-    stride = 2
+    kernel_size = kernel_size
+    stride = kernel_size
     if planar:
         kernel_size = planar_kernel(kernel_size)
         stride = planar_kernel(stride)
@@ -195,6 +195,15 @@ def get_activation(activation):
     else:
         # Deep copy is necessary in case of paremtrized activations
         return copy.deepcopy(activation)
+
+
+def get_interp_mode(dim):
+    if dim == 3:
+        return 'trilinear'
+    elif dim == 2:
+        return 'bilinear'
+    else:
+        raise ValueError('dim has to be 2 or 3')
 
 
 class PoolingError(Exception):
@@ -718,7 +727,7 @@ class UNet(nn.Module):
             https://arxiv.org/abs/1604.06174 for more details.
     """
 
-    __constants__ = ['down_convs', 'up_convs']
+    __constants__ = ['down_convs', 'up_convs', 'deep_supervision_convs']
 
     def __init__(
             self,
@@ -731,6 +740,7 @@ class UNet(nn.Module):
             planar_blocks: Sequence = (),
             batch_norm='unset',
             attention=False,
+            deep_supervision=True,
             activation: Union[str, nn.Module] = 'relu',
             normalization: str = 'group',
             full_norm: bool = True,
@@ -788,6 +798,7 @@ class UNet(nn.Module):
         self.n_blocks = n_blocks
         self.normalization = normalization
         self.attention = attention
+        self.deep_supervision = deep_supervision
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
@@ -805,6 +816,10 @@ class UNet(nn.Module):
         # Indices of blocks that should operate in 2D instead of 3D mode,
         # to save resources
         self.planar_blocks = planar_blocks
+
+        if self.deep_supervision:
+            self.deep_feats = []
+            self.deep_supervision_convs = nn.ModuleList()
 
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
@@ -825,6 +840,11 @@ class UNet(nn.Module):
                 conv_mode=conv_mode,
             )
             self.down_convs.append(down_conv)
+            if self.deep_supervision and i == n_blocks - 1:
+                # ks = 2 * (i + 1)
+                ks = (4, 8, 8)
+                dsupsampler = upconv2(outs, self.out_channels, kernel_size=ks, dim=dim, planar=False)
+                self.deep_supervision_convs.append(dsupsampler)
 
         # create the decoder pathway and add to a list
         # - careful! decoding only requires n_blocks-1 blocks
@@ -847,6 +867,15 @@ class UNet(nn.Module):
                 conv_mode=conv_mode,
             )
             self.up_convs.append(up_conv)
+            if self.deep_supervision and i < n_blocks - 2:
+                assert n_blocks == 4
+                # TODO: Figure out a general formula
+                if i == 0:
+                    ks = (2, 4, 4)
+                elif i == 1:
+                    ks = (1, 2, 2)
+                dsupsampler = upconv2(outs, self.out_channels, kernel_size=ks , dim=dim, planar=planar)
+                self.deep_supervision_convs.append(dsupsampler)
 
         self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
@@ -863,6 +892,8 @@ class UNet(nn.Module):
 
     def forward(self, x):
         sh = x.shape[2:]
+        if self.deep_supervision:
+            self.deep_feats.clear()
         encoder_outs = []
 
         # Encoder pathway, save outputs for merging
@@ -873,6 +904,9 @@ class UNet(nn.Module):
             else:
                 x, before_pool = module(x)
             encoder_outs.append(before_pool)
+            if self.training and self.deep_supervision and i == self.n_blocks - 1:
+                feat = self.deep_supervision_convs[0](x)
+                self.deep_feats.append(feat)
             i += 1
 
         # Decoding by UpConv and merging with saved outputs of encoder
@@ -883,6 +917,9 @@ class UNet(nn.Module):
                 x = checkpoint(module, before_pool, x)
             else:
                 x = module(before_pool, x)
+            if self.training and self.deep_supervision and i < self.n_blocks - 2:
+                feat = self.deep_supervision_convs[i + 1](x)
+                self.deep_feats.append(feat)
             i += 1
 
         # No softmax is used, so you need to apply it in the loss.
