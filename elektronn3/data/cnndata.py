@@ -199,7 +199,6 @@ class PatchCreator(data.Dataset):
 
         self.n_successful_warp = 0
         self.n_failed_warp = 0
-        self.n_read_failures = 0
         self._failed_warp_warned = False
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
@@ -231,25 +230,6 @@ class PatchCreator(data.Dataset):
                 continue
             except coord_transforms.WarpingSanityError:
                 logger.exception('Invalid coordinate values encountered while warping. Retrying...')
-                continue
-            except OSError:
-                if self.n_read_failures > self.n_successful_warp:
-                    logger.error(
-                        'Encountered more OSErrors than successful samples\n'
-                        f'(Counted {self.n_read_failures} errors.)\n'
-                        'There is probably something wrong with your HDF5 '
-                        'files. Aborting...'
-                    )
-                    raise RuntimeError
-                self.n_read_failures += 1
-                traceback.print_exc()
-                logger.warning(
-                    '\nUnhandled OSError while reading data from HDF5 file.\n'
-                    f'  input: {input_src.file.filename}\n'
-                    f'  target: {target_src.file.filename}\n'
-                    'Continuing with next sample. For details, see the '
-                    'traceback above.\n'
-                )
                 continue
             self.n_successful_warp += 1
             try:
