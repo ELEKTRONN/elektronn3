@@ -122,13 +122,15 @@ class InferenceModel(object):
         return out
 
 
-def load_model(src: str) -> nn.Module:
+def load_model(src: str, network_str='') -> nn.Module:
     """
     Load trained elektronn3 model.
 
     Args:
         src: Source path to model directory. Directory must contain training
         script and model-checkpoint.pth.
+        network_str: Specifically for choosing different architecture of U-Net. 
+                     Choose from ['unet', 'unet++', 'attention-unet']
 
     Returns:
         Trained model
@@ -138,7 +140,7 @@ def load_model(src: str) -> nn.Module:
                                    "Ill-defined trainer script."
     exec(open(train_script[0]).read(), globals())
     assert "get_model" in globals(), "'get_model' not defiend in trainer script."
-    model = get_model()
+    model = get_model(network=network_str)
     state_dict_p = glob.glob(f'{src}/*.pth')
     if len(state_dict_p) > 1:
         last_p = ["state_dict.pth" in sp for sp in state_dict_p]
