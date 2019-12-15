@@ -15,7 +15,6 @@ from torch import nn
 from morphx.data.torchset import TorchSet
 from elektronn3.models.convpoint import SegSmall, SegBig
 from elektronn3.training import Trainer3d, Backup
-from elektronn3.training import metrics
 
 
 # PARSE PARAMETERS #
@@ -27,7 +26,7 @@ parser.add_argument('--sr', type=str, required=True, help='Save root')
 parser.add_argument('--bs', type=int, default=16, help='Batch size')
 parser.add_argument('--sp', type=int, default=1000, help='Number of sample points')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
-parser.add_argument('--cl', type=int, default=2, help='Number of classes')
+parser.add_argument('--cl', type=int, default=5, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 
@@ -80,9 +79,7 @@ if use_cuda:
 # Transformations to be applied to samples before feeding them to the network
 train_transform = clouds.Compose([clouds.RandomRotate(), clouds.Center()])
 
-train_ds = TorchSet(train_path, radius, npoints, train_transform,
-                    class_num=num_classes,
-                    elektronn3=True)
+train_ds = TorchSet(train_path, radius, npoints, train_transform, class_num=num_classes)
 
 # PREPARE AND START TRAINING #
 

@@ -320,6 +320,7 @@ class Trainer3d:
                 'different combination of save_root and exp_name.'
             )
         os.makedirs(self.save_path)
+
         _change_log_file_to(f'{self.save_path}/elektronn3.log')
         logger.info(f'Writing files to save_path {self.save_path}/\n')
 
@@ -438,28 +439,25 @@ class Trainer3d:
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
 
         timer = Timer()
-        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, batch in batch_iter:
-            inp = batch['pts']
-            feats = batch['features']
-            target = batch['lbs']
+        batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
+        for pts, features, lbs in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            dinp = inp.to(self.device, non_blocking=True)
-            dfeats = feats.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dinp = pts.to(self.device, non_blocking=True)
+            dfeats = features.to(self.device, non_blocking=True)
+            dtarget = lbs.to(self.device, non_blocking=True)
 
-            # forward pass
+            ipdb.set_trace()
+
+            # dinp: (batch_size, sample_num, 3)
+            # dfeats: (batch_size, sample_num, 1)
+            # dtarget: (batch_size, sample_num)
+            # dout: (batch_size, sample_num, num_classes)
             dout = self.model(dfeats, dinp)
 
-            # dout has shape of (batch_size, point_number, classes)
-            # dtarget has shape of (batch_size, point_number)
-            # transform dout to shape (batch_size*point_number, classes) and dtarget to (batch_size*point_number)
-            # => shape conform to (N,C) and (N) instead of (N,C,d1) and (N,d1)
-            dout = dout.view(-1, 5)
-            dtarget = dtarget.view(-1)
-
-            # takes input with form (N,C) or (N,C,d1,d2,...) and target with (N) or (N,d1,d2,...)
-            dloss = self.criterion(dout, dtarget)
+            # calculate loss similar to method of aboulch (convpoint repo).
+            dloss = 0
+            for i in range(dout.size(0)):
+                dloss += self.criterion(dout[i], dtarget[i])
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException

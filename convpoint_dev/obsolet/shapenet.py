@@ -7,8 +7,8 @@ import torch.utils.data
 
 import numpy as np
 import torch.nn.functional as F
-import convpoint_dev.metrics as metrics
-import convpoint_dev.data_utils as data_utils
+import convpoint_dev.obsolet.metrics as metrics
+import convpoint_dev.obsolet.data_utils as data_utils
 
 from datetime import datetime
 from tqdm import tqdm

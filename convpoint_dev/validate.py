@@ -6,10 +6,9 @@
 
 import os
 import torch
-import pickle
 import argparse
 import numpy as np
-import convpoint_dev.metrics as metrics
+import convpoint_dev.obsolet.metrics as metrics
 import morphx.processing.clouds as clouds
 from morphx.classes.pointcloud import PointCloud
 from sklearn.metrics import confusion_matrix

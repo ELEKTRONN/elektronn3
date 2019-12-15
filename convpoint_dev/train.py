@@ -10,7 +10,7 @@ import random
 import argparse
 import torch.nn.functional as func
 import numpy as np
-import convpoint_dev.metrics as metrics
+import convpoint_dev.obsolet.metrics as metrics
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import clouds
 from sklearn.metrics import confusion_matrix
