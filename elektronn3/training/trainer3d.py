@@ -6,12 +6,12 @@
 
 import datetime
 from collections import deque
-import ipdb
 
 import gc
 import logging
 import os
 import shutil
+import random
 
 from itertools import islice
 from math import nan
@@ -35,9 +35,11 @@ from elektronn3.training.train_utils import pretty_string_time
 from elektronn3.training.train_utils import Timer, HistoryTracker
 
 from torch.utils import collect_env
-from elektronn3.training import metrics
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
+
+from morphx.classes.pointcloud import PointCloud
+from morphx.processing import clouds
 
 logger = logging.getLogger('elektronn3log')
 
@@ -321,6 +323,8 @@ class Trainer3d:
             )
         os.makedirs(self.save_path)
 
+        self.im_path = self.save_path + '/tr_examples/'
+
         _change_log_file_to(f'{self.save_path}/elektronn3.log')
         logger.info(f'Writing files to save_path {self.save_path}/\n')
 
@@ -439,14 +443,17 @@ class Trainer3d:
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
 
         timer = Timer()
-        batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
-        for pts, features, lbs in batch_iter:
+        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
+        batch_num = 0
+        for i, batch in batch_iter:
+            pts = batch['pts']
+            features = batch['features']
+            target = batch['target']
+
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
             dfeats = features.to(self.device, non_blocking=True)
-            dtarget = lbs.to(self.device, non_blocking=True)
-
-            ipdb.set_trace()
+            dtarget = target.to(self.device, non_blocking=True)
 
             # dinp: (batch_size, sample_num, 3)
             # dfeats: (batch_size, sample_num, 1)
@@ -473,6 +480,19 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
+                # save samples (approx. 1/4) of every 100th batch for visualization
+                if batch_num % 100 == 0:
+                    results = []
+                    for i in range(pts.size(0)):
+                        if random.random() > 0.75:
+                            orig = PointCloud(pts[i].cpu().numpy(), labels=target[i].cpu().numpy())
+                            pred = PointCloud(pts[i].cpu().numpy(), labels=dout[i].cpu().numpy())
+                            results.append(orig)
+                            results.append(pred)
+
+                    clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                batch_num += 1
+
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
