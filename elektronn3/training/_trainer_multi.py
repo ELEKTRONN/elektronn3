@@ -29,11 +29,11 @@ class TrainerMulti(Trainer):
 
     Not intended for general use. May move in the future."""
 
-    def __init__(self, optimizer_iterations=1, *args, **kwargs):
+    def __init__(self, optimizer_iterations=1, loss_crop=16, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.optimizer_iterations = optimizer_iterations
         assert(optimizer_iterations > 0)
-        self.loss_crop = 16 # crop sample for loss calcuation by this amount
+        self.loss_crop = loss_crop  # 16 # crop sample for loss calcuation by this amount
 
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
@@ -103,7 +103,7 @@ class TrainerMulti(Trainer):
 
             def evaluator(target, out):
                 #pred = metrics._argmax(out)
-                m = metric(target, out, out_channels=out_channels, ignore=out_channels - 1, mean=mean)
+                m = metric(target, out, num_classes=out_channels, ignore=out_channels - 1, mean=mean)
                 return m[c]
 
             return evaluator
@@ -258,6 +258,7 @@ class TrainerMulti(Trainer):
                 images['inp'] = inp.numpy()
                 images['target'] = multi_class_target.numpy()
                 images['out'] = dout.detach().cpu().numpy()
+                self._put_current_attention_maps_into(images)
 
             if self.terminate:
                 break
@@ -309,6 +310,7 @@ class TrainerMulti(Trainer):
             'out': out.numpy(),
             'target': multi_class_target.numpy()
         }
+        self._put_current_attention_maps_into(images)
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
