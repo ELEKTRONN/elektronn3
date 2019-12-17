@@ -6,6 +6,13 @@ from torch.optim.lr_scheduler import _LRScheduler
 # TODO: Delete this when it's merged and released in PyTorch.
 
 
+def SGDR(*args, **kwargs):
+    """
+    Backwards compat. wrapper.
+    """
+    return CosineAnnealingWarmRestarts(*args, **kwargs)
+
+
 class CosineAnnealingWarmRestarts(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
