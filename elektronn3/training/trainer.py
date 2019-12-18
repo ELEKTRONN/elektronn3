@@ -504,7 +504,7 @@ class Trainer:
         return stats, misc, images
 
     def _put_current_attention_maps_into(self, images):
-        if getattr(self.model, 'attention'):
+        if getattr(self.model, 'attention', None):
             for i in range(len(self.model.up_convs)):
                 att = self.model.up_convs[i].att[0][0].detach().cpu().numpy()
                 if att.ndim == 3:
