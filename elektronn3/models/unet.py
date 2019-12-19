@@ -650,7 +650,7 @@ class UNet(nn.Module):
             - 'group<G>' for group normalization with <G> groups
               (e.g. 'group16') for G=16
             - 'instance' for instance normalization
-            - 'batch' for batch normalization
+            - 'batch' for batch normalization (default)
             - 'none' or ``None`` for no normalization
         attention: If ``True``, use grid attention in the decoding pathway,
             as proposed in https://arxiv.org/abs/1804.03999.
@@ -732,7 +732,7 @@ class UNet(nn.Module):
             batch_norm='unset',
             attention=False,
             activation: Union[str, nn.Module] = 'relu',
-            normalization: str = 'group',
+            normalization: str = 'batch',
             full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
