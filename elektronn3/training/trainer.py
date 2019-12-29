@@ -699,14 +699,19 @@ class Trainer:
         except:  # No valid scheduler in use
             lr_sched_state = None
 
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'lr_sched_state_dict': lr_sched_state,
+        info = {
             'global_step': self.step,
             'epoch': self.epoch,
             'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
+            'inference_kwargs': self.inference_kwargs
+        }
+
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'lr_sched_state_dict': lr_sched_state,
+            'info': info
         }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}')
         try:
