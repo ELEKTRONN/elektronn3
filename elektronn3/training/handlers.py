@@ -170,13 +170,18 @@ def _tb_log_preview(
         # 5D tensors -> 3D images -> We can make 2D videos out of them
         # See comments in the 5D section in _tb_log_sample_images
         inp_video = squash01(inp_batch)
+        # (N, C, T=D, H, W) -> (N, T=D, C, H, W) because of add_video API
+        inp_video = np.swapaxes(inp_video, 1, 2)
         trainer.tb.add_video(
             f'{group}_vid/inp', inp_video, global_step=trainer.step
         )
         for c in range(out_batch.shape[1]):
+            outc_video = squash01(out_batch[:, c][None])  # Slice C, but keep dimensions intact
+            # (N, C=1, T=D, H, W) -> (N, T=D, C=1, H, W)
+            outc_video = np.moveaxis(outc_video, 1, 2)
             trainer.tb.add_video(
                 f'{group}_vid/out{c}',
-                squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
+                outc_video,
                 global_step=trainer.step
             )
 
@@ -299,10 +304,10 @@ def _tb_log_sample_images(
     if inp_batch.ndim == 5 and trainer.enable_videos:
         # 5D tensors -> 3D images -> We can make 2D videos out of them
         # We re-interpret the D dimension as the temporal dimension T of the video
-        #  -> (N, C, T, H, W)
+        #  -> (N, T, C, H, W)
         # Inputs and outputs need to be squashed to the (0, 1) intensity range
         #  for video rendering, otherwise they will appear as random noise.
-        # Since tensorboardX's add_video only supports (N, C, T, H, W) tensors,
+        # Since tensorboardX's add_video only supports (N, T, C, H, W) tensors,
         #  we have to add a fake C dimension to the (N, D, H, W) target tensors
         #  and replace the C dimension of output tensors by empty C dimensions
         #  to visualize each channel separately.
@@ -311,6 +316,9 @@ def _tb_log_sample_images(
         if target_video.ndim == 4:
             # TODO: This fails with 2D multi-channel targets. Handle these reliably
             target_video = target_video[:, None]
+        # (N, C, T=D, H, W) -> (N, T=D, C, H, W) because of add_video API
+        inp_video = np.swapaxes(inp_video, 1, 2)
+        target_video = np.swapaxes(target_video, 1, 2)
         trainer.tb.add_video(
             f'{group}_vid/inp', inp_video, global_step=trainer.step
         )
@@ -318,11 +326,16 @@ def _tb_log_sample_images(
             f'{group}_vid/target', target_video, global_step=trainer.step
         )
         for c in range(out_batch.shape[1]):
+            outc_video = squash01(out_batch[:, c][None])  # Slice C, but keep dimensions intact
+            # (N, C=1, T=D, H, W) -> (N, T=D, C=1, H, W)
+            outc_video = np.moveaxis(outc_video, 1, 2)
             trainer.tb.add_video(
                 f'{group}_vid/out{c}',
-                squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
+                outc_video,
                 global_step=trainer.step
             )
+        # TODO: Add output and target overlay videos (not straightforward
+        #       because the 2D overlay code currently uses matplotlib)
 
     trainer.tb.add_figure(
         f'{group}/inp',

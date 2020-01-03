@@ -161,6 +161,9 @@ class Trainer:
             overlay image plots.
         enable_videos: Enables video visualizations for 3D image data
             in tensorboard. Requires the moviepy package.
+            Warning: Videos are stored as GIFs and can get very large,
+            so only use this if you log seldomly or have a lot of storage
+            capacity.
         enable_tensorboard: If ``True``, tensorboard logging/plotting is
             enabled during training.
         tensorboard_root_path: Path to the root directory under which
