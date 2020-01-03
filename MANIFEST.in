@@ -1,0 +1,2 @@
+include versioneer.py
+include elektronn3/_version.py

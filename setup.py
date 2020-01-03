@@ -1,4 +1,5 @@
 import os
+import versioneer
 
 from setuptools import setup, find_packages
 
@@ -28,7 +29,8 @@ else:
 
 setup(
     name='elektronn3',
-    version='0.0.0',
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     description='Utilities for 3D CNNs in PyTorch',
     url='https://github.com/ELEKTRONN/elektronn3',
     author='ELEKTRONN team',
