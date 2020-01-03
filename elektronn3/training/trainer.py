@@ -230,6 +230,7 @@ class Trainer:
             preview_batch: Optional[torch.Tensor] = None,
             preview_interval: int = 5,
             inference_kwargs: Optional[Dict[str, Any]] = None,
+            hparams: Optional[Dict[str, Any]] = None,
             extra_save_steps: Sequence[int] = (),
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
@@ -293,6 +294,16 @@ class Trainer:
         self.inference_kwargs.setdefault('verbose', True)
         self.inference_kwargs.setdefault('apply_softmax', True)
 
+        if hparams is None:
+            hparams = {}
+        else:
+            for k, v in hparams.items():
+                if isinstance(v, (tuple, list)):
+                    # Convert to str because tensorboardX doesn't support
+                    # tuples and lists in add_hparams()
+                    hparams[k] = str(v)
+        self.hparams = hparams
+
         if self.mixed_precision:
             from apex import amp
             self.model, self.optimizer = amp.initialize(self.model, self.optimizer, opt_level='O1')
@@ -343,6 +354,9 @@ class Trainer:
                 os.makedirs(tb_path, exist_ok=True)
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
 
+            if self.hparams:
+                self.tb.add_hparams(hparam_dict=self.hparams, metric_dict={})
+
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
@@ -365,7 +379,6 @@ class Trainer:
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
-    # TODO: Modularize, make some general parts reusable for other trainers.
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
         After each training epoch, validation performance is measured and

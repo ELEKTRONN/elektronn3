@@ -85,6 +85,10 @@ else:
     device = torch.device('cpu')
 logger.info(f'Running on device: {device}')
 
+# You can store selected hyperparams in a dict for logging to tensorboard, e.g.
+# hparams = {'n_blocks': 4, 'start_filts': 32, 'planar_blocks': (0,)}
+hparams = {}
+
 out_channels = 2
 model = UNet(
     out_channels=out_channels,
@@ -304,6 +308,7 @@ trainer = Trainer(
     preview_batch=preview_batch,
     preview_interval=5,
     inference_kwargs=inference_kwargs,
+    hparams=hparams,
     # enable_videos=True,  # Uncomment to enable videos in tensorboard
     out_channels=out_channels,
     ipython_shell=args.ipython,
