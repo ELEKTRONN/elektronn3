@@ -8,14 +8,16 @@
     with original cell files """
 
 import os
+import math
 import glob
 import torch
+import ipdb
 import argparse
 import numpy as np
 import morphx.processing.clouds as clouds
 from morphx.classes.pointcloud import PointCloud
 from elektronn3.models.convpoint import SegSmall, SegBig
-from morphx.data.torchset import TorchSet
+from morphx.data.cloudset import CloudSet
 from tqdm import tqdm
 
 
@@ -23,12 +25,12 @@ from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description='Validate a network.')
 parser.add_argument('--na', type=str, required=True, help='Experiment name')
-parser.add_argument('--vp', type=str, required=True, help='Validation path')
+parser.add_argument('--vp', type=str, required=True, help='Path to validation data')
 parser.add_argument('--sr', type=str, required=True, help='Save root')
 parser.add_argument('--sd', type=str, required=True, help='State dict name')
 parser.add_argument('--sp', type=int, default=1000, help='Number of sample points')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
-parser.add_argument('--cl', type=int, default=2, help='Number of classes')
+parser.add_argument('--cl', type=int, default=5, help='Number of classes')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 
 args = parser.parse_args()
@@ -41,6 +43,7 @@ name = args.na
 npoints = args.sp
 radius = args.ra
 n_classes = args.cl
+batch_size = 16
 
 # set paths (full validations get saved to saved_root + name + full_validation)
 val_path = os.path.expanduser(args.vp)
@@ -69,14 +72,9 @@ model.eval()
 
 # PREPARE DATA SET #
 
-# Transformations to be applied to one half of the samples before feeding them to the network
-transform = clouds.Center()
-
-# Define two datasets, one for applying the same transformation as during training (most important: center()). The
-# transformed data gets fed into the network. The other dataset doesn't apply any transformation in order to stitch
-# together the original cell afterwards.
-t_ds = TorchSet('', radius, npoints, transform=transform, class_num=n_classes)
-ds = TorchSet('', radius, npoints, class_num=n_classes)
+# Transformations to be applied to the samples before feeding them to the network
+transform = clouds.Compose([clouds.Normalization(radius), clouds.Center()])
+ds = CloudSet('', radius, npoints, class_num=n_classes)
 
 
 # PREPARE AND START TRAINING #
@@ -86,36 +84,41 @@ for file in files:
     name = file[slashs[-1] + 1:-4]
 
     # switch cloudset to selected file
-    hc = clouds.load_gt(file)
-
-    # Switch both dataset to processing only the given cloud
-    t_ds.activate_single(hc)
+    hc = clouds.load_cloud(file)
     ds.activate_single(hc)
-
-    # define pytorch loaders for each TorchSet (cannot be defined before because they need to know the sizes of the
-    # datasets which only get set after activate_single)
-    t_loader = torch.utils.data.DataLoader(t_ds, batch_size=16, shuffle=False, num_workers=1)
-    loader = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=False, num_workers=1)
-
-    # load data from both datasets, feed transformed points to network and transfer output to untransformed points
     chunk_build = None
-    it = iter(loader)
-    for t_pts, t_features, t_lbs in tqdm(t_loader):
-        if t_pts is None:
-            continue
-        else:
-            pts, features, lbs = next(it)
-            with torch.no_grad():
-                outputs = model(t_features, t_pts)
-                output_np = outputs.cpu().detach().numpy()
-                output_np = np.argmax(output_np, axis=2).copy()
+
+    for i in tqdm(range(math.ceil(len(ds) / batch_size))):
+        t_pts = torch.zeros((batch_size, npoints, 3))
+        t_features = torch.ones((batch_size, npoints, 1))
+        cloud_arr = []
+
+        # load batch_size samples, save original sample for later evaluation, apply transformation and save samples
+        # into torch batch
+        for j in range(batch_size):
+            cloud = ds[0]
+            if cloud is not None:
+                cloud_arr.append(cloud)
+                t_cloud = PointCloud(cloud.vertices, cloud.labels)
+                transform(t_cloud)
+                t_pts[j] = torch.from_numpy(t_cloud.vertices)
+            else:
+                break
+
+        # apply model to batch of samples
+        outputs = model(t_features, t_pts)
+        output_np = outputs.cpu().detach().numpy()
+        output_np = np.argmax(output_np, axis=2).copy()
+
+        # map predictions onto original samples and merge all samples into full object
+        for j in range(batch_size):
+            if j < len(cloud_arr):
+                chunk = PointCloud(cloud_arr[j].vertices, output_np[j])
 
                 # add processed chunks incrementally to full cell
-                for i in range(t_pts.size(0)):
-                    chunk = PointCloud(pts[i], output_np[i].reshape((len(output_np[i]), 1)))
-                    if chunk_build is None:
-                        chunk_build = chunk
-                    else:
-                        chunk_build = clouds.merge_clouds(chunk_build, chunk)
+                if chunk_build is None:
+                    chunk_build = chunk
+                else:
+                    chunk_build = clouds.merge_clouds(chunk_build, chunk)
 
     clouds.save_cloud(chunk_build, val_examples, name)

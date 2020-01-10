@@ -7,6 +7,8 @@
 import os
 import torch
 import argparse
+import random
+import numpy as np
 # Don't move this stuff, it needs to be run this early to work
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
@@ -29,21 +31,28 @@ parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=5, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
+parser.add_argument('--seed', default=0, help='Random seed')
 
 args = parser.parse_args()
 
+for arg in vars(args):
+    print(arg, getattr(args, arg))
 
 # SET UP ENVIRONMENT #
 
-use_cuda = not args.co
+random_seed = args.seed
+torch.manual_seed(random_seed)
+np.random.seed(random_seed)
+random.seed(random_seed)
 
 # define parameters
+use_cuda = not args.co
 name = args.na
 batch_size = args.bs
 npoints = args.sp
 radius = args.ra
 num_classes = args.cl
-milestones = [60, 120]
+milestones = [10, 20, 40, 80, 160, 320, 640, 1280]
 lr = 1e-3
 lr_stepsize = 1000
 lr_dec = 0.995
@@ -61,7 +70,7 @@ save_root = os.path.expanduser(args.sr)
 train_path = os.path.expanduser(args.tp)
 
 
-# CREATE NETWORK AND PREPARE DATA SET#
+# CREATE NETWORK AND PREPARE DATA SET #
 
 input_channels = 1
 if args.big:
@@ -77,7 +86,10 @@ if use_cuda:
     model.to(device)
 
 # Transformations to be applied to samples before feeding them to the network
-train_transform = clouds.Compose([clouds.RandomRotate(), clouds.Center()])
+train_transform = clouds.Compose([clouds.RandomVariation((-10, 10)),
+                                  clouds.Normalization(radius),
+                                  clouds.RandomRotate(),
+                                  clouds.Center()])
 
 train_ds = TorchSet(train_path, radius, npoints, train_transform, class_num=num_classes)
 
@@ -86,6 +98,9 @@ train_ds = TorchSet(train_path, radius, npoints, train_transform, class_num=num_
 # set up optimization
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
+# scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones, gamma=0.5)
+# scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.999)
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 1000)
 
 criterion = torch.nn.CrossEntropyLoss()
 if use_cuda:

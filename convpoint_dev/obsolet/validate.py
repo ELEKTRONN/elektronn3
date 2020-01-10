@@ -26,7 +26,7 @@ parser.add_argument('--sd', type=str, required=True, help='State dict name')
 parser.add_argument('--bs', type=int, default=16, help='Batch size')
 parser.add_argument('--sp', type=int, default=1000, help='Number of sample points')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
-parser.add_argument('--cl', type=int, default=2, help='Number of classes')
+parser.add_argument('--cl', type=int, default=5, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 
@@ -85,7 +85,7 @@ if use_cuda:
 # PREPARE DATA SET #
 
 # Transformations to be applied to samples before feeding them to the network
-val_transform = clouds.Compose([clouds.Center()])
+val_transform = clouds.Compose([clouds.Normalization(radius), clouds.RandomRotate(), clouds.Center()])
 
 ds = TorchSet(val_path, radius, npoints, val_transform, class_num=n_classes)
 train_loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=1)
@@ -97,7 +97,11 @@ with torch.no_grad():
     cm = np.zeros((n_classes, n_classes))
     t = tqdm(train_loader, ncols=120)
     batch_num = 0
-    for pts, features, lbs in t:
+    for batch in t:
+        pts = batch['pts']
+        features = batch['features']
+        lbs = batch['target']
+
         features.to(device)
         pts.to(device)
         lbs.to(device)
@@ -119,7 +123,7 @@ with torch.no_grad():
             results.append(orig)
             results.append(pred)
 
-        clouds.save_cloudlist(results, val_examples, 'batch_{}.pkl'.format(batch_num))
+        clouds.save_cloudlist(results, val_examples, 'batch_{}'.format(batch_num))
 
         batch_num += 1
 

@@ -437,6 +437,10 @@ class Trainer3d:
     def _train(self, max_steps, max_runtime):
         self.model.train()
 
+        # save model manually
+        model_path = os.path.join(self.save_path, f'state_dict_self.pth')
+        torch.save(self.model.state_dict(), model_path)
+
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
@@ -461,10 +465,15 @@ class Trainer3d:
             # dout: (batch_size, sample_num, num_classes)
             dout = self.model(dfeats, dinp)
 
-            # calculate loss similar to method of aboulch (convpoint repo).
-            dloss = 0
-            for i in range(dout.size(0)):
-                dloss += self.criterion(dout[i], dtarget[i])
+            # # calculate loss similar to method of aboulch (convpoint repo).
+            # dloss = 0
+            # for i in range(dout.size(0)):
+            #     dloss += self.criterion(dout[i], dtarget[i])
+
+            dout_flat = dout.view(-1, 5)
+            dtarget_flat = dtarget.view(-1)
+            dloss = self.criterion(dout_flat, dtarget_flat)
+
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
@@ -480,18 +489,17 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                # save samples (approx. 1/4) of every 100th batch for visualization
-                if batch_num % 100 == 0:
-                    results = []
-                    for i in range(pts.size(0)):
-                        if random.random() > 0.75:
-                            orig = PointCloud(pts[i].cpu().numpy(), labels=target[i].cpu().numpy())
-                            pred = PointCloud(pts[i].cpu().numpy(), labels=dout[i].cpu().numpy())
+                # save samples of every 20th batch of every 20th epoch for visualization
+                if self.epoch % 10 == 0:
+                    if batch_num % 20 == 0:
+                        results = []
+                        for j in range(pts.size(0)):
+                            orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
+                            pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
                             results.append(orig)
                             results.append(pred)
-
-                    clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
-                batch_num += 1
+                        clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                    batch_num += 1
 
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())

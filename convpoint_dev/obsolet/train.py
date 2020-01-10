@@ -155,9 +155,9 @@ for epoch in range(epochs):
             results = []
             for i in range(pts.size(0)):
                 orig = PointCloud(pts[i].cpu().numpy(), labels=target_np[i])
-                var = clouds.get_variation(orig)
+                var = orig.class_num
                 # don't save if sample has only one label
-                if max(var) == 1:
+                if var <= 1:
                     continue
                 pred = PointCloud(pts[i].cpu().numpy(), labels=output_np[i])
                 results.append(orig)
