@@ -848,7 +848,6 @@ class Trainer:
             grad = param.grad if param.grad is not None else torch.tensor(0)
             self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
-    # TODO: Use Predictor(..., transform=...) and remove normalization from preview batch?
     def _preview_inference(
             self,
             inp: np.ndarray,

@@ -229,7 +229,6 @@ valid_dataset = None if not valid_indices else PatchCreator(
 preview_batch = get_preview_batch(
     h5data=input_h5data[valid_indices[0]],
     preview_shape=(32, 320, 320),
-    transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
 # Options for the preview inference (see elektronn3.inference.Predictor).
 # Attention: These values are highly dependent on model and data shapes!
@@ -238,6 +237,7 @@ inference_kwargs = {
     'overlap_shape': (32, 64, 64),
     'offset': None,
     'apply_softmax': True,
+    'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True),
 }
 
 optimizer = optim.SGD(
