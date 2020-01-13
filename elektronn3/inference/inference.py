@@ -532,7 +532,11 @@ class Predictor:
                 print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
         if self.transform is not None:
             for i in range(inp.shape[0]):  # Apply transform for each sample of the batch separately
-                inp[i], _ = self.transform(inp[i], None)  # target=None because we don't have any here
+                transformed, _ = self.transform(inp[i], None)  # target=None because we don't have any here
+                # transforms are expected to return np.ndarrays, so if inp is a torch.Tensor, we need to cast manually
+                if isinstance(inp, torch.Tensor):
+                    transformed = torch.as_tensor(transformed, dtype=inp.dtype)
+                inp[i] = transformed
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
