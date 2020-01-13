@@ -4,12 +4,14 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
+import pprint
 from collections import deque
 
 import gc
 import logging
 import os
 import shutil
+import zipfile
 
 from itertools import islice
 from math import nan
@@ -27,6 +29,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
+import elektronn3
 from elektronn3.training import handlers
 from elektronn3.training.swa import SWA
 from elektronn3.training.train_utils import pretty_string_time
@@ -720,7 +723,9 @@ class Trainer:
             'epoch': self.epoch,
             'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
-            'inference_kwargs': self.inference_kwargs
+            'inference_kwargs': self.inference_kwargs,
+            'elektronn3.__version__': elektronn3.__version__,
+            'env_info': collect_env.get_pretty_env_info()
         }
 
         torch.save({
@@ -730,16 +735,16 @@ class Trainer:
             'info': info
         }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}')
+        pts_model_path = f'{model_path}s'
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
             log(f'Saved model as {model_path}')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
-                model_path += 's'
                 traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
-                traced.save(model_path)
-                log(f'Saved jit-traced model as {model_path}')
+                traced.save(pts_model_path)
+                log(f'Saved jit-traced model as {pts_model_path}')
                 # Uncomment these lines if separate traces for train/eval are required:
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
@@ -749,14 +754,18 @@ class Trainer:
             # Using the file extension '.pts' to show it's a ScriptModule.
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
-                model.save(model_path)
-                log(f'Saved jitted model as {model_path}')
+                model.save(pts_model_path)
+                log(f'Saved jitted model as {pts_model_path}')
             else:
                 raise exc
         finally:
             # Reset training state to the one it had before this function call,
             # because it could have changed with the model.eval() call above.
             model.training = model_trainmode
+        if os.path.isfile(pts_model_path):
+            with zipfile.ZipFile(pts_model_path, 'a', compresslevel=zipfile.ZIP_DEFLATED) as zfile:
+                infostr = pprint.pformat(info, indent=2, width=120)
+                zfile.writestr('info.txt', infostr)
 
     def _log_basic(self, stats, misc):
         """Log to stdout and text log file"""
