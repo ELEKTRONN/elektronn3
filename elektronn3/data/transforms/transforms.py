@@ -250,6 +250,9 @@ class Normalize:
             normalized[c] = (inp[c] - self.mean[c]) / self.std[c]
         return normalized, target
 
+    def __repr__(self):
+        return f'Normalize(mean={self.mean}, std={self.std}, inplace={self.inplace})'
+
 
 # TODO: Support uniform distribution (or any distribution in general)
 class RandomBrightnessContrast:
@@ -266,7 +269,6 @@ class RandomBrightnessContrast:
             augmentation. The input is returned unmodified with a probability
             of ``1 - prob``.
     """
-
 
     def __init__(
             self,
