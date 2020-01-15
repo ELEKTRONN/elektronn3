@@ -51,7 +51,6 @@ class NaNException(RuntimeError):
 
 def _worker_init_fn(worker_id: int) -> None:
     """Sets a unique but deterministic random seed for background workers.
-
     Only sets the seed for NumPy because PyTorch and Python's own RNGs
     take care of reseeding on their own.
     See https://github.com/numpy/numpy/issues/9650."""
@@ -90,15 +89,12 @@ def _change_log_file_to(
 
 class Trainer3d:
     """ Training loop abstraction with IPython and tensorboard integration.
-
     Hitting Ctrl-C anytime during the training will drop you to the IPython
     training shell where you can access training data and make interactive
     changes.
     To continue training, hit Ctrl-D twice.
     If you want the process to terminate after leaving the shell, set
     ``self.terminate = True`` inside it and then hit Ctrl-D twice.
-
-
     Args:
         model: PyTorch model (``nn.Module``) that shall be trained.
             Please make sure that the output shape of the ``model``
@@ -437,6 +433,10 @@ class Trainer3d:
     def _train(self, max_steps, max_runtime):
         self.model.train()
 
+        # save model manually
+        model_path = os.path.join(self.save_path, f'state_dict_self.pth')
+        torch.save(self.model.state_dict(), model_path)
+
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
@@ -461,10 +461,15 @@ class Trainer3d:
             # dout: (batch_size, sample_num, num_classes)
             dout = self.model(dfeats, dinp)
 
-            # calculate loss similar to method of aboulch (convpoint repo).
-            dloss = 0
-            for i in range(dout.size(0)):
-                dloss += self.criterion(dout[i], dtarget[i])
+            # # calculate loss similar to method of aboulch (convpoint repo).
+            # dloss = 0
+            # for i in range(dout.size(0)):
+            #     dloss += self.criterion(dout[i], dtarget[i])
+
+            dout_flat = dout.view(-1, 5)
+            dtarget_flat = dtarget.view(-1)
+            dloss = self.criterion(dout_flat, dtarget_flat)
+
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
@@ -480,18 +485,17 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                # save samples (approx. 1/4) of every 100th batch for visualization
-                if batch_num % 100 == 0:
-                    results = []
-                    for i in range(pts.size(0)):
-                        if random.random() > 0.75:
-                            orig = PointCloud(pts[i].cpu().numpy(), labels=target[i].cpu().numpy())
-                            pred = PointCloud(pts[i].cpu().numpy(), labels=dout[i].cpu().numpy())
+                # save samples of every 20th batch of every 20th epoch for visualization
+                if self.epoch % 10 == 0:
+                    if batch_num % 20 == 0:
+                        results = []
+                        for j in range(pts.size(0)):
+                            orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
+                            pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
                             results.append(orig)
                             results.append(pred)
-
-                    clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
-                batch_num += 1
+                        clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                    batch_num += 1
 
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
@@ -534,19 +538,15 @@ class Trainer3d:
         r"""Handle quasi-periodic learning rate schedulers that lower the
         learning rate to local minima but then ramp it up again
         (Cosine Annealing, SGDR, Cyclical LRs etc.).
-
         Model saving is triggered when a local minimum of learning rates is
         detected. For the motivation of this behavior, see
         https://arxiv.org/abs/1704.00109. The saved models can be used to build
         an ensemble.
-
         Local minima are found by checking for the simple criterion
         :math:`\lr_{t-1}` > \lr{t} < lr{t+1}`.
-
         If an SWA (Stochastic Weight Averaging) optimizer is detected, the SWA
         algorithm is performed (see https://arxiv.org/abs/1803.05407) and the
         resulting model is also saved, marked by the "_swa" file name suffix.
-
         .. note::
             The saved SWA model performs batch norm statistics correction
             only on a limited number of batches from the ``self.train_loader``
@@ -631,9 +631,7 @@ class Trainer3d:
             val_loss=np.nan
     ) -> None:
         """Save/serialize trained model state to files.
-
         Writes the following files in the ``self.save_path``:
-
         - ``state_dicts.pth`` contains the a dict that holds the ``state_dict``
           of the trained model, the ``state_dict`` of the optimizer and
           some meta information (global step, epoch, best validation loss)
@@ -652,7 +650,6 @@ class Trainer3d:
           and ``self.enable_save_trace`` is ``True``, a ScriptModule form of the
           ``model`` will be created on demand by jit-tracing it with
           ``self.example_input``.
-
         Args:
             suffix: If defined, this string will be added before the file
                 extensions of the respective files mentioned above.
@@ -800,7 +797,6 @@ class Trainer3d:
 
     def _tb_log_histograms(self) -> None:
         """Log histograms of model parameters and their current gradients.
-
         Make sure to run this between ``backward()`` and ``zero_grad()``,
         because otherwise gradient histograms will only consist of zeros.
         """
@@ -840,11 +836,9 @@ class Trainer3d:
 class Backup:
     """ Backup class for archiving training script, src folder and environment info.
     Should be used for any future archiving needs.
-
     Args:
         script_path: The path to the training script. Eg. train_unet_neurodata.py
         save_path: The path where the information is archived.
-
     """
     def __init__(self, script_path, save_path):
         self.script_path = script_path
@@ -852,7 +846,6 @@ class Backup:
 
     def archive_backup(self):
         """Archiving the source folder, the training script and environment info.
-
         The training script is saved with the prefix "0-" to distinguish from regular scripts.
         Environment information equivalent to the output of ``python -m torch.utils.collect_env``
         is saved in a file named "env_info.txt".
@@ -879,9 +872,7 @@ def findcudatensors() -> Tuple[int, List[torch.Tensor]]:
     you can look at the returned ``tensors`` list to find out what tensors
     are currently allocated, for example
     ``print([x.shape for x in findcudatensors()[1])``.
-
     Returns a tuple of
-
     - total memory usage of found tensors in MiB
     - a list of all of those tensors, ordered by size."""
     tensors = []
