@@ -355,6 +355,7 @@ class Trainer3d:
             timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
+
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
         # fail silently and stop responding, bringing down the whole training process.
         # This issue might be related to https://github.com/pytorch/pytorch/issues/1355.
@@ -461,14 +462,14 @@ class Trainer3d:
             # dout: (batch_size, sample_num, num_classes)
             dout = self.model(dfeats, dinp)
 
-            # # calculate loss similar to method of aboulch (convpoint repo).
-            # dloss = 0
-            # for i in range(dout.size(0)):
-            #     dloss += self.criterion(dout[i], dtarget[i])
+            # calculate loss similar to method of aboulch (convpoint repo).
+            dloss = 0
+            for i in range(dout.size(0)):
+                dloss += self.criterion(dout[i], dtarget[i])
 
-            dout_flat = dout.view(-1, 5)
-            dtarget_flat = dtarget.view(-1)
-            dloss = self.criterion(dout_flat, dtarget_flat)
+            # dout_flat = dout.view(-1, 5)
+            # dtarget_flat = dtarget.view(-1)
+            # dloss = self.criterion(dout_flat, dtarget_flat)
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')

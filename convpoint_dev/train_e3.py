@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--na', type=str, default="pointcloud_TEST", help='Experiment name')
 parser.add_argument('--tp', type=str, default="/wholebrain/scratch/yliu/merger_gt_semseg_pointcloud/gt_results/", help='Train path')
 parser.add_argument('--sr', type=str, default="/wholebrain/scratch/yliu/pointcloud_train_result/", help='Save root')
-parser.add_argument('--bs', type=int, default=16, help='Batch size')
+parser.add_argument('--bs', type=int, default=10, help='Batch size')
 parser.add_argument('--sp', type=int, default=10000, help='Number of sample points')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=2, help='Number of classes')
@@ -143,6 +143,7 @@ train_ds = TorchSet(train_path, radius, npoints, train_transform, class_num=num_
 # TEST
 # test_chunked_pcl(train_ds)
 # END of TEST
+
 
 # PREPARE AND START TRAINING #
 
