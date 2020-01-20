@@ -11,7 +11,7 @@ import os
 import math
 import glob
 import torch
-import ipdb
+import time
 import argparse
 import numpy as np
 import morphx.processing.clouds as clouds
@@ -44,6 +44,7 @@ npoints = args.sp
 radius = args.ra
 n_classes = args.cl
 batch_size = 16
+device = 'cuda'
 
 # set paths (full validations get saved to saved_root + name + full_validation)
 val_path = os.path.expanduser(args.vp)
@@ -67,6 +68,7 @@ else:
 
 full = torch.load(os.path.join(folder, args.sd))
 model.load_state_dict(full['model_state_dict'])
+model.to(device)
 model.eval()
 
 
@@ -77,7 +79,9 @@ transform = clouds.Compose([clouds.Normalization(radius), clouds.Center()])
 ds = CloudSet('', radius, npoints, class_num=n_classes)
 
 
-# PREPARE AND START TRAINING #
+# PREPARE AND START VALIDATION #
+model_time = 0
+model_counter = 0
 
 for file in files:
     slashs = [pos for pos, char in enumerate(file) if char == '/']
@@ -87,6 +91,8 @@ for file in files:
     hc = clouds.load_cloud(file)
     ds.activate_single(hc)
     chunk_build = None
+
+    batch_num = 0
 
     for i in tqdm(range(math.ceil(len(ds) / batch_size))):
         t_pts = torch.zeros((batch_size, npoints, 3))
@@ -106,9 +112,26 @@ for file in files:
                 break
 
         # apply model to batch of samples
+        t_pts = t_pts.to(device, non_blocking=True)
+        t_features = t_features.to(device, non_blocking=True)
+        start = time.time()
         outputs = model(t_features, t_pts)
+        model_time += time.time() - start
+        model_counter += 1
+
         output_np = outputs.cpu().detach().numpy()
-        output_np = np.argmax(output_np, axis=2).copy()
+        output_np = np.argmax(output_np, axis=2)
+
+        if batch_num % 2 == 0:
+            results = []
+            pts = t_pts.cpu().detach().numpy()
+            for j in range(pts.size(0)):
+                orig = PointCloud(pts[j])
+                pred = PointCloud(pts[j], labels=output_np[j])
+                results.append(orig)
+                results.append(pred)
+            clouds.save_cloudlist(results, val_examples + 'val_examples/', '{}_batch_{}'.format(name, batch_num))
+        batch_num += 1
 
         # map predictions onto original samples and merge all samples into full object
         for j in range(batch_size):
@@ -122,3 +145,6 @@ for file in files:
                     chunk_build = clouds.merge_clouds(chunk_build, chunk)
 
     clouds.save_cloud(chunk_build, val_examples, name)
+
+model_time = model_time / model_counter
+print(model_time)

@@ -32,6 +32,7 @@ parser.add_argument('--cl', type=int, default=5, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 parser.add_argument('--seed', default=0, help='Random seed')
+parser.add_argument('--ana', default=0, help='Cloudset size of previous analysis')
 
 args = parser.parse_args()
 
@@ -57,6 +58,7 @@ lr = 1e-3
 lr_stepsize = 1000
 lr_dec = 0.995
 max_steps = 500000
+size = args.ana
 
 if use_cuda:
     device = torch.device('cuda')
@@ -91,7 +93,7 @@ train_transform = clouds.Compose([clouds.RandomVariation((-10, 10)),
                                   clouds.RandomRotate(),
                                   clouds.Center()])
 
-train_ds = TorchSet(train_path, radius, npoints, train_transform, class_num=num_classes)
+train_ds = TorchSet(train_path, radius, npoints, train_transform, class_num=num_classes, size=size)
 
 # PREPARE AND START TRAINING #
 
@@ -118,6 +120,7 @@ trainer = Trainer3d(
     save_root=save_root,
     exp_name=name,
     schedulers={"lr": scheduler},
+    num_classes=num_classes
 )
 
 # Archiving training script, src folder, env info

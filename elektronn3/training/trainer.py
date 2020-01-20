@@ -847,23 +847,17 @@ class Backup:
         self.script_path = script_path
         self.save_path = save_path
 
-    def archive_training_script(self):
-        """ Archiving the training script.
+    def archive_backup(self):
+        """Archiving the source folder, the training script and environment info.
 
         The training script is saved with the prefix "0-" to distinguish from regular scripts.
+        Environment information equivalent to the output of ``python -m torch.utils.collect_env``
+        is saved in a file named "env_info.txt".
         """
 
         # Archiving the Training script
         shutil.copyfile(self.script_path, self.save_path + '/0-' + os.path.basename(self.script_path))
         os.chmod(self.save_path + '/0-' + os.path.basename(self.script_path), 0o755)
-
-    def archive_backup(self):
-        """Archiving the source folder and environment info.
-
-        Environment information equivalent to the output of ``python -m torch.utils.collect_env``
-        is saved in a file named "env_info.txt".
-        """
-
         # Archiving the src folder
         pkg_path = os.path.dirname(arch_src)
         backup_path = os.path.join(self.save_path, 'src_backup')

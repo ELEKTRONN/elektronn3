@@ -7,11 +7,12 @@
 import datetime
 from collections import deque
 
+import math
 import gc
 import logging
 import os
 import shutil
-import random
+import warnings
 
 from itertools import islice
 from math import nan
@@ -38,6 +39,8 @@ from torch.utils import collect_env
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
+from morphx.data.chunkhandler import ChunkHandler
+from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import clouds
 
@@ -228,7 +231,9 @@ class Trainer3d:
             device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
-            valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            valid_dataset: Optional[ChunkHandler] = None,
+            pred_mapper: Optional[PredictionMapper] = None,
+            val_freq: int = 1,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
@@ -237,7 +242,7 @@ class Trainer3d:
             preview_interval: int = 5,
             offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
-            example_input: Optional[torch.Tensor] = None,
+            example_input: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
             enable_save_trace: bool = False,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -281,6 +286,8 @@ class Trainer3d:
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.pred_mapper = pred_mapper
+        self.val_freq = val_freq
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
         self.preview_tile_shape = preview_tile_shape
@@ -359,19 +366,6 @@ class Trainer3d:
             timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
-        # num_workers is set to 0 for valid_loader because validation background processes sometimes
-        # fail silently and stop responding, bringing down the whole training process.
-        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355.
-        # The performance impact of disabling multiprocessing here is low in normal settings,
-        # because the validation loader doesn't perform expensive augmentations, but just reads
-        # data from hdf5s.
-        if valid_dataset is not None:
-            self.valid_loader = DataLoader(
-                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
-                worker_init_fn=_worker_init_fn
-            )
-        self.best_val_loss = np.inf  # Best recorded validation loss
-        self.best_tr_loss = np.inf
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -390,11 +384,9 @@ class Trainer3d:
                 stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
-                if self.valid_dataset is None:
-                    stats['val_loss'] = nan
-                else:
-                    valid_stats = self._validate()
-                    stats.update(valid_stats)
+                stats['val_loss'] = nan
+                if self.epoch == 1 or self.epoch % self.val_freq == 0:
+                    self._validate()
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -405,10 +397,6 @@ class Trainer3d:
 
                 # Save trained model state
                 self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
-                # TODO: Support other metrics for determining what's the "best" model?
-                if stats['val_loss'] < self.best_val_loss:
-                    self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -470,7 +458,7 @@ class Trainer3d:
             # for i in range(dout.size(0)):
             #     dloss += self.criterion(dout[i], dtarget[i])
 
-            dout_flat = dout.view(-1, 5)
+            dout_flat = dout.view(-1, self.num_classes)
             dtarget_flat = dtarget.view(-1)
             dloss = self.criterion(dout_flat, dtarget_flat)
 
@@ -592,45 +580,57 @@ class Trainer3d:
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     @torch.no_grad()
-    def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
+    def _validate(self):
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
-        val_loss = []
-        stats = {name: [] for name in self.valid_metrics.keys()}
-        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
-        for i, batch in batch_iter:
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            inp, feats, target = batch['pts'], batch['features'], batch['lbs']
-            dinp = inp.to(self.device, non_blocking=True)
-            dfeats = feats.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
-            dout = self.model(dfeats, dinp)
+        # Iterate trough validation dataset and predict all chunks with current model.
+        for hc in self.valid_dataset.hc_names:
+            merged = None
+            for batch in tqdm(range(math.ceil(self.valid_dataset.get_hybrid_length(hc) / self.batchsize)), 'Validate'):
+                pts = torch.zeros((self.batchsize, self.valid_dataset.sample_num, 3))
+                feats = torch.ones((self.batchsize, self.valid_dataset.sample_num, 1))
+                centroids = torch.ones((self.batchsize, 3))
 
-            # dout has shape of (batch_size, point_number, classes)
-            # dtarget has shape of (batch_size, point_number)
-            # transform dout to shape (batch_size*point_number, classes) and dtarget to (batch_size*point_number)
-            # => shape conform to (N,C) and (N) instead of (N,C,d1) and (N,d1)
-            dout = dout.view(-1, 5)
-            dtarget = dtarget.view(-1)
+                for j in range(self.batchsize):
+                    chunk, centroid = self.valid_dataset[(hc, batch*self.batchsize+j)]
+                    centroids[j] = torch.from_numpy(centroid)
+                    pts[j] = torch.from_numpy(chunk.vertices)
 
-            val_loss.append(self.criterion(dout, dtarget).item())
-            out = dout.detach().cpu()
-            target = target.view(-1)
-            target = target.reshape(len(target),1)
-            for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(target, out, self.num_classes))
+                pts = pts.to(self.device, non_blocking=True)
+                feats = feats.to(self.device, non_blocking=True)
+                outputs = self.model(feats, pts)
+                pts = pts.cpu().detach().numpy()
+                output_np = outputs.cpu().detach().numpy()
+                output_np = np.argmax(output_np, axis=2)
 
-        stats['val_loss'] = np.mean(val_loss)
-        stats['val_loss_std'] = np.std(val_loss)
-        for name in self.valid_metrics.keys():
-            stats[name] = np.nanmean(stats[name])
+                for j in range(self.batchsize):
+                    if not np.all(pts[j] == 0):
+                        prediction = PointCloud(pts[j], output_np[j])
+
+                        # TODO: Find better solution for handling inverse transformations
+                        transform = self.valid_dataset.transform
+                        assert isinstance(transform.transforms[0], clouds.Normalization)
+                        assert isinstance(transform.transforms[1], clouds.Center)
+
+                        # Inverse transformation
+                        prediction.move(centroids[j].numpy())
+                        prediction.scale(self.valid_dataset.chunk_size)
+
+                        if merged is None:
+                            merged = prediction
+                        else:
+                            merged = clouds.merge_clouds(merged, prediction)
+
+                        self.pred_mapper.map_predictions(prediction, hc, batch*self.batchsize+j)
+
+            # Save validation as original PointCloud with predictions and as PointCloud containing all merged chunks.
+            name = 'epoch_{}'.format(self.epoch)
+            self.pred_mapper.save_prediction(name=name)
+            save_path = self.pred_mapper.save_path
+            clouds.save_cloud(merged, save_path, name=name+'_merged')
 
         self.model.train()  # Reset model to training mode
 
-        return stats
-
-# TODO: Instead of using specific keys like val_loss, enable passing info as an
-#       extra dict whose contents will be added to the state_dict
     def _save_model(
             self,
             suffix: str = '',
@@ -710,7 +710,6 @@ class Trainer3d:
             'lr_sched_state_dict': lr_sched_state,
             'global_step': self.step,
             'epoch': self.epoch,
-            'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
         }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}')
@@ -721,7 +720,9 @@ class Trainer3d:
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
                 model_path += 's'
-                traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    traced = torch.jit.trace(model.eval(), self.example_input)
                 traced.save(model_path)
                 log(f'Saved jit-traced model as {model_path}')
                 # Uncomment these lines if separate traces for train/eval are required:
