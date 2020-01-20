@@ -140,7 +140,7 @@ class PatchCreator(data.Dataset):
     def __init__(
             self,
             input_sources: List[Tuple[str, str]],
-            target_sources: List[Tuple[str, str]],
+            target_sources: Optional[List[Tuple[str, str]]],
             patch_shape: Sequence[int],
             offset: Sequence[int] = (0, 0, 0),
             cube_prios: Optional[Sequence[float]] = None,
@@ -156,13 +156,14 @@ class PatchCreator(data.Dataset):
             cube_meta=_DefaultCubeMeta(),
     ):
         # Early checks
-        if len(input_sources) != len(target_sources):
-            raise ValueError("input_h5data and target_h5data must be lists of same length!")
+        if target_sources is not None and len(input_sources) != len(target_sources):
+            raise ValueError(
+                'If target_sources is not None, input_sources and '
+                'target_sources must be lists of same length.'
+            )
         if not train:
             if warp_prob > 0:
-                logger.warning(
-                    'Augmentations should not be used on validation data.'
-                )
+                logger.warning('Augmentations should not be used on validation data.')
 
         # batch properties
         self.train = train
@@ -183,7 +184,7 @@ class PatchCreator(data.Dataset):
         self.patch_shape = np.array(patch_shape, dtype=np.int)
         self.ndim = self.patch_shape.ndim
         self.offset = np.array(offset)
-        self.target_patch_size = self.patch_shape - self.offset * 2
+        self.target_patch_shape = self.patch_shape - self.offset * 2
         self._target_dtype = target_dtype
         self.transform = transform
 
@@ -211,7 +212,8 @@ class PatchCreator(data.Dataset):
         while True:
             try:
                 inp, target = self.warp_cut(input_src, target_src, warp_prob, self.warp_kwargs)
-                target = target.astype(self._target_dtype)
+                if target is not None:
+                    target = target.astype(self._target_dtype)
             except coord_transforms.WarpingOOBError as e:
                 # Temporarily set warp_prob to 1 to make sure that the next attempt
                 #  will also try to use warping. Otherwise, self.warp_prob would not
@@ -241,15 +243,16 @@ class PatchCreator(data.Dataset):
             break
 
         inp = torch.as_tensor(inp)
-        target = torch.as_tensor(target)
         cube_meta = torch.as_tensor(self.cube_meta[i])
         fname = os.path.basename(self.inputs[i].fname)
         sample = {
             'inp': inp,
-            'target': target,
-            'cube_meta': cube_meta,
+            'cube_meta': cube_meta,  # TODO: Make cube_meta completely optional again
             'fname': fname
         }
+        if target is not None:
+            sample['target'] = torch.as_tensor(target)
+
         return sample
 
     def __len__(self) -> int:
@@ -273,10 +276,10 @@ class PatchCreator(data.Dataset):
     def warp_cut(
             self,
             inp_src: DataSource,
-            target_src: DataSource,
+            target_src: Optional[DataSource],
             warp_prob: Union[float, bool],
             warp_kwargs: Dict[str, Any]
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """
         (Wraps :py:meth:`elektronn3.data.coord_transforms.get_warped_slice()`)
 
@@ -322,12 +325,19 @@ class PatchCreator(data.Dataset):
             warp_kwargs = dict(warp_kwargs)
             warp_kwargs['warp_amount'] = 0
 
+        if target_src is None:
+            target_src_shape = None
+            target_patch_shape = None
+        else:
+            target_src_shape = target_src.shape
+            target_patch_shape = self.target_patch_shape
+
         M = coord_transforms.get_warped_coord_transform(
             inp_src_shape=inp_src.shape,
             patch_shape=self.patch_shape,
             aniso_factor=self.aniso_factor,
-            target_src_shape=target_src.shape,
-            target_patch_shape=self.target_patch_size,
+            target_src_shape=target_src_shape,
+            target_patch_shape=target_patch_shape,
             **warp_kwargs
         )
 
@@ -336,7 +346,7 @@ class PatchCreator(data.Dataset):
             patch_shape=self.patch_shape,
             M=M,
             target_src=target_src,
-            target_patch_shape=self.target_patch_size,
+            target_patch_shape=target_patch_shape,
             target_discrete_ix=self.target_discrete_ix
         )
 
@@ -347,35 +357,33 @@ class PatchCreator(data.Dataset):
         Draw an example cube according to sampling weight on training data,
         or randomly on valid data
         """
-        if self.train:
-            i = np.random.choice(
-                np.arange(len(self.cube_prios)),
-                p=self.cube_prios / np.sum(self.cube_prios)
-            )
-            inp_source, target_source = self.inputs[i], self.targets[i]
-        else:
-            if len(self.inputs) == 0:
-                raise ValueError("No validation set")
-
-            # TODO: Sampling weight for validation data?
-            i = np.random.randint(0, len(self.inputs))
-            inp_source, target_source = self.inputs[i], self.targets[i]
-
+        i = np.random.choice(
+            np.arange(len(self.cube_prios)),
+            p=self.cube_prios / np.sum(self.cube_prios)
+        )
+        inp_source = self.inputs[i]
+        target_source = None if self.targets is None else self.targets[i]
         return inp_source, target_source, i
 
     def load_data(self) -> None:
         if len(self.inputs) == len(self.targets) == 0:
             inp_files, target_files = self.open_files()
             self.inputs.extend(inp_files)
-            self.targets.extend(target_files)
+            if target_files is None:
+                self.targets = None
+            else:
+                self.targets.extend(target_files)
         else:
             logger.info('Using directly specified data sources.')
 
         if self.cube_prios is None:
+            # If no priorities are given: sample proportionally to target sizes
+            #  if available, or else w.r.t. input sizes (voxel counts)
             self.cube_prios = []
-            for inp, target in zip(self.inputs, self.targets):
-                # If no priorities are given: sample proportional to cube size
-                self.cube_prios.append(target.size)
+            if self.targets is None:
+                self.cube_prios = [inp.size for inp in self.inputs]
+            else:
+                self.cube_prios = [target.size for target in self.targets]
             self.cube_prios = np.array(self.cube_prios, dtype=np.float32) / np.sum(self.cube_prios)
 
         logger.debug(f'cube_prios = {self.cube_prios}')
@@ -386,8 +394,9 @@ class PatchCreator(data.Dataset):
         """
         notfound = False
         give_neuro_data_hint = False
-        fullpaths = [f for f, _ in self.input_sources] + \
-                    [f for f, _ in self.target_sources]
+        fullpaths = [f for f, _ in self.input_sources]
+        if self.target_sources is not None:
+            fullpaths.extend([f for f, _ in self.target_sources])
         for p in fullpaths:
             if not os.path.exists(p):
                 print('{} not found.'.format(p))
@@ -405,21 +414,30 @@ class PatchCreator(data.Dataset):
             sys.stdout.flush()
             sys.exit(1)
 
-    def open_files(self) -> Tuple[List[DataSource], List[DataSource]]:
+    def open_files(self) -> Tuple[List[DataSource], Optional[List[DataSource]]]:
         self.check_files()
         inp_sources, target_sources = [], []
         modestr = 'Training' if self.train else 'Validation'
         memstr = ' (in memory)' if self.in_memory else ''
         logger.info(f'\n{modestr} data set{memstr}:')
-        for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_sources, self.target_sources, self.cube_meta):
-            inp_source = HDF5DataSource(fname=inp_fname, key=inp_key, in_memory=self.in_memory)
-            target_source = HDF5DataSource(fname=target_fname, key=target_key, in_memory=self.in_memory)
-            logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_source.shape} ({inp_source.dtype})')
-            logger.info(f'  with target: {target_fname}[{target_key}]: {target_source.shape} ({target_source.dtype})')
-            if not np.all(cube_meta == np.inf):
-                logger.info(f'  cube_meta:   {cube_meta}')
-            inp_sources.append(inp_source)
-            target_sources.append(target_source)
+        if self.target_sources is None:
+            for (inp_fname, inp_key), cube_meta in zip(self.input_sources, self.cube_meta):
+                inp_source = HDF5DataSource(fname=inp_fname, key=inp_key, in_memory=self.in_memory)
+                logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_source.shape} ({inp_source.dtype})')
+                if not np.all(cube_meta == np.inf):
+                    logger.info(f'  cube_meta:   {cube_meta}')
+                inp_sources.append(inp_source)
+                target_sources = None
+        else:
+            for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_sources, self.target_sources, self.cube_meta):
+                inp_source = HDF5DataSource(fname=inp_fname, key=inp_key, in_memory=self.in_memory)
+                target_source = HDF5DataSource(fname=target_fname, key=target_key, in_memory=self.in_memory)
+                logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_source.shape} ({inp_source.dtype})')
+                logger.info(f'  with target: {target_fname}[{target_key}]: {target_source.shape} ({target_source.dtype})')
+                if not np.all(cube_meta == np.inf):
+                    logger.info(f'  cube_meta:   {cube_meta}')
+                inp_sources.append(inp_source)
+                target_sources.append(target_source)
         logger.info('')
 
         return inp_sources, target_sources

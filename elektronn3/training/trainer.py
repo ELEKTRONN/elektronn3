@@ -120,6 +120,9 @@ class Trainer:
         valid_metrics: Validation metrics to be calculated on
             validation data after each training epoch. All metrics are logged
             to tensorboard.
+        ss_criterion: Loss criterion for self-supervised training. The
+            ``ss_criterion`` is used instead of the standard ``criterion``
+            on training batches that lack a ``target`` key.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -233,6 +236,7 @@ class Trainer:
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
+            ss_criterion: Optional[torch.nn.Module] = None,
             preview_batch: Optional[torch.Tensor] = None,
             preview_interval: int = 5,
             inference_kwargs: Optional[Dict[str, Any]] = None,
@@ -274,6 +278,7 @@ class Trainer:
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
         self.valid_metrics = valid_metrics
+        self.ss_criterion = ss_criterion
         self.preview_batch = preview_batch
         self.preview_interval = preview_interval
         self.inference_kwargs = inference_kwargs
@@ -447,13 +452,16 @@ class Trainer:
     def _train_step(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Core training step on self.device"""
         inp = batch['inp']
-        target = batch['target']
+        target = batch.get('target')
         # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
         dinp = inp.to(self.device, non_blocking=True)
-        dtarget = target.to(self.device, non_blocking=True)
+        dtarget = target.to(self.device, non_blocking=True) if target is not None else None
         # forward pass
         dout = self.model(dinp)
-        dloss = self.criterion(dout, dtarget)
+        if dtarget is None:  # Assume self-supervised unary loss function
+            dloss = self.ss_criterion(dout)
+        else:
+            dloss = self.criterion(dout, dtarget)
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException
@@ -489,12 +497,12 @@ class Trainer:
 
             dloss, dout = self._train_step(batch)
 
-            target = batch['target']
             with torch.no_grad():
                 loss = float(dloss)
-                mean_target = float(target.to(torch.float32).mean())
-                stats['tr_loss'].append(loss)
+                target = batch.get('target')
+                mean_target = float(target.to(torch.float32).mean()) if target is not None else 0.
                 misc['mean_target'].append(mean_target)
+                stats['tr_loss'].append(loss)
                 batch_iter.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
@@ -509,7 +517,8 @@ class Trainer:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
                 images['inp'] = batch['inp'].numpy()
-                images['target'] = batch['target'].numpy()
+                if 'target' in batch:
+                    images['target'] = batch['target'].numpy()
                 images['out'] = dout.detach().cpu().numpy()
                 self._put_current_attention_maps_into(images)
 
@@ -618,11 +627,15 @@ class Trainer:
         )
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            inp, target = batch['inp'], batch['target']
+            inp = batch['inp']
+            target = batch.get('target')
             dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dtarget = target.to(self.device, non_blocking=True) if target is not None else None
             dout = self.model(dinp)
-            val_loss.append(self.criterion(dout, dtarget).item())
+            if dtarget is None:  # Use self-supervised unary loss function
+                val_loss.append(self.ss_criterion(dout).item())
+            else:
+                val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             for name, evaluator in self.valid_metrics.items():
                 stats[name].append(evaluator(target, out))
@@ -630,7 +643,7 @@ class Trainer:
         images = {
             'inp': inp.numpy(),
             'out': out.numpy(),
-            'target': target.numpy()
+            'target': None if target is None else target.numpy()
         }
         self._put_current_attention_maps_into(images)
 
