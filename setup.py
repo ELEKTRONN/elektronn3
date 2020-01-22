@@ -9,7 +9,7 @@ if on_rtd:
     install_requires = []
 else:
     install_requires = [
-        'torch>=1.3.0',
+        'torch',
         'numpy',
         'scipy',
         'h5py',
@@ -22,7 +22,6 @@ else:
         'tqdm',
         'scikit-learn',
         'scikit-image',
-        'tensorboard',
         'tensorboardX',
         'torchvision'
     ]

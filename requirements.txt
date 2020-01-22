@@ -1,6 +1,6 @@
-# python>=3.6
+# python>=3.8
 
-torch>=1.2.0
+torch>=1.4.0
 numpy
 scipy
 h5py
@@ -18,5 +18,5 @@ tensorboardX
 torchvision
 
 # Only required for running a tensorboard server:
-tensorboard>=1.13
+tensorboard>=1.15
 tensorflow
