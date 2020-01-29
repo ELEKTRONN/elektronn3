@@ -22,7 +22,7 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 # Requirements
 
 - Linux (support for Windows, MacOS and other systems is not planned)
-- Python 3.8 (earlier versions may work, but they are not tested)
+- Python 3.6 or later
 - PyTorch 1.4
 - For other requirements see `requirements.txt`
 
