@@ -776,7 +776,7 @@ class Trainer:
             # because it could have changed with the model.eval() call above.
             model.training = model_trainmode
         if os.path.isfile(pts_model_path):
-            with zipfile.ZipFile(pts_model_path, 'a', compresslevel=zipfile.ZIP_DEFLATED) as zfile:
+            with zipfile.ZipFile(pts_model_path, 'a', compression=zipfile.ZIP_DEFLATED) as zfile:
                 infostr = pprint.pformat(info, indent=2, width=120)
                 zfile.writestr('info.txt', infostr)
 
