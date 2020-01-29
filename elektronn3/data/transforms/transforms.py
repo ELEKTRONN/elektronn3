@@ -562,24 +562,28 @@ class AdditiveGaussianNoise:
 
 
 class RandomCrop:
-    def __init__(self, size: Sequence[int]):
-        self.size = np.array(size)
+    def __init__(self, crop_shape: Sequence[int]):
+        self.crop_shape = np.array(crop_shape)
 
     def __call__(
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        ndim_spatial = len(self.size)  # Number of spatial axes E.g. 3 for (C,D,H.W)
-        img_shape = inp.shape[-ndim_spatial:]
+        ndim_spatial = len(self.crop_shape)  # Number of spatial axes E.g. 3 for (C,D,H.W)
+        img_shape = np.array(inp.shape[-ndim_spatial:])
         # Number of nonspatial axes (like the C axis). Usually this is one
         ndim_nonspatial = inp.ndim - ndim_spatial
+        if any(self.crop_shape > img_shape):
+            raise ValueError(
+                f'crop shape {self.crop_shape} can\'t be larger than image shape {img_shape}.'
+            )
         # Calculate the "lower" corner coordinate of the slice
         coords_lo = np.array([
-            np.random.randint(0, img_shape[i] - self.size[i] + 1)
+            np.random.randint(0, img_shape[i] - self.crop_shape[i] + 1)
             for i in range(ndim_spatial)
         ])
-        coords_hi = coords_lo + self.size  # Upper ("high") corner coordinate.
+        coords_hi = coords_lo + self.crop_shape  # Upper ("high") corner coordinate.
         # Calculate necessary slice indices for reading the file
         nonspatial_slice = [  # Slicing all available content in these dims.
             slice(0, inp.shape[i]) for i in range(ndim_nonspatial)
