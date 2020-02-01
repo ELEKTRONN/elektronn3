@@ -11,6 +11,7 @@ import gc
 import logging
 import os
 import shutil
+import warnings
 import zipfile
 
 from itertools import islice
@@ -755,7 +756,10 @@ class Trainer:
             log(f'Saved model as {model_path}')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
-                traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+                with warnings.catch_warnings():
+                    # It's enough to be warned once during initial tracing
+                    warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
+                    traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
                 traced.save(pts_model_path)
                 log(f'Saved jit-traced model as {pts_model_path}')
                 # Uncomment these lines if separate traces for train/eval are required:
