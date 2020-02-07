@@ -13,7 +13,7 @@ import elektronn3
 elektronn3.select_mpl_backend('Agg')
 import morphx.processing.clouds as clouds
 from morphx.data.torchset import TorchSet
-from elektronn3.models.convpoint import SegSmall, SegBig
+from elektronn3.models.convpoint import SegSmall, SegNoBatch
 from elektronn3.training import Trainer3d, Backup
 from elektronn3.training import metrics
 
@@ -68,7 +68,7 @@ val_path = os.path.expanduser(args.vp)
 
 input_channels = 1
 if args.big:
-    model = SegBig(input_channels, num_classes).to(device)
+    model = SegNoBatch(input_channels, num_classes).to(device)
 else:
     model = SegSmall(input_channels, num_classes).to(device)
 

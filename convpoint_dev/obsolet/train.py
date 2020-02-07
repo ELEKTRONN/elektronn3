@@ -14,7 +14,7 @@ import convpoint_dev.obsolet.metrics as metrics
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import clouds
 from sklearn.metrics import confusion_matrix
-from elektronn3.models.convpoint import SegSmall, SegBig
+from elektronn3.models.convpoint import SegSmall, SegNoBatch
 from elektronn3.training.trainer import Backup
 from morphx.data.torchset import TorchSet
 from tqdm import tqdm
@@ -50,7 +50,7 @@ input_channels = 1
 output_channels = args.cl
 
 if args.big:
-    model = SegBig(input_channels, output_channels).to(device)
+    model = SegNoBatch(input_channels, output_channels).to(device)
 else:
     model = SegSmall(input_channels, output_channels).to(device)
 

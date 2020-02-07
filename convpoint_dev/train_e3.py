@@ -15,7 +15,7 @@ elektronn3.select_mpl_backend('Agg')
 import morphx.processing.clouds as clouds
 from torch import nn
 from morphx.data.torchset import TorchSet
-from elektronn3.models.convpoint import SegSmall, SegBig
+from elektronn3.models.convpoint import SegSmall, SegNoBatch
 from elektronn3.training import Trainer3d, Backup
 
 
@@ -76,7 +76,7 @@ train_path = os.path.expanduser(args.tp)
 
 input_channels = 1
 if args.big:
-    model = SegBig(input_channels, num_classes)
+    model = SegNoBatch(input_channels, num_classes)
 else:
     model = SegSmall(input_channels, num_classes)
 

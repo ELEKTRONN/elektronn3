@@ -13,7 +13,6 @@ import logging
 import os
 import shutil
 import warnings
-
 from itertools import islice
 from math import nan
 from pickle import PickleError
@@ -606,11 +605,6 @@ class Trainer3d:
                 for j in range(self.batchsize):
                     if not np.all(pts[j] == 0):
                         prediction = PointCloud(pts[j], output_np[j])
-
-                        # TODO: Find better solution for handling inverse transformations
-                        transform = self.valid_dataset.transform
-                        assert isinstance(transform.transforms[0], clouds.Normalization)
-                        assert isinstance(transform.transforms[1], clouds.Center)
 
                         # Inverse transformation
                         prediction.move(centroids[j].numpy())

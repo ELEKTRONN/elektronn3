@@ -16,7 +16,7 @@ import argparse
 import numpy as np
 import morphx.processing.clouds as clouds
 from morphx.classes.pointcloud import PointCloud
-from elektronn3.models.convpoint import SegSmall, SegBig
+from elektronn3.models.convpoint import SegSmall, SegNoBatch
 from morphx.data.cloudset import CloudSet
 from tqdm import tqdm
 
@@ -62,7 +62,7 @@ input_channels = 1
 output_channels = args.cl
 
 if args.big:
-    model = SegBig(input_channels, output_channels)
+    model = SegNoBatch(input_channels, output_channels)
 else:
     model = SegSmall(input_channels, output_channels)
 
