@@ -1,6 +1,6 @@
 # python>=3.6
 
-torch==1.1.0
+torch>=1.2.0
 numpy
 scipy
 h5py
@@ -15,7 +15,7 @@ tqdm
 pillow
 colorlog
 tensorboardX
-torchvision==0.3.0
+torchvision
 
 # Only required for running a tensorboard server:
 tensorboard>=1.13

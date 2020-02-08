@@ -51,6 +51,9 @@ parser.add_argument(
     '--deterministic', action='store_true',
     help='Run in fully deterministic mode (at the cost of execution speed).'
 )
+parser.add_argument('-i', '--ipython', action='store_true',
+    help='Drop into IPython shell on errors or keyboard interrupts.'
+)
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
@@ -90,7 +93,6 @@ model = UNet(
     batch_norm=True,
     # conv_mode='valid',
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
-    adaptive=True  # Experimental. Disable if results look weird.
 ).to(device)
 # Example for a model-compatible input.
 example_input = torch.ones(1, 1, 32, 64, 64)
@@ -173,9 +175,10 @@ if args.resume is not None:  # Load pretrained network
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
 ]
 train_transform = transforms.Compose(common_transforms + [
+    # transforms.RandomRotate2d(prob=0.9),
     # transforms.RandomGrayAugment(channels=[0], prob=0.3),
     # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
     # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
@@ -186,28 +189,28 @@ valid_transform = transforms.Compose(common_transforms + [])
 aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
 common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': aniso_factor,
-    'patch_shape': (48, 96, 96),
+    'patch_shape': (44, 88, 88),
     # 'offset': (8, 20, 20),
     'num_classes': 2,
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
 train_dataset = PatchCreator(
-    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
     train=True,
     epoch_size=args.epoch_size,
     warp_prob=0.2,
     warp_kwargs={
         'sample_aniso': aniso_factor != 1,
         'perspective': True,
-        'warp_amount': 0.1,
+        'warp_amount': 1.0,
     },
     transform=train_transform,
     **common_data_kwargs
 )
 valid_dataset = None if not valid_indices else PatchCreator(
-    input_h5data=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    target_h5data=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
     epoch_size=10,  # How many samples to use for each validation run
     warp_prob=0,
@@ -278,7 +281,7 @@ trainer = Trainer(
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
     batchsize=1,
-    num_workers=1,
+    num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
     example_input=example_input,
@@ -294,8 +297,12 @@ trainer = Trainer(
     # TODO: Tune these:
     preview_tile_shape=(32, 64, 64),
     preview_overlap_shape=(32, 64, 64),
+    ipython_shell=args.ipython,
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
+
+if args.deterministic:
+    assert trainer.num_workers <= 1, 'num_workers > 1 introduces indeterministic behavior'
 
 # Archiving training script, src folder, env info
 Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()

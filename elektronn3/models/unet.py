@@ -39,7 +39,6 @@ from typing import Sequence, Union, Tuple
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
-from torch.nn import functional as F
 
 import elektronn3.modules as em
 
@@ -187,47 +186,6 @@ class UpConv(nn.Module):
         return y
 
 
-# class EncoderBottleneck(nn.Module):
-#     def __init__(self, in_channels, out_channels, dim=3):
-#         super().__init__()
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
-#         self.dim = dim
-#
-#         self.conv = em.conv1(in_channels, 4, dim=dim)
-#         self.aap = nn.AdaptiveAvgPool2d((8, 8))
-#         self.fc = nn.Linear(4 * 8*8, 32)
-#
-#     def forward(self, x):
-#         x = self.conv(x)
-#         x = F.relu(x)
-#         x = self.aap(x)
-#         x = x.view(x.shape[0], -1)
-#         x = self.fc(x)
-#         x = F.relu(x)
-#         return x
-#
-#
-# class DecoderBottleneck(nn.Module):
-#     def __init__(self, in_channels, out_channels, dim=3):
-#         super().__init__()
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
-#         self.dim = dim
-#
-#         self.fc = nn.Linear(32, 4 * 8*8)
-#         self.conv = em.conv1(in_channels, out_channels, dim=dim)
-#
-#     def forward(self, x):
-#         x = self.fc(x)
-#         x = F.relu(x)
-#         x = x.view(x.shape[0], 4, 8, 8)
-#         x = self.conv(x)
-#         x = F.relu(x)
-#         x = F.interpolate(x, (SIZE))  # TODO
-#         return x
-
-
 # TODO: Pre-calculate output sizes when using valid convolutions
 class UNet(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
@@ -356,9 +314,6 @@ class UNet(nn.Module):
             original batch normalization paper and the BN scheme of 3D U-Net,
             but it delivers better results this way
             (see https://redd.it/67gonq).
-        ae: Enable autoencoder mode. ``out_channels`` is ignored; outputs always
-            have the same channels as inputs.
-            Experimental. May not work well with other non-default options.
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -432,7 +387,6 @@ class UNet(nn.Module):
             planar_blocks: Sequence = (),
             activation: Union[str, nn.Module] = 'relu',
             batch_norm: bool = True,
-            ae: bool = False,
             dim: int = 3,
             conv_mode: str = 'same',
             adaptive: bool = False,
@@ -492,10 +446,12 @@ class UNet(nn.Module):
         self.dim = dim
         self.adaptive = adaptive
         self.checkpointing = checkpointing
-        self.ae = ae
 
         self.down_convs = []
         self.up_convs = []
+
+        if adaptive:
+            print('Warning: adaptive mode is no longer needed on newer PyTorch/CUDA/CuDNN setups and is therefore deprecated.')
 
         # Indices of blocks that should operate in 2D instead of 3D mode,
         # to save resources
@@ -547,14 +503,6 @@ class UNet(nn.Module):
             self.up_convs.append(up_conv)
 
         self.conv_final = em.conv1(outs, self.out_channels, dim=dim)
-        if self.ae:
-            # Dedicated final layer for autoencoder training.
-            # self.conv_final is left untouched for autoencoder training,
-            # so switching to ae=False won't require layer re-initialization.
-            self.conv_ae_final = em.conv1(outs, self.in_channels, dim=dim)
-            self.encoder_bottleneck = em.conv1(self.down_convs[-1].out_channels, 1, dim=dim)
-            # self.encoder_bottleneck = EncoderBottleneck(self.down_convs[-1].out_channels, 1, dim=dim)
-            self.decoder_bottleneck = em.conv1(self.encoder_bottleneck.out_channels, self.up_convs[0].in_channels, dim=dim)
 
         # add the list of modules to current module
         self.down_convs = nn.ModuleList(self.down_convs)
@@ -573,9 +521,6 @@ class UNet(nn.Module):
             self.weight_init(m)
 
     def forward(self, x):
-        if self.ae:
-            # Don't do usual forward, do autoencoder forward pass instead
-            return self.autoencode(x)
         sh = x.shape[2:]
         encoder_outs = []
 
@@ -601,63 +546,6 @@ class UNet(nn.Module):
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
         return x
-
-    def _ae_encode(self, x):
-        for i, module in enumerate(self.down_convs):
-            x, _ = module(x)
-        x = self.encoder_bottleneck(x)
-        return x
-
-    def _ae_decode(self, x):
-        x = self.decoder_bottleneck(x)
-        for i, module in enumerate(self.up_convs):
-            # Calculate expected shape for mock feature
-            sh = (x.shape[0], x.shape[1] // 2) + tuple(d * 2 for d in x.shape[2:])
-            before_pool = torch.zeros(sh, dtype=x.dtype, device=x.device)  # Mock encoder outputs
-            # TODO: For auto-encoder with throwaway decoder, we should use custom upconv blocks
-            #       without (mock) feature merging. Merging with zeros is a waste of computation.
-            x = module(before_pool, x)
-        return x
-
-    def autoencode(self, x):
-        # Encode, decode and reconstruct
-        enc = self._ae_encode(x)
-        dec = self._ae_decode(enc)
-        rec = self.conv_ae_final(dec)
-        return rec
-
-
-class UNet3dLite(UNet):
-    """(WIP) Re-implementation of the unet3d_lite model from ELEKTRONN2
-
-    See https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/unet3d_lite.py
-    (Not yet working due to the AutoCrop node in ELEKTRONN2 working differently)
-    """
-    def __init__(self):
-        super().__init__(
-            in_channels=1,
-            out_channels=2,
-            n_blocks=4,
-            start_filts=32,
-            up_mode='transpose',
-            merge_mode='concat',
-            planar_blocks=(0, 1, 2),  # U1 and U2 will later be replaced by non-planar blocks
-            activation='relu',
-            batch_norm=False,
-            dim=3,
-            conv_mode='valid',
-        )
-        # TODO: mrg0 in the original unet3d_lite has upconv_n_f=512, which doesn't appear here
-        for i in [1, 2]:
-            # Replace planar U1 and U2 blocks with non-planar 3x3x3 versions
-            ins = self.up_convs[i].upconv.in_channels
-            outs = self.up_convs[i].conv2.out_channels
-            self.up_convs[i] = UpConv(
-                ins, outs, merge_mode=self.merge_mode, up_mode=self.up_mode,
-                planar=False,
-                activation=self.activation, batch_norm=self.batch_norm,
-                dim=self.dim, conv_mode=self.conv_mode
-            )
 
 
 def test_model(

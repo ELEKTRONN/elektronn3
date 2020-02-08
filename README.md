@@ -22,8 +22,8 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 # Requirements
 
 - Linux (support for Windows, MacOS and other systems is not planned)
-- Python 3.6 or later
-- PyTorch 1.1
+- Python 3.7 or later (3.6 may work, but it is not regularly tested)
+- PyTorch 1.2
 - For other requirements see `requirements.txt`
 
 # Setup
@@ -54,14 +54,6 @@ you can run:
 
     python3 train_unet_neurodata.py
 
-## Training shell
-
-- Hitting Ctrl-C anytime during the training will drop you to the
-IPython training shell where you can access training data and make interactive
-changes.
-- To continue training, hit Ctrl-D twice.
-- If you want the process to terminate after leaving the shell, set
-`self.terminate = True` inside it and then hit Ctrl-D twice.
 
 ## Using Tensorboard
 

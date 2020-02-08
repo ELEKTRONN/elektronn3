@@ -27,7 +27,10 @@ from scipy.ndimage.interpolation import map_coordinates
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 
-Transform = Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+Transform = Callable[
+    [np.ndarray, Optional[np.ndarray]],
+    Tuple[np.ndarray, Optional[np.ndarray]]
+]
 
 
 class _DropSample(Exception):
@@ -36,7 +39,7 @@ class _DropSample(Exception):
 
 
 class Identity:
-    def __call__(self, inp, target):
+    def __call__(self, inp, target=None):
         return inp, target
 
 
@@ -67,7 +70,6 @@ class Compose:
             format_string += '\n    {0}'.format(t)
         format_string += '\n)'
         return format_string
-
 
 class Lambda:
     """Wraps a function of the form f(x, y) = (x', y') into a transform.
@@ -108,10 +110,25 @@ class RandomSlicewiseTransform:
     match.
 
     Args:
-        transform:
-        prob:
+        transform: transform that works on 2D slices
+        prob: Probability with which each slice is chosen to transformed by the
+            specified ``transform``.
+
+    Example::
+
+        Here we replace each slice by zeros with p=0.1. This has an effect
+        similar to the "missing section" augmentation described in
+        https://arxiv.org/abs/1706.00120.
+
+        >>> def zero_out(inp, target): return inp * 0, target
+        >>> t = RandomSlicewiseTransform(zero_out, prob=0.1)
     """
-    def __init__(self, transform, prob=0.1, inplace=True):
+    def __init__(
+            self,
+            transform: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]],
+            prob: float = 0.1,
+            inplace: bool = True
+    ):
         self.transform = transform
         self.prob = prob
         assert inplace, 'Only inplace operation is supported currently'
@@ -197,14 +214,18 @@ class Normalize:
         std: Global standard deviation value(s) of the inputs. Can either
             be a sequence of float values where each value corresponds to a
             channel or a single float value (only for single-channel data).
+        inplace: Apply in-place (works faster, needs less memory but overwrites
+            inputs).
     """
     def __init__(
             self,
             mean: Union[Sequence[float], float],
-            std: Union[Sequence[float], float]
+            std: Union[Sequence[float], float],
+            inplace: bool = False
     ):
         self.mean = np.array(mean)
         self.std = np.array(std)
+        self.inplace = inplace
         # Unsqueeze first dimensions if mean and scalar are passed as scalars
         if self.mean.ndim == 0:
             self.mean = self.mean[None]
@@ -215,9 +236,11 @@ class Normalize:
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
-            # TODO: fast in-place version
     ) -> Tuple[np.ndarray, np.ndarray]:
-        normalized = np.empty_like(inp)
+        if self.inplace:
+            normalized = inp  # Refer to the same memory space
+        else:
+            normalized = np.empty_like(inp)
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
             raise ValueError('mean and std must have the same length as the C '
                              'axis (number of channels) of the input.')
@@ -478,7 +501,6 @@ class RandomBlurring:  # Warning: This operates in-place!
             patch_shape: Optional[Sequence[int]] = None
     ):
         self.config = {**self._default_config, **config}
-        # TODO: support random state
         if patch_shape is not None:
             random_blurring.check_random_data_blurring_config(patch_shape, **config)
 
@@ -532,17 +554,15 @@ class AdditiveGaussianNoise:
         return noisy_inp, target
 
 
-
 class RandomCrop:
     def __init__(self, size: Sequence[int]):
-        # TODO: support random state
         self.size = np.array(size)
 
     def __call__(
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         ndim_spatial = len(self.size)  # Number of spatial axes E.g. 3 for (C,D,H.W)
         img_shape = inp.shape[-ndim_spatial:]
         # Number of nonspatial axes (like the C axis). Usually this is one
@@ -757,32 +777,68 @@ class RandomFlip:
         return inp_flipped, target_flipped
 
 
-# TODO: Support other image shapes
+# TODO: Make rotation border mode configurable
 class RandomRotate2d:
-    """Random rotations, based on scikit-image"""
+    """Random rotations in the xy plane, based on scikit-image.
+
+    If inputs are 3D images ([C,] D, H, W) Rotate them as a stack of 2D images
+    by the same angle, constraining the rotation direction to the xy plane"""
     def __init__(self, angle_range=(-180, 180), prob=1):
         self.angle_range = angle_range
         self.prob = prob
 
     def __call__(self, inp, target):
-        assert inp.ndim == 3 and inp.shape[0] == 1
-        assert target.ndim == 2 and target.shape == inp.shape[1:]
+        assert inp.ndim in (3, 4)
         if np.random.rand() > self.prob:
             return inp, target
         angle = np.random.uniform(*self.angle_range)
         rot_opts = {'angle': angle, 'preserve_range': True, 'mode': 'reflect'}
-        rinp = skimage.transform.rotate(inp[0], **rot_opts).astype(inp.dtype)[None]  # Hack: Assume 1 channel
-        rtarget = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)  # Hack: Assume no channel dimension
+
+        if target.ndim == inp.ndim - 1:  # Implicit (no) channel dimension
+            target_c = False
+        elif target.ndim == inp.ndim:  # Explicit channel dimension
+            target_c = True
+        else:
+            raise ValueError('Target dimension not understood.')
+
+        def rot(inp, target):
+            """Rotate in 2D space"""
+            for c in range(inp.shape[0]):
+                inp[c] = skimage.transform.rotate(inp[c], **rot_opts).astype(inp.dtype)[None]
+            if target is None:
+                return inp, target  # Return early if target shouldn't be transformed
+            # Otherwise, transform target:
+            if target_c:
+                for c in range(target.shape[0]):
+                    target[c] = skimage.transform.rotate(target[c], **rot_opts).astype(target.dtype)
+            else:
+                target = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)
+            return inp, target
+        
+        if inp.ndim == 3:  # 2D case
+            rinp, rtarget = rot(inp, target)
+        else:  # 3D case: Rotate each z slice separately by the same angle
+            rinp = np.empty_like(inp)
+            rtarget = np.empty_like(target)
+            for z in range(rinp.shape[1]):
+                if target_c:
+                    rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
+                else:
+                    rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
+
         return rinp, rtarget
 
 
+
 # TODO: Support other image shapes
-# TODO: Document target is None
 class AlbuSeg2d:
     """Wrapper for albumentations' segmentation-compatible 2d augmentations.
 
     Wraps an augmentation so it can be used within elektronn3's transform pipeline.
     See https://github.com/albu/albumentations.
+
+    If ``target`` is ``None``, it is ignored. Else, it is passed to the wrapped
+    albumentations augmentation as the ``mask`` argument.
 
     Args:
         albu: albumentation object of type `DualTransform`.

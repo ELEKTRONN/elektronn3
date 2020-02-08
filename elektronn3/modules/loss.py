@@ -45,6 +45,42 @@ class CombinedLoss(torch.nn.Module):
         return loss
 
 
+class FocalLoss(torch.nn.Module):
+    """Focal Loss (https://arxiv.org/abs/1708.02002)
+
+    Expects raw outputs, not softmax probs."""
+    def __init__(self, weight=None, gamma=2., reduction='mean', ignore_index=-100):
+        super().__init__()
+        self.gamma = gamma
+        self.nll = torch.nn.NLLLoss(weight=weight, reduction=reduction, ignore_index=ignore_index)
+        self.log_softmax = torch.nn.LogSoftmax(1)
+
+    def forward(self, output, target):
+        log_prob = self.log_softmax(output)
+        prob = torch.exp(log_prob)
+        return self.nll(((1 - prob) ** self.gamma) * log_prob, target)
+
+
+class SoftmaxBCELoss(torch.nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.bce = torch.nn.BCELoss(*args, **kwargs)
+
+    def forward(self, output, target):
+        probs = torch.nn.functional.softmax(output, dim=1)
+        return self.bce(probs, target)
+
+# class MultiLabelCrossEntropy(nn.Module):
+#     def __init__(self, weight=torch.tensor(1.)):
+#         self.register_buffer('weight', weight)
+
+#     def forward(self, output, target):
+#         assert output.shape == target.shape
+#         logprobs = torch.nn.functional.log_softmax(output, dim=1)
+#         wsum = self.weight[None] * torch.sum(-target * logprobs)
+#         return torch.mean(wsum, dim=1)
+
+
 def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
     reduce_dims = tuple([0] + list(range(x.dim()))[2:])  # = (0, 2, 3, ...)
