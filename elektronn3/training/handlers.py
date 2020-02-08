@@ -394,3 +394,35 @@ def _tb_log_sample_images(
                     plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
                     global_step=trainer.step
                 )
+
+
+def _tb_log_sample_images_all_img(
+        trainer: 'Trainer',
+        images: Dict[str, np.ndarray],
+        z_plane: Optional[int] = None,
+        group: str = 'sample'
+) -> None:
+    """Tensorboard plotting handler that plots all arrays in the ``images``
+    dict as 2D grayscale images. Multi-channel images are split along the
+    C dimension and plotted separately.
+    """
+    name = images.pop('fname', [None])[0]
+    # TODO: Clean up/remove the messy name handling. Figure out how to pass non-image data cleanly.
+
+    for key, img in images.items():
+        img = img[:1]  # Always only use the first element of the batch dimension
+        batch2img = _get_batch2img_function(img, z_plane)
+        img = batch2img(img)
+        if img.shape[0] == 1:
+            trainer.tb.add_figure(
+                f'{group}/{key}',
+                plot_image(img[0], cmap='gray', filename=name),
+                global_step=trainer.step
+            )
+        else:
+            for c in range(img.shape[0]):
+                trainer.tb.add_figure(
+                    f'{group}/{key}{c}',
+                    plot_image(img[c], cmap='gray', filename=name),
+                    global_step=trainer.step
+                )
