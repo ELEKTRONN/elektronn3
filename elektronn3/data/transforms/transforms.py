@@ -708,7 +708,7 @@ class ElasticTransform:
         if inp.ndim == 4:
             if self.draw_debug_grid:
                 inp, target = _draw_debug_grid(inp, target)
-            ish, tsh = np.array(inp.shape[-3:]), np.array(target.shape[-3:])
+            ish = np.array(inp.shape[-3:])
             dz = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
@@ -723,6 +723,8 @@ class ElasticTransform:
             indices = np.reshape(z, (-1, 1)), np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
 
             # If there is a target, apply the same deformation field to the target
+            if target is not None:
+                tsh = np.array(target.shape[-3:])
             if target is not None and np.any(ish != tsh):
                 if self.draw_debug_grid:
                     inp, target = _draw_debug_grid(inp, target)
@@ -739,7 +741,7 @@ class ElasticTransform:
             else:
                 target_indices = indices
         elif inp.ndim == 3:
-            ish, tsh = np.array(inp.shape[-2:]), np.array(target.shape[-2:])
+            ish = np.array(inp.shape[-2:])
             dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             y, x = np.array(
@@ -751,6 +753,8 @@ class ElasticTransform:
             indices = np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
 
             # If there is a target, apply the same deformation field to the target
+            if target is not None:
+                tsh = np.array(target.shape[-2:])
             if target is not None and np.any(ish != tsh):
                 # Crop input re-indexing arrays to the target region and transform coordinates
                 #  to the target' own frame by subtracting the input-target offset
