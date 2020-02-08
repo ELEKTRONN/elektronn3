@@ -668,3 +668,69 @@ class Reconstruction2d(data.Dataset):
 
     def __len__(self):
         return len(self.inp_paths) * self.epoch_multiplier
+
+
+class TripletData2d(data.Dataset):
+    """Simple dataset for 2D triplet loss training.
+    """
+    def __init__(
+            self,
+            inp_paths,
+            transform=transforms.Identity(),
+            in_memory=True,
+            inp_dtype=np.float32,
+            epoch_multiplier=1,  # Pretend to have more data in one epoch
+    ):
+        super().__init__()
+        self.inp_paths = inp_paths
+        self.transform = transform
+        self.in_memory = in_memory
+        self.inp_dtype = inp_dtype
+        self.epoch_multiplier = epoch_multiplier
+
+        if self.in_memory:
+            self.inps = [
+                np.array(imageio.imread(fname)).astype(np.float32)[None]
+                for fname in self.inp_paths
+            ]
+
+    def _get(self, index):
+        if self.in_memory:
+            inp = self.inps[index]
+        else:
+            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
+            if inp.ndim == 2:  # (H, W)
+                inp = inp[None]  # (C=1, H, W)
+        while True:  # Only makes sense if RandomCrop is used
+            try:
+                inp, _ = self.transform(inp, None)
+                break
+            except transforms._DropSample:
+                pass
+        inp = torch.as_tensor(inp)
+        return inp
+
+    def _randidx_excluding(self, exclude):
+        while True:
+            idx = np.random.randint(0, len(self.inp_paths) // self.epoch_multiplier)
+            if idx != exclude:
+                return idx
+
+    def __getitem__(self, index):
+        index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
+        anchor = self._get(index)
+        # Assuming a random augmentation transform, the positive image will be different than the anchor
+        pos = self._get(index)
+        # Sample negative from a random different index -> different image
+        neg_idx = self._randidx_excluding(index)
+        neg = self._get(neg_idx)
+        sample = {
+            'anchor': anchor,
+            'pos': pos,
+            'neg': neg,
+            'fname': f'ap{index}n{neg_idx}'
+        }
+        return sample
+
+    def __len__(self):
+        return len(self.inp_paths) * self.epoch_multiplier
