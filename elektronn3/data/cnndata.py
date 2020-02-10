@@ -677,6 +677,7 @@ class TripletData2d(data.Dataset):
             self,
             inp_paths,
             transform=transforms.Identity(),
+            invariant_transform=None,
             in_memory=True,
             inp_dtype=np.float32,
             epoch_multiplier=1,  # Pretend to have more data in one epoch
@@ -684,6 +685,7 @@ class TripletData2d(data.Dataset):
         super().__init__()
         self.inp_paths = inp_paths
         self.transform = transform
+        self.invariant_transform = invariant_transform
         self.in_memory = in_memory
         self.inp_dtype = inp_dtype
         self.epoch_multiplier = epoch_multiplier
@@ -707,7 +709,6 @@ class TripletData2d(data.Dataset):
                 break
             except transforms._DropSample:
                 pass
-        inp = torch.as_tensor(inp)
         return inp
 
     def _randidx_excluding(self, exclude):
@@ -719,15 +720,22 @@ class TripletData2d(data.Dataset):
     def __getitem__(self, index):
         index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         anchor = self._get(index)
-        # Assuming a random augmentation transform, the positive image will be different than the anchor
-        pos = self._get(index)
+        if self.invariant_transform is None:
+            # Assuming a random augmentation transform, the positive image will be different than
+            #  the anchor, but it will originate from the same image file.
+            #  If random cropping and geometrical transforms are used, make sure that the model does
+            #  not produce localized/spatial outputs!
+            pos = self._get(index)
+        else:
+            # Apply an additional transform against which the network should learn invariant behavior
+            pos, _ = self.invariant_transform(anchor, None)
         # Sample negative from a random different index -> different image
         neg_idx = self._randidx_excluding(index)
         neg = self._get(neg_idx)
         sample = {
-            'anchor': anchor,
-            'pos': pos,
-            'neg': neg,
+            'anchor': torch.as_tensor(anchor),
+            'pos': torch.as_tensor(pos),
+            'neg': torch.as_tensor(neg),
             'fname': f'ap{index}n{neg_idx}'
         }
         return sample
