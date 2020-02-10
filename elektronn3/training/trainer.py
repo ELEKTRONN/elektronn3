@@ -37,7 +37,6 @@ from elektronn3.training.train_utils import pretty_string_time
 from elektronn3.training.train_utils import Timer, HistoryTracker
 
 from torch.utils import collect_env
-from elektronn3.training import metrics
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
@@ -89,15 +88,7 @@ def _change_log_file_to(
 
 
 class Trainer:
-    """ Training loop abstraction with IPython and tensorboard integration.
-
-    Hitting Ctrl-C anytime during the training will drop you to the IPython
-    training shell where you can access training data and make interactive
-    changes.
-    To continue training, hit Ctrl-D twice.
-    If you want the process to terminate after leaving the shell, set
-    ``self.terminate = True`` inside it and then hit Ctrl-D twice.
-
+    """ General training loop abstraction for supervised training.
 
     Args:
         model: PyTorch model (``nn.Module``) that shall be trained.
