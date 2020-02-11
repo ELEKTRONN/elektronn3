@@ -19,7 +19,7 @@ class TripletTrainer(Trainer):
         self.preview_plotting_handler = noop  # TODO
         self.sample_plotting_handler = handlers._tb_log_sample_images_all_img
 
-    def _train_step_triplet(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _train_step_triplet(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """Core training step for triplet loss on self.device"""
         # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
         danchor = batch['anchor'].to(self.device, non_blocking=True)
@@ -37,7 +37,7 @@ class TripletTrainer(Trainer):
         self.optimizer.zero_grad()
         dloss.backward()
         self.optimizer.step()
-        return dloss, torch.cat([danc_out, dpos_out, dneg_out])
+        return dloss, {'anchor_out': danc_out, 'pos_out': dpos_out, 'neg_out': dneg_out}
 
     def _train(self, max_steps, max_runtime):
         """Train for one epoch or until max_steps or max_runtime is reached"""
@@ -59,7 +59,7 @@ class TripletTrainer(Trainer):
             if self.step in self.extra_save_steps:
                 self._save_model(f'_step{self.step}', verbose=True)
 
-            dloss, dout = self._train_step_triplet(batch)
+            dloss, dout_imgs = self._train_step_triplet(batch)
 
             with torch.no_grad():
                 loss = float(dloss)
@@ -84,6 +84,21 @@ class TripletTrainer(Trainer):
                         img = img.detach().cpu().numpy()
                     images[key] = img
                 self._put_current_attention_maps_into(images)
+
+                # TODO: The plotting handler abstraction is inadequate here. Figure out how
+                #       we can handle plotting cleanly in one place.
+                # Outputs are visualized here, while inputs are visualized in the plotting handler
+                #  which is called in _run()...
+                for name, img in dout_imgs.items():
+                    img = img.detach()[0].cpu().numpy()  # select first item of batch
+                    for c in range(img.shape[0]):
+                        if img.ndim == 4:  # 3D data
+                            img = img[:, img.shape[0] // 2]  # take center slice of depth dim -> 2D
+                        self.tb.add_figure(
+                            f'tr_samples/{name}_c{c}',
+                            handlers.plot_image(img[c], cmap='gray'),
+                            global_step=self.step
+                        )
 
             if self.terminate:
                 break
