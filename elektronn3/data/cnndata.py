@@ -723,15 +723,20 @@ class TripletData2d(data.Dataset):
         if self.invariant_transform is None:
             # Assuming a random augmentation transform, the positive image will be different than
             #  the anchor, but it will originate from the same image file.
-            #  If random cropping and geometrical transforms are used, make sure that the model does
-            #  not produce localized/spatial outputs!
+            #  If random cropping and geometrical transforms are used, make sure that the loss is
+            #  not calculated on localized/spatial outputs!
             pos = self._get(index)
         else:
             # Apply an additional transform against which the network should learn invariant behavior
             pos, _ = self.invariant_transform(anchor, None)
-        # Sample negative from a random different index -> different image
+        # Sample a negative image from a random different index -> different image
         neg_idx = self._randidx_excluding(index)
         neg = self._get(neg_idx)
+        if self.invariant_transform is not None:
+            # Also apply the invariant transform to the negative image because otherwise
+            #  the model could "cheat" by detecting that the inherent features of this
+            #  transform only exist in the positive image.
+            neg, _ = self.invariant_transform(neg, None)
         sample = {
             'anchor': torch.as_tensor(anchor),
             'pos': torch.as_tensor(pos),

@@ -642,7 +642,6 @@ class ElasticTransform:
         sigma: Sigma parameter of the gaussian smoothing performed on the
             random displacement field. High ``sigma`` values (> 4) lead
             to less randomness and more spatial consistency.
-            Lower values
         alpha: Factor by which all random displacements are multiplied.
             Each local displacement is drawn from the range
             ``[-alpha, alpha]``, so e.g. for ``alpha=1`` you won't see
