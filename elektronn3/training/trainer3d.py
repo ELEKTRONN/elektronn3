@@ -7,6 +7,7 @@
 import datetime
 from collections import deque
 
+import ipdb
 import math
 import gc
 import logging
@@ -41,7 +42,7 @@ from elektronn3 import __file__ as arch_src
 from morphx.data.chunkhandler import ChunkHandler
 from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
-from morphx.processing import clouds
+from morphx.processing import clouds, objects
 
 logger = logging.getLogger('elektronn3log')
 
@@ -384,8 +385,9 @@ class Trainer3d:
                 self.epoch += 1
 
                 stats['val_loss'] = nan
-                if self.epoch == 1 or self.epoch % self.val_freq == 0:
-                    self._validate()
+                if self.valid_dataset is not None:
+                    if self.epoch == 1 or self.epoch % self.val_freq == 0:
+                        self._validate()
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -440,11 +442,15 @@ class Trainer3d:
             pts = batch['pts']
             features = batch['features']
             target = batch['target']
+            p_mask = batch['p_mask']
+            l_mask = batch['l_mask']
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
             dfeats = features.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
+            dp_mask = p_mask.to(self.device, non_blocking=True)
+            dl_mask = l_mask.to(self.device, non_blocking=True)
 
             # dinp: (batch_size, sample_num, 3)
             # dfeats: (batch_size, sample_num, 1)
@@ -457,9 +463,9 @@ class Trainer3d:
             # for i in range(dout.size(0)):
             #     dloss += self.criterion(dout[i], dtarget[i])
 
-            dout_flat = dout.view(-1, self.num_classes)
-            dtarget_flat = dtarget.view(-1)
-            dloss = self.criterion(dout_flat, dtarget_flat)
+            dout_mask = dout[dp_mask].view(-1, 3)
+            dtarget_mask = dtarget[dl_mask]
+            dloss = self.criterion(dout_mask, dtarget_mask)
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -485,7 +491,7 @@ class Trainer3d:
                             pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
                             results.append(orig)
                             results.append(pred)
-                        clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                        objects.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
                     batch_num += 1
 
                 loss = float(dloss)
@@ -580,7 +586,7 @@ class Trainer3d:
 
     @torch.no_grad()
     def _validate(self):
-        self.model.eval()  # Set dropout and batchnorm to eval mode
+        self.model.eval()
 
         # Iterate trough validation dataset and predict all chunks with current model.
         for hc in self.valid_dataset.hc_names:
