@@ -1,2 +1,5 @@
 from .layers import *
-from .loss import DiceLoss, FocalLoss, LovaszLoss, CombinedLoss, NorpfDiceLoss, ACLoss
+from .loss import (
+    DiceLoss, FocalLoss, LovaszLoss, CombinedLoss, NorpfDiceLoss, ACLoss,
+    GAPTripletMarginLoss
+)

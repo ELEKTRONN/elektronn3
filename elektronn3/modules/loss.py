@@ -9,6 +9,9 @@ from typing import Sequence, Optional
 
 import torch
 
+from torch import nn
+from torch.nn import functional as F
+
 from elektronn3.modules.lovasz_losses import lovasz_softmax
 
 
@@ -80,6 +83,27 @@ class SoftmaxBCELoss(torch.nn.Module):
 #         wsum = self.weight[None] * torch.sum(-target * logprobs)
 #         return torch.mean(wsum, dim=1)
 
+
+def global_average_pooling(inp: torch.Tensor) -> torch.Tensor:
+    if inp.ndim == 5:
+        return F.adaptive_avg_pool3d(inp, 1)
+    elif inp.ndim == 4:
+        return F.adaptive_avg_pool2d(inp, 1)
+    else:
+        raise NotImplementedError
+
+
+class GAPTripletMarginLoss(nn.TripletMarginLoss):
+    """Same as ``torch.nn.TripletMarginLoss``, but applies global average
+    pooling to anchor, positive and negative tensors before calculating the
+    loss."""
+
+    def forward(self, anchor: torch.Tensor, positive: torch.Tensor, negative: torch.Tensor) -> torch.Tensor:
+        return super().forward(
+            global_average_pooling(anchor),
+            global_average_pooling(positive),
+            global_average_pooling(negative)
+        )
 
 def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
