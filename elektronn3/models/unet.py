@@ -197,10 +197,6 @@ def get_activation(activation):
         return copy.deepcopy(activation)
 
 
-class PoolingError(Exception):
-    pass
-
-
 class DownConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 MaxPool.
@@ -214,6 +210,7 @@ class DownConv(nn.Module):
         self.out_channels = out_channels
         self.pooling = pooling
         self.normalization = normalization
+        self.dim = dim
         padding = 1 if 'same' in conv_mode else 0
 
         self.conv1 = conv3(
@@ -228,8 +225,10 @@ class DownConv(nn.Module):
             if planar:
                 kernel_size = planar_kernel(kernel_size)
             self.pool = get_maxpool(dim)(kernel_size=kernel_size)
+            self.pool_ks = kernel_size
         else:
             self.pool = nn.Identity()
+            self.pool_ks = -123  # Bogus value, will never be read. Only to satisfy TorchScript's static type system
 
         self.act1 = get_activation(activation)
         self.act2 = get_activation(activation)
@@ -240,21 +239,35 @@ class DownConv(nn.Module):
             self.norm0 = nn.Identity()
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
-    @torch.jit.unused
-    def check_poolable(self, y: torch.Tensor):
+    def check_poolable(self, y: torch.Tensor) -> None:
         """Before pooling, we manually check if the tensor is divisible by the pooling kernel
         size, because PyTorch doesn't throw an error if it's not divisible, but calculates
         the output shape by floor division instead. While this may make sense for other
         architectures, in U-Net this would lead to incorrect output shapes after upsampling.
         """
-        ks = self.pool.kernel_size
+        # The code below looks stupidly repetitive, but currently it has to be this way to
+        #  ensure source-level TorchScript compatibility. This is due to the static type system of
+        #  TorchScript (ks can be None, int, Tuple[int, int] or Tuple[int, int, int]).
+        #  TorchScript Exceptions don't support messages, so print statements are used for errors.
+        ks = self.pool_ks
+        if ks is None:
+            return
         if isinstance(ks, int):  # given as scalar -> extend to spatial shape
-            ks = tuple([ks for _ in y.shape[2:]])
-        if any([s % k != 0 for s, k in zip(y.shape[2:], ks)]):
-            raise PoolingError(
-                f'Can\'t pool {y.shape[2:]} input by a {ks}'
-                ' kernel. Please adjust the input shape.'
-            )
+            if self.dim == 3:
+                for i in range(self.dim):
+                    if y.shape[2 + i] % ks != 0:
+                        print(f'\nCan\'t pool {y.shape[2:]} input by {ks}.\n')
+                        raise Exception
+            else:
+                for i in range(self.dim):
+                    if y.shape[2 + i] % ks != 0:
+                        print(f'\nCan\'t pool {y.shape[2:]} input by {ks}.\n')
+                        raise Exception
+        else:
+            for i in range(self.dim):
+                if y.shape[2 + i] % ks[i] != 0:
+                    print(f'\nCan\'t pool {y.shape[2:]} input by {ks}.\n')
+                    raise Exception
 
     def forward(self, x):
         y = self.conv1(x)
@@ -264,7 +277,7 @@ class DownConv(nn.Module):
         y = self.norm1(y)
         y = self.act2(y)
         before_pool = y
-        if self.pooling and not torch.jit.is_scripting():
+        if self.pooling:
             self.check_poolable(y)
         y = self.pool(y)
         return y, before_pool
@@ -729,8 +742,8 @@ class UNet(nn.Module):
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
             planar_blocks: Sequence = (),
-            batch_norm='unset',
-            attention=False,
+            batch_norm: str = 'unset',
+            attention: bool = False,
             activation: Union[str, nn.Module] = 'relu',
             normalization: str = 'batch',
             full_norm: bool = True,
@@ -862,7 +875,6 @@ class UNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        sh = x.shape[2:]
         encoder_outs = []
 
         # Encoder pathway, save outputs for merging
