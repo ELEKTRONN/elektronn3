@@ -91,7 +91,7 @@ def _change_log_file_to(
     file_handler.baseFilename = new_path
 
 
-class Trainer3d:
+class Trainer3dTriplet:
     """ Training loop abstraction with IPython and tensorboard integration.
 
     Hitting Ctrl-C anytime during the training will drop you to the IPython
