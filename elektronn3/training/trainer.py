@@ -5,6 +5,7 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
 import pprint
+import traceback
 from collections import deque
 
 import gc
@@ -598,13 +599,23 @@ class Trainer:
                 # TODO: Make bn_update configurable (esp. number of batches)
                 self.optimizer.update_swa()  # Put current model params into SWA buffer
                 self.optimizer.swap_swa_sgd()  # Perform SWA and write results into model params
-                max_bn_corr_batches = 10  # Batches to use to correct SWA batchnorm stats
-                # We're assuming here that len(self.train_loader), which is an upper bound for
-                #  len(swa_loader), is sufficient for a good stat estimation
-                swa_loader = islice(self.train_loader, max_bn_corr_batches)
-                # This may be expensive (comparable to validation computations)
-                SWA.bn_update(swa_loader, self.model, device=self.device)
-                self._save_model(suffix='_swa', verbose=False)
+                has_bn = any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm) for m in self.model.modules())
+                if has_bn:  # Perform batch norm correction
+                    try:
+                        max_bn_corr_batches = 10  # Batches to use to correct SWA batchnorm stats
+                        # We're assuming here that len(self.train_loader), which is an upper bound for
+                        #  len(swa_loader), is sufficient for a good stat estimation
+                        swa_loader = islice(self.train_loader, max_bn_corr_batches)
+                        # This may be expensive (comparable to validation computations)
+                        SWA.bn_update(swa_loader, self.model, device=self.device)
+                        self._save_model(suffix='_swa', verbose=False)
+                    except:
+                        logger.exception(
+                            'SWA helper bn_update has failed. SWA model will be saved with incorrect '
+                            'batchnorm statistics. Please make sure to manually correct the BN stats '
+                            'before deploying the model.'
+                        )
+                        self._save_model(suffix='_swa_todo_batchnorm_corr', verbose=False)
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     @torch.no_grad()
