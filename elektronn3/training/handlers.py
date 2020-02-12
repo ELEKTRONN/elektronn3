@@ -10,23 +10,37 @@ import matplotlib.pyplot as plt
 import matplotlib.cm
 import numpy as np
 import torch
-from skimage.color import label2rgb
 from torch.nn import functional as F
 
 from elektronn3.data.utils import squash01
 
 
-E3_CMAP = os.getenv('E3_CMAP', 'viridis')
+E3_CMAP: str = os.getenv('E3_CMAP')
 
 
-def get_colors(num_classes: int, cmap: str = E3_CMAP) -> np.ndarray:
-    return matplotlib.cm.get_cmap(cmap, num_classes).colors
+def get_cmap(out_channels: int):
+    if E3_CMAP is not None:
+        cmname = E3_CMAP
+    # Else, use defaults:
+    elif out_channels <= 10:
+        cmname = 'tab10'
+    elif out_channels <= 20:
+        cmname = 'tab20'
+    else:
+        raise RuntimeError(
+            f'Default cmaps only support up to 20 colors, which are not enough to label '
+            f'{out_channels} different output channels.\nPlease set a different cmap '
+            'with the E3_CMAP envvar.'
+        )
+    return matplotlib.cm.get_cmap(cmname, out_channels)
 
 
 def plot_image(
         image: np.ndarray,
+        overlay: Optional[np.ndarray] = None,
+        overlay_alpha=0.5,
         cmap=None,
-        num_classes=None,
+        out_channels=None,
         colorbar=True,
         filename=''
 ) -> matplotlib.figure.Figure:
@@ -34,32 +48,45 @@ def plot_image(
 
     For gray-scale images, use ``cmap='gray'``.
     For label matrices (segmentation targets or class predictions),
-    specify the global number of possible classes in ``num_classes``."""
+    specify the global number of possible classes in ``out_channels``."""
 
     # Determine colormap and set discrete color values if needed.
     vmin, vmax = None, None
     ticks = None
-    if cmap is None and num_classes is not None:
+    ticklabels = None
+    if cmap is None and out_channels is not None:
         # Assume label matrix with qualitative classes, no meaningful order
-        # Using rainbow because IMHO all actually qualitative colormaps
-        #  are incredibly ugly.
-        cmap = plt.cm.get_cmap(E3_CMAP, num_classes)
-        ticks = np.arange(num_classes)
+        if cmap is not None:
+            raise ValueError('If out_channels is not None, manually setting cmap is not supported.')
 
-    if num_classes is not None:  # For label matrices
+        if out_channels > 20:
+            raise NotImplementedError('out_channels > 20 is not supported for plotting.')
+        cmap = get_cmap(out_channels)
+
+        ticks = np.linspace(0.5, out_channels - 0.5, out_channels) # 0.5 for centered ticks
+        ticklabels = np.arange(out_channels)
+    if out_channels is not None:  # For label matrices
         # Prevent colormap normalization. If vmax is not set, the colormap
         #  is dynamically rescaled to fit between the minimum and maximum
         #  values of the image to be plotted. This could lead to misleading
         #  visualizations if the maximum value of the array to be plotted
         #  is less than the global maximum of classes.
         vmin = 0
-        vmax = num_classes
+        vmax = out_channels
 
     fig, ax = plt.subplots()
-    aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+    if overlay is None:
+        aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+    else:
+        ax.imshow(image, cmap='gray')
+        masked_overlay = np.ma.masked_where(overlay == 0, overlay)
+        aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha)
     ax.set_title(filename)
     if colorbar:
-        fig.colorbar(aximg, ticks=ticks)  # TODO: Centered tick labels
+        bar = fig.colorbar(aximg, ticks=ticks)
+        if ticklabels is not None:
+            bar.set_ticklabels(ticklabels)
+        bar.solids.set(alpha=1) # otherwise uses image’s opacity
     return fig
 
 
@@ -110,12 +137,10 @@ def _tb_log_preview(
     inp_batch = trainer.preview_batch
     out_batch = trainer._preview_inference(
         inp=inp_batch,
-        tile_shape=trainer.preview_tile_shape,
-        overlap_shape=trainer.preview_overlap_shape,
-        offset=trainer.preview_offset
+        inference_kwargs=trainer.inference_kwargs,
     )
     inp_batch = inp_batch.numpy()
-    if trainer.apply_softmax_for_prediction:
+    if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(out_batch, 1).numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
@@ -166,19 +191,13 @@ def _tb_log_preview(
         )
     trainer.tb.add_figure(
         f'{group}/pred',
-        plot_image(pred_slice, num_classes=trainer.num_classes),
+        plot_image(pred_slice, out_channels=trainer.out_channels),
         trainer.step
     )
     inp_slice = batch2img(inp_batch)[0]
-    inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-    pred_slice_ov = label2rgb(
-        pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha,
-        colors=get_colors(trainer.num_classes)[1:]
-    )
-    pred_slice_ov[pred_slice == 0, :] = inp01[pred_slice == 0, None]
     trainer.tb.add_figure(
         f'{group}/pred_overlay',
-        plot_image(pred_slice_ov, colorbar=False),
+        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels),
         global_step=trainer.step
     )
 
@@ -214,7 +233,7 @@ def _tb_log_sample_images(
     out_batch = images['out'][:1]
     name = images.get('fname', '')
 
-    if trainer.apply_softmax_for_prediction:
+    if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
@@ -257,7 +276,7 @@ def _tb_log_sample_images(
         padded_target_batch[slc] = target_batch
         target_batch = padded_target_batch
 
-    target_cmap = None
+    target_cmap = E3_CMAP
     batch2img = _get_batch2img_function(out_batch, z_plane)
     target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
@@ -267,6 +286,7 @@ def _tb_log_sample_images(
         # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
         target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
         out_slice = np.moveaxis(out_slice, 0, -1)
+        target_cmap = None
     elif target_slice.shape[0] == 1:
         target_slice = target_slice[0]
         out_slice = out_slice[0]
@@ -311,9 +331,17 @@ def _tb_log_sample_images(
     )
     trainer.tb.add_figure(
         f'{group}/target',
-        plot_image(target_slice, num_classes=trainer.num_classes, cmap=target_cmap, filename=name),
+        plot_image(target_slice, out_channels=trainer.out_channels, filename=name),
         global_step=trainer.step
     )
+
+    for key, img in images.items():
+        if key.startswith('att'):
+            trainer.tb.add_figure(
+                f'{group}/{key}',
+                plot_image(img, cmap='viridis'),
+                global_step=trainer.step
+            )
 
     # Only make pred and overlay plots in classification scenarios
     if is_classification:
@@ -328,34 +356,18 @@ def _tb_log_sample_images(
         pred_slice = out_slice.argmax(0)
         trainer.tb.add_figure(
             f'{group}/pred_slice',
-            plot_image(pred_slice, num_classes=trainer.num_classes, filename=name),
+            plot_image(pred_slice, out_channels=trainer.out_channels, filename=name),
             global_step=trainer.step
         )
         if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
-            inp01 = squash01(inp_slice)  # Squash to [0, 1] range for label2rgb and plotting
-            target_slice_ov = label2rgb(
-                target_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha,
-                colors=get_colors(trainer.num_classes)[1:]
-            )
-            # Replace zero-labelled regions in blended overlay img with original image contents
-            # to avoid darkening effects of alpha blending with 0.
-            target_slice_ov[target_slice == 0, :] = inp01[target_slice == 0, None]
-            pred_slice_ov = label2rgb(
-                pred_slice, inp01, bg_label=0, alpha=trainer.overlay_alpha,
-                colors=get_colors(trainer.num_classes)[1:]
-            )
-            pred_slice_ov[pred_slice == 0, :] = inp01[pred_slice == 0, None]
-            # Ensure the value range remains [0, 1]
-            target_slice_ov = np.clip(target_slice_ov, 0, 1)
-            pred_slice_ov = np.clip(pred_slice_ov, 0, 1)
             trainer.tb.add_figure(
                 f'{group}/target_overlay',
-                plot_image(target_slice_ov, colorbar=False, filename=name),
+                plot_image(inp_slice, overlay=target_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
                 global_step=trainer.step
             )
             trainer.tb.add_figure(
                 f'{group}/pred_overlay',
-                plot_image(pred_slice_ov, colorbar=False),
+                plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
                 global_step=trainer.step
             )
     elif is_regression:

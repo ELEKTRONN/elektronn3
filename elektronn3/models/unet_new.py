@@ -19,30 +19,191 @@ which implements (2D) U-Net with user-defined network depth
 and a few other improvements of the original architecture.
 
 Major differences of this version from Huang's code:
+
 - Operates on 3D image data (5D tensors) instead of 2D data
 - Uses 3D convolution, 3D pooling etc. by default
 - planar_blocks architecture parameter for mixed 2D/3D convnets
   (see UNet class docstring for details)
 - Improved tests (see the bottom of the file)
 - Cleaned up parameter/variable names and formatting, changed default params
-- Updated for PyTorch 1.0.1 and Python 3.6 (earlier versions unsupported)
+- Updated for PyTorch 1.3 and Python 3.6 (earlier versions unsupported)
 - (Optional DEBUG mode for optional printing of debug information)
 - Extended documentation
 """
 
 __all__ = ['UNet']
 
+import copy
 import itertools
 
-from typing import Sequence, Union, Tuple
-
+from typing import Sequence, Union, Tuple, Optional
+import warnings
 import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 from torch.nn import functional as F
+try:
+    ignore_decorator = torch.jit.unused
+except AttributeError:
+    # pytorch 1.1.0
+    ignore_decorator = torch.jit.ignore
 
-import elektronn3.modules.layer_helpers as em
-# TODO: This module is deprecated and needs to be replaced by unet_new.py
+
+def get_conv(dim=3):
+    """Chooses an implementation for a convolution layer."""
+    if dim == 3:
+        return nn.Conv3d
+    elif dim == 2:
+        return nn.Conv2d
+    else:
+        raise ValueError('dim has to be 2 or 3')
+
+
+def get_convtranspose(dim=3):
+    """Chooses an implementation for a transposed convolution layer."""
+    if dim == 3:
+        return nn.ConvTranspose3d
+    elif dim == 2:
+        return nn.ConvTranspose2d
+    else:
+        raise ValueError('dim has to be 2 or 3')
+
+
+def get_maxpool(dim=3):
+    """Chooses an implementation for a max-pooling layer."""
+    if dim == 3:
+        return nn.MaxPool3d
+    elif dim == 2:
+        return nn.MaxPool2d
+    else:
+        raise ValueError('dim has to be 2 or 3')
+
+
+def get_normalization(normtype: str, num_channels: int, dim: int = 3):
+    """Chooses an implementation for a batch normalization layer."""
+    if normtype is None or normtype == 'none':
+        return nn.Identity()
+    elif normtype.startswith('group'):
+        if normtype == 'group':
+            num_groups = 8
+        elif len(normtype) > len('group') and normtype[len('group'):].isdigit():
+            num_groups = int(normtype[len('group'):])
+        else:
+            raise ValueError(
+                f'normtype "{normtype}" not understood. It should be "group<G>",'
+                f' where <G> is the number of groups.'
+            )
+        return nn.GroupNorm(num_groups=num_groups, num_channels=num_channels)
+    elif normtype == 'instance':
+        if dim == 3:
+            return nn.InstanceNorm3d(num_channels)
+        elif dim == 2:
+            return nn.InstanceNorm2d(num_channels)
+        else:
+            raise ValueError('dim has to be 2 or 3')
+    elif normtype == 'batch':
+        if dim == 3:
+            return nn.BatchNorm3d(num_channels)
+        elif dim == 2:
+            return nn.BatchNorm2d(num_channels)
+        else:
+            raise ValueError('dim has to be 2 or 3')
+    else:
+        raise ValueError(
+            f'Unknown normalization type "{normtype}".\n'
+            'Valid choices are "batch", "instance", "group" or "group<G>",'
+            'where <G> is the number of groups.'
+        )
+
+
+def planar_kernel(x):
+    """Returns a "planar" kernel shape (e.g. for 2D convolution in 3D space)
+    that doesn't consider the first spatial dim (D)."""
+    if isinstance(x, int):
+        return (1, x, x)
+    else:
+        return x
+
+
+def planar_pad(x):
+    """Returns a "planar" padding shape that doesn't pad along the first spatial dim (D)."""
+    if isinstance(x, int):
+        return (0, x, x)
+    else:
+        return x
+
+
+def conv3(in_channels, out_channels, kernel_size=3, stride=1,
+          padding=1, bias=True, planar=False, dim=3):
+    """Returns an appropriate spatial convolution layer, depending on args.
+    - dim=2: Conv2d with 3x3 kernel
+    - dim=3 and planar=False: Conv3d with 3x3x3 kernel
+    - dim=3 and planar=True: Conv3d with 1x3x3 kernel
+    """
+    if planar:
+        stride = planar_kernel(stride)
+        padding = planar_pad(padding)
+        kernel_size = planar_kernel(kernel_size)
+    return get_conv(dim)(
+        in_channels,
+        out_channels,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        bias=bias
+    )
+
+
+def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
+    """Returns a learned upsampling operator depending on args."""
+    kernel_size = 2
+    stride = 2
+    if planar:
+        kernel_size = planar_kernel(kernel_size)
+        stride = planar_kernel(stride)
+    if mode == 'transpose':
+        return get_convtranspose(dim)(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride
+        )
+    elif 'resizeconv' in mode:
+        if 'linear' in mode:
+            upsampling_mode = 'trilinear' if dim == 3 else 'bilinear'
+        else:
+            upsampling_mode = 'nearest'
+        rc_kernel_size = 1 if mode.endswith('1') else 3
+        return ResizeConv(
+            in_channels, out_channels, planar=planar, dim=dim,
+            upsampling_mode=upsampling_mode, kernel_size=rc_kernel_size
+        )
+
+
+def conv1(in_channels, out_channels, dim=3):
+    """Returns a 1x1 or 1x1x1 convolution, depending on dim"""
+    return get_conv(dim)(in_channels, out_channels, kernel_size=1)
+
+
+def get_activation(activation):
+    if isinstance(activation, str):
+        if activation == 'relu':
+            return nn.ReLU()
+        elif activation == 'leaky':
+            return nn.LeakyReLU(negative_slope=0.1)
+        elif activation == 'prelu':
+            return nn.PReLU(num_parameters=1)
+        elif activation == 'rrelu':
+            return nn.RReLU()
+        elif activation == 'lin':
+            return nn.Identity()
+    else:
+        # Deep copy is necessary in case of paremtrized activations
+        return copy.deepcopy(activation)
+
+
+class PoolingError(Exception):
+    pass
 
 
 class DownConv(nn.Module):
@@ -51,46 +212,66 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 batch_norm=False, dim=3, conv_mode='same', adaptive=False):
+                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
-        self.batch_norm = batch_norm
+        self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = em.conv3(
-            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-            adaptive=adaptive
+        self.conv1 = conv3(
+            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
-        self.conv2 = em.conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-            adaptive=adaptive
+        self.conv2 = conv3(
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
 
         if self.pooling:
             kernel_size = 2
             if planar:
-                kernel_size = em.planar_kernel(kernel_size)
-            self.pool = em.get_maxpool(dim)(kernel_size=kernel_size)
+                kernel_size = planar_kernel(kernel_size)
+            self.pool = get_maxpool(dim)(kernel_size=kernel_size)
+        else:
+            self.pool = nn.Identity()
 
-        self.act1 = em.get_activation(activation)
-        self.act2 = em.get_activation(activation)
+        self.act1 = get_activation(activation)
+        self.act2 = get_activation(activation)
 
-        if self.batch_norm:
-            self.bn = em.get_batchnorm(dim)(self.out_channels)
+        if full_norm:
+            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
+        else:
+            self.norm0 = nn.Identity()
+        self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+
+    @ignore_decorator
+    def check_poolable(self, y: torch.Tensor):
+        """Before pooling, we manually check if the tensor is divisible by the pooling kernel
+        size, because PyTorch doesn't throw an error if it's not divisible, but calculates
+        the output shape by floor division instead. While this may make sense for other
+        architectures, in U-Net this would lead to incorrect output shapes after upsampling.
+        """
+        ks = self.pool.kernel_size
+        if isinstance(ks, int):  # given as scalar -> extend to spatial shape
+            ks = tuple([ks for _ in y.shape[2:]])
+        if any([s % k != 0 for s, k in zip(y.shape[2:], ks)]):
+            raise PoolingError(
+                f'Can\'t pool {y.shape[2:]} input by a {ks}'
+                ' kernel. Please adjust the input shape.'
+            )
 
     def forward(self, x):
         y = self.conv1(x)
+        y = self.norm0(y)
         y = self.act1(y)
         y = self.conv2(y)
-        if self.batch_norm:
-            y = self.bn(y)
+        y = self.norm1(y)
         y = self.act2(y)
         before_pool = y
-        if self.pooling:
-            y = self.pool(y)
+        if self.pooling and not torch.jit.is_scripting():
+            self.check_poolable(y)
+        y = self.pool(y)
         return y, before_pool
 
 
@@ -129,42 +310,51 @@ class UpConv(nn.Module):
     """
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
-                 activation='relu', batch_norm=False, dim=3, conv_mode='same', adaptive=False):
+                 activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
+                 attention=False):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.merge_mode = merge_mode
         self.up_mode = up_mode
-        self.batch_norm = batch_norm
+        self.normalization = normalization
         padding = 1 if 'same' in conv_mode else 0
 
-        self.upconv = em.upconv2(self.in_channels, self.out_channels,
-            mode=self.up_mode, planar=planar, dim=dim, adaptive=adaptive
-        )
+        self.upconv = upconv2(self.in_channels, self.out_channels,
+                              mode=self.up_mode, planar=planar, dim=dim)
 
         if self.merge_mode == 'concat':
-            self.conv1 = em.conv3(
-                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-                adaptive=adaptive
+            self.conv1 = conv3(
+                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
             )
         else:
             # num of input channels to conv2 is same
-            self.conv1 = em.conv3(
-                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-                adaptive=adaptive
+            self.conv1 = conv3(
+                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
             )
-        self.conv2 = em.conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding,
-            adaptive=adaptive
+        self.conv2 = conv3(
+            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
         )
 
-        self.act0 = em.get_activation(activation)
-        self.act1 = em.get_activation(activation)
-        self.act2 = em.get_activation(activation)
+        self.act0 = get_activation(activation)
+        self.act1 = get_activation(activation)
+        self.act2 = get_activation(activation)
 
-        if self.batch_norm:
-            self.bn = em.get_batchnorm(dim)(self.out_channels)
+        if full_norm:
+            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
+            self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+        else:
+            self.norm0 = nn.Identity()
+            self.norm1 = nn.Identity()
+        self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
+        if attention:
+            self.attention = GridAttention(
+                in_channels=in_channels // 2, gating_channels=in_channels, dim=dim
+            )
+        else:
+            self.attention = DummyAttention()
+        self.att = None  # Field to store attention mask for later analysis
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -172,61 +362,162 @@ class UpConv(nn.Module):
             enc: Tensor from the encoder pathway
             dec: Tensor from the decoder pathway (to be upconv'd)
         """
+
         updec = self.upconv(dec)
-        crenc, upcdec = autocrop(enc, updec)
+        enc, updec = autocrop(enc, updec)
+        genc, att = self.attention(enc, dec)
+        self.att = att
+        updec = self.norm0(updec)
         updec = self.act0(updec)
         if self.merge_mode == 'concat':
-            mrg = torch.cat((updec, crenc), 1)
+            mrg = torch.cat((updec, genc), 1)
         else:
-            mrg = updec + crenc
+            mrg = updec + genc
         y = self.conv1(mrg)
+        y = self.norm1(y)
         y = self.act1(y)
         y = self.conv2(y)
-        if self.batch_norm:
-            y = self.bn(y)
+        y = self.norm2(y)
         y = self.act2(y)
         return y
 
 
-# class EncoderBottleneck(nn.Module):
-#     def __init__(self, in_channels, out_channels, dim=3):
-#         super().__init__()
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
-#         self.dim = dim
-#
-#         self.conv = em.conv1(in_channels, 4, dim=dim)
-#         self.aap = nn.AdaptiveAvgPool2d((8, 8))
-#         self.fc = nn.Linear(4 * 8*8, 32)
-#
-#     def forward(self, x):
-#         x = self.conv(x)
-#         x = F.relu(x)
-#         x = self.aap(x)
-#         x = x.view(x.shape[0], -1)
-#         x = self.fc(x)
-#         x = F.relu(x)
-#         return x
-#
-#
-# class DecoderBottleneck(nn.Module):
-#     def __init__(self, in_channels, out_channels, dim=3):
-#         super().__init__()
-#         self.in_channels = in_channels
-#         self.out_channels = out_channels
-#         self.dim = dim
-#
-#         self.fc = nn.Linear(32, 4 * 8*8)
-#         self.conv = em.conv1(in_channels, out_channels, dim=dim)
-#
-#     def forward(self, x):
-#         x = self.fc(x)
-#         x = F.relu(x)
-#         x = x.view(x.shape[0], 4, 8, 8)
-#         x = self.conv(x)
-#         x = F.relu(x)
-#         x = F.interpolate(x, (SIZE))  # TODO
-#         return x
+class ResizeConv(nn.Module):
+    """Upsamples by 2x and applies a convolution.
+
+    This is meant as a replacement for transposed convolution to avoid
+    checkerboard artifacts. See
+
+    - https://distill.pub/2016/deconv-checkerboard/
+    - https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
+    """
+    def __init__(self, in_channels, out_channels, kernel_size=3, planar=False, dim=3,
+                 upsampling_mode='nearest'):
+        super().__init__()
+        self.upsampling_mode = upsampling_mode
+        self.scale_factor = 2
+        if dim == 3 and planar:  # Only interpolate (H, W) dims, leave D as is
+            self.scale_factor = planar_kernel(self.scale_factor)
+        self.dim = dim
+        self.upsample = nn.Upsample(scale_factor=self.scale_factor, mode=self.upsampling_mode)
+        # TODO: Investigate if 3x3 or 1x1 conv makes more sense here and choose default accordingly
+        # Preliminary notes:
+        # - conv3 increases global parameter count by ~10%, compared to conv1 and is slower overall
+        # - conv1 is the simplest way of aligning feature dimensions
+        # - conv1 may be enough because in all common models later layers will apply conv3
+        #   eventually, which could learn to perform the same task...
+        #   But not exactly the same thing, because this layer operates on
+        #   higher-dimensional features, which subsequent layers can't access
+        #   (at least in U-Net out_channels == in_channels // 2).
+        # --> Needs empirical evaluation
+        if kernel_size == 3:
+            self.conv = conv3(
+                in_channels, out_channels, padding=1, planar=planar, dim=dim
+            )
+        elif kernel_size == 1:
+            self.conv = conv1(in_channels, out_channels, dim=dim)
+        else:
+            raise ValueError(f'kernel_size={kernel_size} is not supported. Choose 1 or 3.')
+
+    def forward(self, x):
+        return self.conv(self.upsample(x))
+
+
+class GridAttention(nn.Module):
+    """Based on https://github.com/ozan-oktay/Attention-Gated-Networks
+
+    Published in https://arxiv.org/abs/1804.03999"""
+    def __init__(self, in_channels, gating_channels, inter_channels=None, dim=3, sub_sample_factor=2):
+        super().__init__()
+
+        assert dim in [2, 3]
+
+        # Downsampling rate for the input featuremap
+        if isinstance(sub_sample_factor, tuple): self.sub_sample_factor = sub_sample_factor
+        elif isinstance(sub_sample_factor, list): self.sub_sample_factor = tuple(sub_sample_factor)
+        else: self.sub_sample_factor = tuple([sub_sample_factor]) * dim
+
+        # Default parameter set
+        self.dim = dim
+        self.sub_sample_kernel_size = self.sub_sample_factor
+
+        # Number of channels (pixel dimensions)
+        self.in_channels = in_channels
+        self.gating_channels = gating_channels
+        self.inter_channels = inter_channels
+
+        if self.inter_channels is None:
+            self.inter_channels = in_channels // 2
+            if self.inter_channels == 0:
+                self.inter_channels = 1
+
+        if dim == 3:
+            conv_nd = nn.Conv3d
+            bn = nn.BatchNorm3d
+            self.upsample_mode = 'trilinear'
+        elif dim == 2:
+            conv_nd = nn.Conv2d
+            bn = nn.BatchNorm2d
+            self.upsample_mode = 'bilinear'
+        else:
+            raise NotImplementedError
+
+        # Output transform
+        self.w = nn.Sequential(
+            conv_nd(in_channels=self.in_channels, out_channels=self.in_channels, kernel_size=1),
+            bn(self.in_channels),
+        )
+        # Theta^T * x_ij + Phi^T * gating_signal + bias
+        self.theta = conv_nd(
+            in_channels=self.in_channels, out_channels=self.inter_channels,
+            kernel_size=self.sub_sample_kernel_size, stride=self.sub_sample_factor, bias=False
+        )
+        self.phi = conv_nd(
+            in_channels=self.gating_channels, out_channels=self.inter_channels,
+            kernel_size=1, stride=1, padding=0, bias=True
+        )
+        self.psi = conv_nd(
+            in_channels=self.inter_channels, out_channels=1, kernel_size=1, stride=1, bias=True
+        )
+
+        self.init_weights()
+
+    def forward(self, x, g):
+        # theta => (b, c, t, h, w) -> (b, i_c, t, h, w) -> (b, i_c, thw)
+        # phi   => (b, g_d) -> (b, i_c)
+        theta_x = self.theta(x)
+
+        # g (b, c, t', h', w') -> phi_g (b, i_c, t', h', w')
+        #  Relu(theta_x + phi_g + bias) -> f = (b, i_c, thw) -> (b, i_c, t/s1, h/s2, w/s3)
+        phi_g = F.interpolate(self.phi(g), size=theta_x.shape[2:], mode=self.upsample_mode, align_corners=False)
+        f = F.relu(theta_x + phi_g, inplace=True)
+
+        #  psi^T * f -> (b, psi_i_c, t/s1, h/s2, w/s3)
+        sigm_psi_f = torch.sigmoid(self.psi(f))
+
+        # upsample the attentions and multiply
+        sigm_psi_f = F.interpolate(sigm_psi_f, size=x.shape[2:], mode=self.upsample_mode, align_corners=False)
+        y = sigm_psi_f.expand_as(x) * x
+        wy = self.w(y)
+
+        return wy, sigm_psi_f
+
+    def init_weights(self):
+        def weight_init(m):
+            classname = m.__class__.__name__
+            if classname.find('Conv') != -1:
+                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif classname.find('Linear') != -1:
+                nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif classname.find('BatchNorm') != -1:
+                nn.init.normal_(m.weight.data, 1.0, 0.02)
+                nn.init.constant_(m.bias.data, 0.0)
+        self.apply(weight_init)
+
+
+class DummyAttention(nn.Module):
+    def forward(self, x, g):
+        return x, None
 
 
 # TODO: Pre-calculate output sizes when using valid convolutions
@@ -277,7 +568,8 @@ class UNet(nn.Module):
         in_channels: Number of input channels
             (e.g. 1 for single-grayscale inputs, 3 for RGB images)
             Default: 1
-        out_channels: Number of output channels (number of classes).
+        out_channels: Number of output channels (in classification/semantic
+            segmentation, this is the number of different classes).
             Default: 2
         n_blocks: Number of downsampling/convolution blocks (max-pooling)
             in the encoder pathway. The decoder (upsampling/upconvolution)
@@ -290,8 +582,8 @@ class UNet(nn.Module):
               contextual information will be available for the network,
               enhancing the effective visual receptive field.
               (n + 1 -> receptive field is approximately doubled in each
-                  dimension, except in planar blocks, in which it is only
-                  doubled in the H and W image dimensions)
+              dimension, except in planar blocks, in which it is only
+              doubled in the H and W image dimensions)
 
             **Important note**: Always make sure that the spatial shape of
             your input is divisible by the number of blocks, because
@@ -351,15 +643,29 @@ class UNet(nn.Module):
               accuracy.
             - Or you can pass an nn.Module instance directly, e.g.
               ``activation=torch.nn.ReLU()``
-        batch_norm: If batch normalization should be applied at the end of
-            each block. Note that BN is applied after the activated conv
+        normalization: Type of normalization that should be applied at the end
+            of each block. Note that it is applied after the activated conv
             layers, not before the activation. This scheme differs from the
             original batch normalization paper and the BN scheme of 3D U-Net,
             but it delivers better results this way
             (see https://redd.it/67gonq).
-        ae: Enable autoencoder mode. ``out_channels`` is ignored; outputs always
-            have the same channels as inputs.
-            Experimental. May not work well with other non-default options.
+            Choices:
+
+            - 'group' for group normalization (G=8)
+            - 'group<G>' for group normalization with <G> groups
+              (e.g. 'group16') for G=16
+            - 'instance' for instance normalization
+            - 'batch' for batch normalization
+            - 'none' or ``None`` for no normalization
+        attention: If ``True``, use grid attention in the decoding pathway,
+            as proposed in https://arxiv.org/abs/1804.03999.
+            Default: ``False``.
+        full_norm: If ``True`` (default), perform normalization after each
+            (transposed) convolution in the network (which is what almost
+            all published neural network architectures do).
+            If ``False``, only normalize after the last convolution
+            layer of each block, in order to save resources. This was also
+            the default behavior before this option was introduced.
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -408,11 +714,6 @@ class UNet(nn.Module):
                 the borders. Most notably this is the case if you do training
                 and inference not on small patches, but on complete images in
                 a single step.
-        adaptive: If ``True``, use custom convolution/transposed
-            convolution layers for improved performance in planar blocks.
-            This is an experimental feature and it is not guaranteed to give
-            the same results as the native PyTorch convolution/transposed
-            convolution implementations.
         checkpointing: If ``True``, use gradient checkpointing to reduce memory
             consumption while training. This makes the backward pass a bit
             slower, but the memory savings can be huge (usually around
@@ -422,25 +723,31 @@ class UNet(nn.Module):
             https://arxiv.org/abs/1604.06174 for more details.
     """
 
+    __constants__ = ['down_convs', 'up_convs']
+
     def __init__(
             self,
             in_channels: int = 1,
             out_channels: int = 2,
             n_blocks: int = 3,
-            start_filts: int = 64,
+            start_filts: int = 32,
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
             planar_blocks: Sequence = (),
+            batch_norm='unset',
+            attention=False,
             activation: Union[str, nn.Module] = 'relu',
-            batch_norm: bool = True,
-            ae: bool = False,
+            normalization: str = 'group',
+            full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
-            adaptive: bool = False,
-            checkpointing: bool = False
+            checkpointing: bool = False,
+            adaptive: Optional[bool] = None,
     ):
         super().__init__()
-
+        if adaptive is not None:
+            warnings.warn('Keyword argument "adaptive" is deprecated.',
+                          DeprecationWarning)
         if n_blocks < 1:
             raise ValueError('n_blocks must be > 1.')
 
@@ -487,24 +794,31 @@ class UNet(nn.Module):
         self.in_channels = in_channels
         self.start_filts = start_filts
         self.n_blocks = n_blocks
-        self.batch_norm = batch_norm
+        self.normalization = normalization
+        self.attention = attention
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
-        self.adaptive = adaptive
         self.checkpointing = checkpointing
-        self.ae = ae
 
-        self.down_convs = []
-        self.up_convs = []
+        self.down_convs = nn.ModuleList()
+        self.up_convs = nn.ModuleList()
+
+        if batch_norm is True:
+            normalization = 'batch'
+            warnings.warn('The `batch_norm` option has been replaced with the more general '
+                          '`normalization` option. Now setting normalization=batch to enable '
+                          'batch_norm=True behaviour. THis will through an RuntimeError in the'
+                          'future.', DeprecationWarning)
+        elif batch_norm != 'unset':
+            raise RuntimeError(
+                'The `batch_norm` option has been replaced with the more general `normalization` option.\n'
+                'If you still want to use batch normalization, set `normalization=batch` instead.'
+            )
 
         # Indices of blocks that should operate in 2D instead of 3D mode,
         # to save resources
         self.planar_blocks = planar_blocks
-        if not planar_blocks:
-            # Adaptive Convolutions only make sense if a part of the network
-            #  operates in 2D (planar mode)
-            self.adaptive = False
 
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
@@ -519,10 +833,10 @@ class UNet(nn.Module):
                 pooling=pooling,
                 planar=planar,
                 activation=activation,
-                batch_norm=batch_norm,
+                normalization=normalization,
+                full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
-                adaptive=adaptive
             )
             self.down_convs.append(down_conv)
 
@@ -540,61 +854,50 @@ class UNet(nn.Module):
                 merge_mode=merge_mode,
                 planar=planar,
                 activation=activation,
-                batch_norm=batch_norm,
+                normalization=normalization,
+                attention=attention,
+                full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
-                adaptive=adaptive
             )
             self.up_convs.append(up_conv)
 
-        self.conv_final = em.conv1(outs, self.out_channels, dim=dim)
-        if self.ae:
-            # Dedicated final layer for autoencoder training.
-            # self.conv_final is left untouched for autoencoder training,
-            # so switching to ae=False won't require layer re-initialization.
-            self.conv_ae_final = em.conv1(outs, self.in_channels, dim=dim)
-            self.encoder_bottleneck = em.conv1(self.down_convs[-1].out_channels, 1, dim=dim)
-            # self.encoder_bottleneck = EncoderBottleneck(self.down_convs[-1].out_channels, 1, dim=dim)
-            self.decoder_bottleneck = em.conv1(self.encoder_bottleneck.out_channels, self.up_convs[0].in_channels, dim=dim)
+        self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
-        # add the list of modules to current module
-        self.down_convs = nn.ModuleList(self.down_convs)
-        self.up_convs = nn.ModuleList(self.up_convs)
-
-        self.reset_params()
+        self.apply(self.weight_init)
 
     @staticmethod
     def weight_init(m):
+        if isinstance(m, GridAttention):
+            return
         if isinstance(m, (nn.Conv3d, nn.Conv2d, nn.ConvTranspose3d, nn.ConvTranspose2d)):
             nn.init.xavier_normal_(m.weight)
-            nn.init.constant_(m.bias, 0)
-
-    def reset_params(self):
-        for i, m in enumerate(self.modules()):
-            self.weight_init(m)
+            if getattr(m, 'bias') is not None:
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        if self.ae:
-            # Don't do usual forward, do autoencoder forward pass instead
-            return self.autoencode(x)
         sh = x.shape[2:]
         encoder_outs = []
 
         # Encoder pathway, save outputs for merging
-        for i, module in enumerate(self.down_convs):
+        i = 0  # Can't enumerate because of https://github.com/pytorch/pytorch/issues/16123
+        for module in self.down_convs:
             if self.checkpointing:
                 x, before_pool = checkpoint(module, x)
             else:
                 x, before_pool = module(x)
             encoder_outs.append(before_pool)
+            i += 1
 
         # Decoding by UpConv and merging with saved outputs of encoder
-        for i, module in enumerate(self.up_convs):
+        i = 0
+        for module in self.up_convs:
             before_pool = encoder_outs[-(i+2)]
             if self.checkpointing:
                 x = checkpoint(module, before_pool, x)
             else:
                 x = module(before_pool, x)
+            i += 1
 
         # No softmax is used, so you need to apply it in the loss.
         x = self.conv_final(x)
@@ -602,63 +905,6 @@ class UNet(nn.Module):
         #  receptive field estimation using fornoxai/receptivefield:
         # self.feature_maps = [x]  # Currently disabled to save memory
         return x
-
-    def _ae_encode(self, x):
-        for i, module in enumerate(self.down_convs):
-            x, _ = module(x)
-        x = self.encoder_bottleneck(x)
-        return x
-
-    def _ae_decode(self, x):
-        x = self.decoder_bottleneck(x)
-        for i, module in enumerate(self.up_convs):
-            # Calculate expected shape for mock feature
-            sh = (x.shape[0], x.shape[1] // 2) + tuple(d * 2 for d in x.shape[2:])
-            before_pool = torch.zeros(sh, dtype=x.dtype, device=x.device)  # Mock encoder outputs
-            # TODO: For auto-encoder with throwaway decoder, we should use custom upconv blocks
-            #       without (mock) feature merging. Merging with zeros is a waste of computation.
-            x = module(before_pool, x)
-        return x
-
-    def autoencode(self, x):
-        # Encode, decode and reconstruct
-        enc = self._ae_encode(x)
-        dec = self._ae_decode(enc)
-        rec = self.conv_ae_final(dec)
-        return rec
-
-
-class UNet3dLite(UNet):
-    """(WIP) Re-implementation of the unet3d_lite model from ELEKTRONN2
-
-    See https://github.com/ELEKTRONN/ELEKTRONN2/blob/master/examples/unet3d_lite.py
-    (Not yet working due to the AutoCrop node in ELEKTRONN2 working differently)
-    """
-    def __init__(self):
-        super().__init__(
-            in_channels=1,
-            out_channels=2,
-            n_blocks=4,
-            start_filts=32,
-            up_mode='transpose',
-            merge_mode='concat',
-            planar_blocks=(0, 1, 2),  # U1 and U2 will later be replaced by non-planar blocks
-            activation='relu',
-            batch_norm=False,
-            dim=3,
-            conv_mode='valid',
-        )
-        # TODO: mrg0 in the original unet3d_lite has upconv_n_f=512, which doesn't appear here
-        for i in [1, 2]:
-            # Replace planar U1 and U2 blocks with non-planar 3x3x3 versions
-            ins = self.up_convs[i].upconv.in_channels
-            outs = self.up_convs[i].conv2.out_channels
-            self.up_convs[i] = UpConv(
-                ins, outs, merge_mode=self.merge_mode, up_mode=self.up_mode,
-                planar=False,
-                activation=self.activation, batch_norm=self.batch_norm,
-                dim=self.dim, conv_mode=self.conv_mode
-            )
 
 
 def test_model(

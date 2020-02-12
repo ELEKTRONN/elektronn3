@@ -4,6 +4,7 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch
 
+# TODO: Update docs to show Evaluator
 """Metrics and tools for evaluating neural network predictions
 
 References:
@@ -258,6 +259,8 @@ def channel_metric(metric, c, num_classes, argmax=True):
 # Metric evaluator shortcuts for raw network outputs in binary classification
 #  tasks ("bin_*"). "Raw" means not softmaxed or argmaxed.
 
+# These are deprecated and will be removed later. Use Evaluators instead.
+
 def bin_precision(target, out):
     pred = _argmax(out)
     return precision(
@@ -306,3 +309,39 @@ def bin_auroc(target, out):
         target, probs, mean=False
     )[1]  # Take only the score for class 1
 
+
+class Evaluator:
+    def __init__(self, metric_fn, index=None, ignore=None):
+        self.metric_fn = metric_fn
+        self.index = index
+        self.ignore = ignore
+        self.num_classes = None
+
+    def __call__(self, target, out):
+        if self.num_classes is None:
+            self.num_classes = out.shape[1]
+        pred = _argmax(out)
+        m = self.metric_fn(target, pred, self.num_classes, mean=False, ignore=self.ignore)
+        if self.index is None:
+            return m.mean().item()
+        return m[self.index].item()
+
+
+class Accuracy(Evaluator):
+    def __init__(self, *args, **kwargs): super().__init__(accuracy, *args, **kwargs)
+
+
+class Precision(Evaluator):
+    def __init__(self, *args, **kwargs): super().__init__(precision, *args, **kwargs)
+
+
+class Recall(Evaluator):
+    def __init__(self, *args, **kwargs): super().__init__(recall, *args, **kwargs)
+
+
+class IoU(Evaluator):
+    def __init__(self, *args, **kwargs): super().__init__(iou, *args, **kwargs)
+
+
+class DSC(Evaluator):
+    def __init__(self, *args, **kwargs): super().__init__(dice_coefficient, *args, **kwargs)

@@ -61,7 +61,7 @@ overlap_shape: Tuple[int, ...] = (32, 64, 64)
 
 apply_softmax: bool = True  # Disable this if you don't want to apply softmax on the model outputs.
 float16: bool = False  # Save memory by setting this to True. Can also improve speed on some setups.
-num_out_channels: int = 2  # Adjust this if your model outputs more channels/classes
+out_channels: int = 2  # Adjust this if your model outputs more channels/classes
 export_channel: int = 1  # Specify a channel whose contents will be written to the output file
 model_path: str = '~/e3training/base/model_best.pts'  # Change this to the model you want to use.
 inpath: str = '~/neuro_data_cdhw/raw_0.h5'  # Path to the file on which to run inference.
@@ -90,7 +90,7 @@ logger.info(f'Using mean={norm_mean}, std={norm_std} for input normalization...'
 logger.info(' (↑ Make sure these are the same as the values for training the model!)')
 transform = transforms.Normalize(mean=norm_mean, std=norm_std, inplace=True)
 
-out_shape = (num_out_channels, *inp.shape[2:])  # Assuming in_shape = out_shape
+out_shape = (out_channels, *inp.shape[2:])  # Assuming in_shape = out_shape
 logger.info(f'Loading model file {model_path} and setting up Predictor...')
 predictor = Predictor(
     model=model_path,

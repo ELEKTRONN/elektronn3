@@ -96,6 +96,7 @@ class GatherExcite(nn.Module):
         return x * y
 
 
+# TODO: Everything below here is deprecated and is only kept for backwards compatibility.
 class AdaptiveConv3d(nn.Module):
     """Equivalent to ``torch.nn.Conv3d`` except that if
     ``kernel_size[0] == 1``, ``torch.nn.Conv2d`` is used internally in

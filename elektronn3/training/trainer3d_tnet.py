@@ -27,6 +27,7 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
+from torch.autograd import Variable
 from tqdm import tqdm
 
 from elektronn3.training import handlers
@@ -256,6 +257,7 @@ class Trainer3d:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
+            alpha=1e-6
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -304,6 +306,7 @@ class Trainer3d:
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
+        self.alpha = alpha
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -431,7 +434,8 @@ class Trainer3d:
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
-        misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
+        misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target',
+                                                                            'error', 'loss_l2']}
 
         timer = Timer()
         batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
@@ -439,27 +443,21 @@ class Trainer3d:
         for i, batch in batch_iter:
             pts = batch['pts']
             features = batch['features']
-            target = batch['target']
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
             dfeats = features.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
 
-            # dinp: (batch_size, sample_num, 3)
-            # dfeats: (batch_size, sample_num, 1)
-            # dtarget: (batch_size, sample_num)
-            # dout: (batch_size, sample_num, num_classes)
-            dout = self.model(dfeats, dinp)
-
-            # # calculate loss similar to method of aboulch (convpoint repo).
-            # dloss = 0
-            # for i in range(dout.size(0)):
-            #     dloss += self.criterion(dout[i], dtarget[i])
-
-            dout_flat = dout.view(-1, self.num_classes)
-            dtarget_flat = dtarget.view(-1)
-            dloss = self.criterion(dout_flat, dtarget_flat)
+            dA, dB, z0, z1, z2 = self.model(dfeats, dinp)
+            target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
+            target = Variable(target)
+            dloss = self.criterion(dA, dB, target)
+            L_l2 = torch.mean(
+                torch.cat((z0.norm(1, dim=1), z1.norm(1, dim=1), z2.norm(1, dim=1)), dim=0))
+            misc['loss_l2'] += [self.alpha * float(L_l2)]
+            dloss = dloss + self.alpha * L_l2
+            error = calculate_error(dA, dB)
+            misc['error'] += [error]
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -476,21 +474,6 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                # save samples of every 20th batch of every 20th epoch for visualization
-                if self.epoch % 10 == 0 and target.size(1) == pts.size(1):
-                    if batch_num % 20 == 0:
-                        results = []
-                        for j in range(pts.size(0)):
-                            labels = target[j].cpu().numpy()
-                            pred = np.argmax(dout[j].cpu().numpy(), axis=1)
-                            orig = PointCloud(pts[j].cpu().numpy(), labels=labels)
-                            pred = PointCloud(pts[j].cpu().numpy(), labels=pred)
-                            results.append(orig)
-                            results.append(pred)
-                        # 'save_cloudlist' does not exist
-                        clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
-                    batch_num += 1
-
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
@@ -915,3 +898,9 @@ def findcudatensors() -> Tuple[int, List[torch.Tensor]]:
     tensors.sort(key=lambda x: x.numel())
     total_mib = sum(x.numel() * 32 for x in tensors) / 1024**2  # Assuming float32
     return total_mib, tensors
+
+
+def calculate_error(dista, distb):
+    margin = 0
+    pred = (distb - dista - margin).cpu().data
+    return np.array((pred <= 0).sum(), dtype=np.float32) / np.prod(dista.size()) * 100.

@@ -5,7 +5,6 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
 from collections import deque
-import ipdb
 
 import gc
 import logging
@@ -130,19 +129,24 @@ class Trainer:
             ``model``. This is used for JIT tracing during model serialization.
         enable_save_trace: If ``True``, the model is JIT-traced with
             ``example_input`` every time it is serialized to disk.
-        batchsize: Desired batch size of training samples.
+        batch_size: Desired batch size of training samples.
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
             disabled.
-        preview_tile_shape
-        preview_overlap_shape
-        preview_offset
         preview_interval: Determines how often to perform preview inference.
             Preview inference is performed every ``preview_interval`` epochs
             during training. Regardless of this value, preview predictions
             will also be performed once after epoch 1.
             (To disable preview predictions altogether, just set
             ``preview_batch = None``).
+        inference_kwargs: Additional options that are supplied to the
+            :py:class:`elektronn3.inference.Predictor` instance
+            that is used for periodic preview inference on the
+            ``preview_batch``.
+        extra_save_steps: Permanent model snapshots are saved at the
+            training steps specified here. E.g. with
+            ``extra_save_at_steps = (0, 30, 3000)``, a snapshot is made at
+            steps 0 (before training begins), step 30 and step 3000.
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
             See :py:class:`torch.utils.data.DataLoader`
@@ -165,12 +169,6 @@ class Trainer:
             ``exp_name``.
             If ``tensorboard_root_path`` is not set, tensorboard logs are
             written to ``save_path`` (next to model checkpoints, plots etc.).
-        apply_softmax_for_prediction: If ``True`` (default),
-            the softmax operation is performed on network outputs before
-            plotting them, so raw network outputs get converted into predicted
-            class probabilities.
-            Set this to ``False`` if the output of ``model`` is already a
-            softmax output or if you don't want softmax outputs at all.
         ignore_errors: If ``True``, the training process tries to ignore
             all errors and continue with the next batch if it encounters
             an error on the current batch.
@@ -182,13 +180,13 @@ class Trainer:
             C-level segfaults etc.) won't crash the whole training process,
             but drop to an IPython shell so errors can be inspected with
             access to the current training state.
-        num_classes: Optionally specifies the total number of different target
+        out_channels: Optionally specifies the total number of different target
             classes for classification tasks. If this is not set manually,
             the ``Trainer`` checks if the ``train_dataset`` provides this
-            value. If available, ``self.num_classes`` is set to
-            ``self.train_dataset.num_classes``. Otherwise, it is set to
+            value. If available, ``self.out_channels`` is set to
+            ``self.train_dataset.out_channels``. Otherwise, it is set to
             ``None``.
-            The ``num_classes`` attribute is used for plotting purposes and is
+            The ``out_channels`` attribute is used for plotting purposes and is
             not strictly required for training.
         sample_plotting_handler: Function that receives training and
             validation samples and is responsible for visualizing them by
@@ -217,7 +215,7 @@ class Trainer:
     valid_loader: torch.utils.data.DataLoader
     exp_name: str
     save_path: str  # Full path to where training files are stored
-    num_classes: Optional[int]  # Number of different target classes in the train_dataset
+    out_channels: Optional[int]  # Number of channels of the network outputs
 
     def __init__(
             self,
@@ -230,52 +228,39 @@ class Trainer:
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
-            preview_tile_shape: Optional[Tuple[int, ...]] = None,
-            preview_overlap_shape: Optional[Tuple[int, ...]] = None,
-            preview_offset: Optional[Tuple[int, ...]] = None,
             preview_interval: int = 5,
-            offset: Optional[Sequence[int]] = None,
+            inference_kwargs: Optional[Dict[str, Any]] = None,
+            extra_save_steps: Sequence[int] = (),
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
             enable_save_trace: bool = False,
-            batchsize: int = 1,
+            batch_size: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
             overlay_alpha: float = 0.4,
             enable_videos: bool = False,
             enable_tensorboard: bool = True,
             tensorboard_root_path: Optional[str] = None,
-            apply_softmax_for_prediction: bool = True,
             ignore_errors: bool = False,
             ipython_shell: bool = False,
-            num_classes: Optional[int] = None,
+            out_channels: Optional[int] = None,
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
     ):
+        inference_kwargs = {} if inference_kwargs is None else inference_kwargs
         if preview_batch is not None and (
-                preview_tile_shape is None or (
-                    preview_overlap_shape is None and preview_offset is None)):
+                'tile_shape' not in inference_kwargs or (
+                    'overlap_shape' not in inference_kwargs and 'offset' not in inference_kwargs)):
             raise ValueError(
                 'If preview_batch is set, you will also need to specify '
-                'preview_tile_shape and preview_overlap_shape or preview_offset!'
+                'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
+        model.to(device)
+
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
-        try:
-            model.to(device)
-        except RuntimeError as exc:
-            if isinstance(model, torch.jit.ScriptModule):
-                # "RuntimeError: to is not supported on TracedModules"
-                # But .cuda() works for some reason. Using this messy
-                # workaround in the hope that we can drop it soon.
-                # TODO: Remove this when ScriptModule.to() is supported
-                # See https://github.com/pytorch/pytorch/issues/7354
-                if 'cuda' in str(self.device):  # (Ignoring device number!)
-                    model.cuda()
-            else:
-                raise exc
         self.model = model
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
@@ -283,18 +268,15 @@ class Trainer:
         self.valid_dataset = valid_dataset
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
-        self.preview_tile_shape = preview_tile_shape
-        self.preview_overlap_shape = preview_overlap_shape
-        self.preview_offset = preview_offset
         self.preview_interval = preview_interval
-        self.offset = offset
+        self.inference_kwargs = inference_kwargs
+        self.extra_save_steps = extra_save_steps
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.example_input = example_input
         self.enable_save_trace = enable_save_trace
-        self.batchsize = batchsize
+        self.batch_size = batch_size
         self.num_workers = num_workers
-        self.apply_softmax_for_prediction = apply_softmax_for_prediction
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
@@ -306,6 +288,10 @@ class Trainer:
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
+
+        self.inference_kwargs.setdefault('batch_size', 1)
+        self.inference_kwargs.setdefault('verbose', True)
+        self.inference_kwargs.setdefault('apply_softmax', True)
 
         if self.mixed_precision:
             from apex import amp
@@ -334,7 +320,7 @@ class Trainer:
         self.__lr_closetozero_alreadytriggered = False  # Used in periodic scheduler handling
         self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         if enable_videos:
             try:
                 import moviepy
@@ -358,7 +344,7 @@ class Trainer:
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
 
         self.train_loader = DataLoader(
-            self.train_dataset, batch_size=self.batchsize, shuffle=True,
+            self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
@@ -371,7 +357,7 @@ class Trainer:
         # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
-                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
+                self.valid_dataset, self.batch_size, shuffle=True, num_workers=0, pin_memory=True,
                 worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
@@ -439,7 +425,31 @@ class Trainer:
         if self.tb is not None:
             self.tb.close()  # Ensure that everything is flushed
 
+    def _train_step(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Core training step on self.device"""
+        inp = batch['inp']
+        target = batch['target']
+        # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+        dinp = inp.to(self.device, non_blocking=True)
+        dtarget = target.to(self.device, non_blocking=True)
+        # forward pass
+        dout = self.model(dinp)
+        dloss = self.criterion(dout, dtarget)
+        if torch.isnan(dloss):
+            logger.error('NaN loss detected! Aborting training.')
+            raise NaNException
+        # update step
+        self.optimizer.zero_grad()
+        if self.mixed_precision:
+            with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            dloss.backward()
+        self.optimizer.step()
+        return dloss, dout
+
     def _train(self, max_steps, max_runtime):
+        """Train for one epoch or until max_steps or max_runtime is reached"""
         self.model.train()
 
         # Scalar training stats that should be logged and written to tensorboard later
@@ -451,34 +461,16 @@ class Trainer:
 
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
-        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        for i, batch in batch_iter:
-            inp = batch['inp']
+        batch_iter = tqdm(
+            self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
+        )
+        for i, batch in enumerate(batch_iter):
+            if self.step in self.extra_save_steps:
+                self._save_model(f'_step{self.step}', verbose=True)
+
+            dloss, dout = self._train_step(batch)
+
             target = batch['target']
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
-
-            # forward pass
-            dout = self.model(dinp)
-            dloss = self.criterion(dout, dtarget)
-            if torch.isnan(dloss):
-                logger.error('NaN loss detected! Aborting training.')
-                raise NaNException
-
-            # update step
-            self.optimizer.zero_grad()
-            if self.mixed_precision:
-                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                dloss.backward()
-            self.optimizer.step()
-            # End of core training loop on self.device
-
-            # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
-            out = dout.detach().cpu()  # Copy model output to host memory for metrics, visualization
-
             with torch.no_grad():
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
@@ -489,33 +481,18 @@ class Trainer:
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
             misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
-            # update schedules
-            for sched in self.schedulers.values():
-                # support ReduceLROnPlateau; doc. uses validation loss instead
-                # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
-                if "metrics" in inspect.signature(sched.step).parameters:
-                    sched.step(metrics=loss)
-                else:
-                    sched.step()
-            # Append LR of the next iteration (after sched.step()) for local LR minima detection
-            self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
-            self._handle_lr()
+            self._scheduler_step(loss)
 
-            running_vx_size += inp.numel()
+            running_vx_size += batch['inp'].numel()
 
-            self.step += 1
-            if self.step >= max_steps:
-                logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
-                self.terminate = True
-            if datetime.datetime.now() >= self.end_time:
-                logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
-                self.terminate = True
+            self._incr_step(max_runtime, max_steps)
             if i == len(self.train_loader) - 1 or self.terminate:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
-                images['inp'] = inp.numpy()
-                images['target'] = target.numpy()
-                images['out'] = out.numpy()
+                images['inp'] = batch['inp'].numpy()
+                images['target'] = batch['target'].numpy()
+                images['out'] = dout.detach().cpu().numpy()
+                self._put_current_attention_maps_into(images)
 
             if self.terminate:
                 break
@@ -525,6 +502,37 @@ class Trainer:
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
         return stats, misc, images
+
+    def _put_current_attention_maps_into(self, images):
+        if getattr(self.model, 'attention'):
+            for i in range(len(self.model.up_convs)):
+                att = self.model.up_convs[i].att[0][0].detach().cpu().numpy()
+                if att.ndim == 3:
+                    att = att[att.shape[0] // 2]
+                images[f'att{i}'] = att
+
+    def _incr_step(self, max_runtime, max_steps):
+        """Increment the current training step counter"""
+        self.step += 1
+        if self.step >= max_steps:
+            logger.info(f'max_steps ({max_steps}) exceeded. Terminating...')
+            self.terminate = True
+        if datetime.datetime.now() >= self.end_time:
+            logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
+            self.terminate = True
+
+    def _scheduler_step(self, loss):
+        """Update schedules"""
+        for sched in self.schedulers.values():
+            # support ReduceLROnPlateau; doc. uses validation loss instead
+            # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
+            if 'metrics' in inspect.signature(sched.step).parameters:
+                sched.step(metrics=loss)
+            else:
+                sched.step()
+        # Append LR of the next iteration (after sched.step()) for local LR minima detection
+        self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
+        self._handle_lr()
 
     def _handle_lr(self) -> None:
         r"""Handle quasi-periodic learning rate schedulers that lower the
@@ -585,7 +593,10 @@ class Trainer:
 
         val_loss = []
         stats = {name: [] for name in self.valid_metrics.keys()}
-        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
+        batch_iter = tqdm(
+            enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
+            dynamic_ncols=True
+        )
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
@@ -602,6 +613,7 @@ class Trainer:
             'out': out.numpy(),
             'target': target.numpy()
         }
+        self._put_current_attention_maps_into(images)
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
@@ -766,7 +778,7 @@ class Trainer:
     def _log_to_history_tracker(self, stats: Dict, misc: Dict) -> None:
         """Update history tracker and plot stats (kind of made obsolete by tensorboard)"""
         # TODO: Decide what to do with this, now that most things are already in tensorboard.
-        if self.step // len(self.train_dataset) > 1:
+        if self._tracker.history.length > 0:
             tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
         else:
             tr_loss_gain = 0
@@ -806,29 +818,20 @@ class Trainer:
             grad = param.grad if param.grad is not None else torch.tensor(0)
             self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
-    # TODO: Make more configurable
     # TODO: Use Predictor(..., transform=...) and remove normalization from preview batch?
     def _preview_inference(
             self,
             inp: np.ndarray,
-            tile_shape: Optional[Tuple[int, ...]] = None,
-            overlap_shape: Optional[Tuple[int, ...]] = None,
-            offset: Optional[Tuple[int, ...]] = None,
-            verbose: bool = True,
+            inference_kwargs: Dict[str, Any],
     ) -> torch.Tensor:
-        if self.num_classes is None:
-            raise RuntimeError('Can\'t do preview prediction if Trainer.num_classes is not set.')
-        out_shape = (self.num_classes, *inp.shape[2:])
+        if self.out_channels is None:
+            raise RuntimeError('Can\'t do preview prediction if Trainer.out_channels is not set.')
+        out_shape = (self.out_channels, *inp.shape[2:])
         predictor = Predictor(
             model=self.model,
             device=self.device,
-            batch_size=1,
-            tile_shape=tile_shape,
-            overlap_shape=overlap_shape,
-            offset=offset,
-            verbose=verbose,
             out_shape=out_shape,
-            apply_softmax=self.apply_softmax_for_prediction,
+            **inference_kwargs,
         )
         out = predictor.predict(inp)
         return out

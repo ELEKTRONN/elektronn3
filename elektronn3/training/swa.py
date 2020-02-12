@@ -295,6 +295,8 @@ class SWA(Optimizer):
         for input in loader:
             if isinstance(input, (list, tuple)):
                 input = input[0]
+            elif isinstance(input, dict):
+                input = input['inp']
             b = input.size(0)
 
             momentum = b / float(n + b)

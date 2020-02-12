@@ -10,14 +10,15 @@ import logging
 import os
 import sys
 import traceback
+from os.path import expanduser
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
+
 import h5py
 import imageio
 import numpy as np
 import torch
-
-from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
 from torch.utils import data
+
 from elektronn3.data import coord_transforms, transforms
 from elektronn3.data.sources import DataSource, HDF5DataSource, slice_3d
 
@@ -128,9 +129,6 @@ class PatchCreator(data.Dataset):
             To combine multiple transforms, use
             :py:class:`elektronn3.data.transforms.Compose`.
             See :py:mod:`elektronn3.data.transforms`. for some implementations.
-        num_classes: The total number of different target classes that exist
-            in the data set. Setting this is optional, but some features might
-            only work if this is specified.
         in_memory: If ``True``, all data set files are immediately loaded
             into host memory and are permanently kept there as numpy arrays.
             If this is disabled (default), file contents are always read from
@@ -154,7 +152,6 @@ class PatchCreator(data.Dataset):
             warp_kwargs: Optional[Dict[str, Any]] = None,
             epoch_size: int = 100,
             transform: Callable = transforms.Identity(),
-            num_classes: Optional[int] = None,
             in_memory: bool = False,
             cube_meta=_DefaultCubeMeta(),
     ):
@@ -181,7 +178,6 @@ class PatchCreator(data.Dataset):
         self.target_discrete_ix = target_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
-        self.num_classes = num_classes
         self.in_memory = in_memory
 
         self.patch_shape = np.array(patch_shape, dtype=np.int)
@@ -228,8 +224,9 @@ class PatchCreator(data.Dataset):
                     fail_percentage = int(round(100 * fail_ratio))
                     print(e)
                     logger.warning(
-                        f'{fail_percentage}% of warping attempts are failing.\n'
-                        'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
+                        f'{fail_percentage}% of warping attempts are failing '
+                        f'for cubes {input_src} and {target_src}.\n'
+                        'Consider lowering warp_kwargs[\'warp_amount\']).'
                     )
                     self._failed_warp_warned = True
                 continue
@@ -255,9 +252,25 @@ class PatchCreator(data.Dataset):
                     'traceback above.\n'
                 )
                 continue
+            # TODO: Add custom Exception for lo > hi postion during warping
+            # This should only be caught if many training cubes are used!
+            except RuntimeError as e:
+                # let's roll the dice again
+                logger.warning(f'Caught RuntimeError and drawing new data cube.\n'
+                               f'{str(e)}')
+                print(input_src)
+                input_src, target_src = self._getcube()  # get new cube randomly
+                print(input_src)
+                continue
             self.n_successful_warp += 1
             try:
-                inp, target = self.transform(inp, target)
+                inp_tr, target_tr = self.transform(inp, target)
+                if np.any(np.isnan(inp_tr)) or np.any(np.isnan(target_tr)):
+                    logger.warning(f'NaN value in {repr(self.transform)}-transformed '
+                                   f'input or target. Falling back to '
+                                   f'untransformed input.')
+                else:
+                    inp, target = inp_tr, target_tr
             except transforms._DropSample:
                 # A filter transform has chosen to drop this sample, so skip it
                 logger.debug('Sample dropped.')
@@ -438,6 +451,17 @@ class PatchCreator(data.Dataset):
         for (inp_fname, inp_key), (target_fname, target_key), cube_meta in zip(self.input_sources, self.target_sources, self.cube_meta):
             inp_source = HDF5DataSource(fname=inp_fname, key=inp_key, in_memory=self.in_memory)
             target_source = HDF5DataSource(fname=target_fname, key=target_key, in_memory=self.in_memory)
+
+            # Perform checks  # TODO
+            if np.max(inp_source) == 0 or np.any(np.isnan(inp_source)) or np.any(np.isnan(target_source)):
+                    msg = f'{inp_fname} contains 0-signal input or NaN values in input or target.'
+                    logger.error(msg)
+                    raise ValueError(msg)
+            if np.any(self.patch_shape[-3:] > np.array(target_source.shape)[-3:]):
+                raise ValueError(f'GT target cube: {target_fname}[{target_key}]:'
+                                 f' {target_source.shape} ({target_source.dtype}) '
+                                 f'is incompatible with patch shape {self.patch_shape}.')
+
             logger.info(f'  input:       {inp_fname}[{inp_key}]: {inp_source.shape} ({inp_source.dtype})')
             logger.info(f'  with target: {target_fname}[{target_key}]: {target_source.shape} ({target_source.dtype})')
             if not np.all(cube_meta == np.inf):
@@ -452,7 +476,7 @@ class PatchCreator(data.Dataset):
 def get_preview_batch(
         h5data: Tuple[str, str],
         preview_shape: Optional[Tuple[int, ...]] = None,
-        transform: Callable = transforms.Identity(),
+        transform: Optional[Callable] = None,
         in_memory: bool = False
 ) -> torch.Tensor:
     fname, key = h5data
@@ -480,7 +504,8 @@ def get_preview_batch(
     inp_np = slice_3d(inp_h5, inp_lo, inp_hi, prepend_empty_axis=True)
     if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
         inp_np = inp_np[:, None]  # Add missing C dim
-    inp_np, _ = transform(inp_np, None)
+    if transform is not None:
+        inp_np, _ = transform(inp_np, None)
     inp = torch.from_numpy(inp_np)
     return inp
 
@@ -503,11 +528,11 @@ class SimpleNeuroData2d(data.Dataset):
             # offset=(0, 0, 0),
             pool=(1, 1, 1),
             transform: Callable = transforms.Identity(),
-            num_classes: Optional[int] = None,
+            out_channels: Optional[int] = None,
     ):
         super().__init__()
         self.transform = transform
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         cube_id = 0 if train else 2
         if inp_path is None:
             inp_path = expanduser(f'~/neuro_data_cdhw/raw_{cube_id}.h5')

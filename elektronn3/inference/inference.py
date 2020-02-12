@@ -51,8 +51,8 @@ def tiled_apply(
     Each tile of the output results from applying a callable ``func`` on an
     input tile which is sliced from a region that has the same center but a
     larger extent (overlapping with other input regions in the vicinity).
-    Input tensors are also padded with zeros to at the boundaries according to
-    the `overlap_shape``to enable consistent tile shapes.
+    Input tensors are also padded with zeros at the boundaries according to
+    the ``overlap_shape`` to enable consistent tile shapes.
 
     The overlapping behavior prevents imprecisions of CNNs (and image
     processing algorithms in general) that appear near the boundaries of
@@ -153,7 +153,8 @@ def tiled_apply(
     crop_high_corner = tile_shape + overlap_shape - offset
     # Used to crop the output tile to the relevant, unpadded region
     #  that will be written to the final output
-    final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
+    final_crop_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(crop_low_corner,
+                                                                 crop_high_corner)])
 
     tiles = np.ceil(out_shape[2:] / tile_shape).astype(int)
     num_tiles = np.prod(tiles)
@@ -162,7 +163,7 @@ def tiled_apply(
     # TODO: Handle fractional inputshape-to-tile ratio
     pbar = tqdm(
         itertools.product(*tile_ranges), 'Predicting',
-        total=num_tiles, disable=not verbose
+        total=num_tiles, disable=not verbose, dynamic_ncols=True
     )
     for tile_pos in pbar:
         tile_pos = np.array(tile_pos)
@@ -184,10 +185,12 @@ def tiled_apply(
         assert np.all(np.less_equal(inp_high_corner, inp_padded.shape[2:])), inp_high_corner
         # Slice only the current tile region in ([D,] H, W) dims
         # Slice input with overlap
-        inp_slice = _extend_nc([slice(l, h) for l, h in zip(inp_low_corner, inp_high_corner)])
+        inp_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(inp_low_corner,
+                                                                   inp_high_corner)])
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
-        out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
+        out_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(out_low_corner,
+                                                                   out_high_corner)])
         inp_tile = inp_padded[inp_slice].contiguous().to(device)
         out_tile = func(inp_tile)
 
@@ -306,12 +309,12 @@ class Predictor:
             – ``out_shape`` is merely used to pre-allocate the output tensor so
             it can be filled later.
             If you know how many channels your model output has
-            (``num_classes``, ``num_out_channels``) and if your model
+            (``out_channels``) and if your model
             preserves spatial shape, you can easily calculate ``out_shape``
             yourself as follows:
 
-            >>> num_out_channels: int = ?  # E.g. for binary classification it's 2
-            >>> out_shape = (num_out_channels, *inp.shape[2:])
+            >>> out_channels: int = ?  # E.g. for binary classification it's 2
+            >>> out_shape = (out_channels, *inp.shape[2:])
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
@@ -376,7 +379,7 @@ class Predictor:
         if tile_shape is not None:
             tile_shape = np.array(tile_shape)
         self.tile_shape = tile_shape
-        if overlap_shape is not None and offset is not None:
+        if (overlap_shape is not None or np.any(overlap_shape)) and (offset is not None or np.any(offset)):
             raise ValueError(
                 f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
                 'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
@@ -594,7 +597,7 @@ class Predictor:
             else:
                 orig_shape = inp.shape
                 padded_shape = np.array(inp.shape)
-                padded_shape[2:] = (inp.shape[2:] // self.tile_shape + 1) * self.tile_shape
+                padded_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
                 padded_inp = np.zeros(padded_shape)
                 # Define the relevant region (that is: without the padding that was just added)
                 relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])

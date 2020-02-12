@@ -33,6 +33,7 @@ class TrainerMulti(Trainer):
         super().__init__(*args, **kwargs)
         self.optimizer_iterations = optimizer_iterations
         assert(optimizer_iterations > 0)
+        self.loss_crop = 16 # crop sample for loss calcuation by this amount
 
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
@@ -68,7 +69,7 @@ class TrainerMulti(Trainer):
                 # TODO: Support other metrics for determining what's the "best" model?
                 if stats['val_loss'] < self.best_val_loss:
                     self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
+                    self._save_model(suffix=f'_best{self.step}', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -94,25 +95,25 @@ class TrainerMulti(Trainer):
 
     def _train(self, max_steps, max_runtime):
 
-        num_classes = self.num_classes
+        out_channels = self.out_channels
 
-        def _channel_metric(metric, c, num_classes=num_classes, mean=False):
+        def _channel_metric(metric, c, out_channels=out_channels, mean=False):
             """Returns an evaluator that calculates the ``metric``
             and selects its value for channel ``c``."""
 
             def evaluator(target, out):
                 #pred = metrics._argmax(out)
-                m = metric(target, out, num_classes=num_classes, mean=mean)
+                m = metric(target, out, out_channels=out_channels, ignore=out_channels - 1, mean=mean)
                 return m[c]
 
             return evaluator
 
         tr_evaluators = {**{
-            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c) for c in range(num_classes)
+            f'tr_DSC_c{c}': _channel_metric(metrics.dice_coefficient, c=c) for c in range(out_channels)
         }, **{
-            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c) for c in range(num_classes)
+            f'tr_precision_c{c}': _channel_metric(metrics.precision, c=c) for c in range(out_channels)
         }, **{
-            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c) for c in range(num_classes)
+            f'tr_recall_c{c}': _channel_metric(metrics.precision, c=c) for c in range(out_channels)
         }}
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss', 'tr_loss_mean', 'tr_accuracy']}
@@ -131,12 +132,14 @@ class TrainerMulti(Trainer):
         gc.collect()
         batch_iter = tqdm(self.train_loader, 'Training', total=len(self.train_loader))
         for i, batch in enumerate(batch_iter):
+            if self.step in self.extra_save_steps:
+                self._save_model(f'_step{self.step}', verbose=True)
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp, target = batch['inp'], batch['target']
-            cube_meta = batch['weight']
-            fname = batch['file_stats']
+            cube_meta = batch['cube_meta']
+            fname = batch['fname']
             dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dtarget = target[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop].to(self.device, non_blocking=True) if self.loss_crop else target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight = weight
@@ -149,7 +152,7 @@ class TrainerMulti(Trainer):
                 self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
             # forward pass
-            dout = self.model(dinp)
+            dout = self.model(dinp)[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop] if self.loss_crop else self.model(dinp)
 
             #print(dout.dtype, dout.shape, dtarget.dtype, dtarget.shape, dout.min(), dout.max())
             dloss = self.criterion(dout, dtarget)
@@ -181,12 +184,14 @@ class TrainerMulti(Trainer):
                 # TODO: Evaluate performance impact of these copies and maybe avoid doing these so often
                 out_class = dout.argmax(dim=1).detach().cpu()
                 multi_class_target = target.argmax(1) if len(target.shape) > 4 else target  # TODO
-                acc = metrics.accuracy(multi_class_target, out_class, num_classes, mean=False).numpy()
+                if self.loss_crop:
+                    multi_class_target = multi_class_target[:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop]
+                acc = metrics.accuracy(multi_class_target, out_class, out_channels, mean=False).numpy()
                 acc = np.average(acc[~np.isnan(acc)])#, weights=)
                 mean_target = float(multi_class_target.to(torch.float32).mean())
 
                 # import h5py
-                # dsc5 = channel_metric(metrics.dice_coefficient, c=5, num_classes=num_classes)(multi_class_target, out_class)
+                # dsc5 = channel_metric(metrics.dice_coefficient, c=5, out_channels=out_channels)(multi_class_target, out_class)
                 # after_step = '+' if i % self.optimizer_iterations == 0 else ''
                 # with h5py.File(os.path.join(self.save_path, f'batch {self.step}{after_step} loss={float(dloss)} dsc5={dsc5}.h5'), "w") as f:
                 #     f.create_dataset('raw', data=inp.squeeze(dim=0), compression="gzip")
@@ -275,7 +280,7 @@ class TrainerMulti(Trainer):
             inp, target = batch['inp'], batch['target']
             cube_meta = batch['cube_meta']
             dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dtarget = target[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop].to(self.device, non_blocking=True) if self.loss_crop else target.to(self.device, non_blocking=True)
             weight = cube_meta[0].to(device=self.device, dtype=self.criterion.weight.dtype, non_blocking=True)
             prev_weight = self.criterion.weight.clone()
             self.criterion.weight *= weight
@@ -288,15 +293,16 @@ class TrainerMulti(Trainer):
                 needs_positive_target_mark = (dense_weight.sum() == 0).type(positive_target_mask.dtype)
                 self.criterion.weight = ignore_mask * dense_weight + needs_positive_target_mark * positive_target_mask * prev_weight.view(1,-1,1,1,1)
 
-            dout = self.model(dinp)
+            dout = self.model(dinp)[:,:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop] if self.loss_crop else self.model(dinp)
             multi_class_target = target.argmax(1) if len(target.shape) > 4 else target
+            if self.loss_crop:
+                multi_class_target = multi_class_target[:,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop,self.loss_crop:-self.loss_crop]
             val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             out_class = out.argmax(dim=1)
             self.criterion.weight = prev_weight
             for name, evaluator in self.valid_metrics.items():
                 stats[name].append(evaluator(multi_class_target, out_class))
-
         images = {
             'fname': Path(batch['fname'][0]).stem,
             'inp': inp.numpy(),

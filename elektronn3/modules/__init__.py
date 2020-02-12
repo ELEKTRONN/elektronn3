@@ -1,3 +1,2 @@
 from .layers import *
-from .layer_helpers import *
-from .loss import DiceLoss, FocalLoss, LovaszLoss, CombinedLoss
+from .loss import DiceLoss, FocalLoss, LovaszLoss, CombinedLoss, NorpfDiceLoss, DiceLossFancy

@@ -46,6 +46,25 @@ extensions = [
     'sphinx.ext.viewcode',
 ]
 
+# Mock requirements to save resources during doc build machine setup
+autodoc_mock_imports = [
+    'torch',
+    'torchvision',
+    'numba',
+    'seaborn',
+    'IPython',
+    'imageio',
+    'sklearn',
+    'skimage',
+    'h5py',
+    'tensorboardX',
+    'colorlog',
+    # Optional requirements
+    'albumentations',
+    'receptivefield',
+]
+
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 

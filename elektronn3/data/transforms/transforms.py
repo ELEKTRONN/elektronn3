@@ -11,8 +11,9 @@ Important note: The transformations here have a similar interface to
 torchvision.transforms, but there are two key differences:
 
 1. They all map (inp, target) pairs to (transformed_inp, transformed_target)
-  pairs instead of just inp to transformed_inp. Most transforms don't change the target, though.
+   pairs instead of just inp to transformed_inp. Most transforms don't change the target, though.
 2. They exclusively operate on numpy.ndarray data instead of PIL or torch.Tensor data.
+
 """
 
 from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
@@ -177,15 +178,15 @@ class SmoothOneHotTarget:
     """Converts target tensors to one-hot encoding, with optional label smoothing.
 
     Args:
-        num_classes: Number of classes (C) in the data set.
+        out_channels: Number of target channels (C) in the data set.
         smooth_eps: Label smoothing strength. If ``smooth_eps=0`` (default), no
             smoothing is applied and regular one-hot tensors are returned.
             See section 7 of https://arxiv.org/abs/1512.00567
     """
     # TODO: Add example to docstring
-    def __init__(self, num_classes: int, smooth_eps: float = 0.):
+    def __init__(self, out_channels: int, smooth_eps: float = 0.):
         assert 0 <= smooth_eps < 0.5
-        self.num_classes = num_classes
+        self.out_channels = out_channels
         self.smooth_eps = smooth_eps
 
     def __call__(
@@ -194,10 +195,10 @@ class SmoothOneHotTarget:
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         if self.smooth_eps == 0.:
-            eye = np.eye(self.num_classes)
+            eye = np.eye(self.out_channels)
         else:
             # Create a "soft" eye where  0 is replaced by smooth_eps and 1 by (1 - smooth_eps)
-            eye = np.full((self.num_classes, self.num_classes), self.smooth_eps)
+            eye = np.full((self.out_channels, self.out_channels), self.smooth_eps)
             np.fill_diagonal(eye, 1. - self.smooth_eps)
         onehot = np.moveaxis(eye[target], -1, 0)
         assert np.all(onehot.argmax(0) == target)
@@ -439,6 +440,7 @@ class RandomGaussianBlur:
             of ``1 - prob``.
         aniso_factor: a tuple or an array to apply the anisotropy, must
             match the dimension of the input.
+
     """
 
     def __init__(
@@ -517,6 +519,7 @@ class RandomBlurring:  # Warning: This operates in-place!
 
 class AdditiveGaussianNoise:
     """Adds random gaussian noise to the input.
+
         Args:
             sigma: Sigma parameter of the gaussian distribution to draw from
             channels: If ``channels`` is ``None``, the noise is applied to
@@ -526,6 +529,7 @@ class AdditiveGaussianNoise:
             prob: probability (between 0 and 1) with which to perform this
                 augmentation. The input is returned unmodified with a probability
                 of ``1 - prob``.
+
     """
 
     def __init__(
@@ -591,57 +595,96 @@ class RandomCrop:
         return inp_cropped, target_cropped
 
 
+def _draw_debug_grid(
+        inp: np.ndarray,
+        target: Optional[np.ndarray] = None,
+        s: int = 16,
+        v: float = 0.,
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """Draw an ``s``-spaced grid of ``v`` values to visualize deformations."""
+    if target is not None and target.ndim == inp.ndim - 1:
+        target[::s] = v
+    if inp.ndim == 4:
+        inp[:, ::s] = v
+        inp[:, :, ::s] = v
+        inp[:, :, :, ::s] = v
+        if target is not None:
+            target[:, ::s] = v
+            target[:, :, ::s] = v
+            if target.ndim == 4:
+                target[:, :, :, ::s] = v
+    elif inp.ndim == 3:
+        inp[:, ::s] = v
+        inp[:, :, ::s] = v
+        if target is not None:
+            target[:, ::s] = v
+            if target.ndim == 3:
+                target[:, :, ::s] = v
+    return inp, target
+
+
 class ElasticTransform:
     """
     Based on https://gist.github.com/fmder/e28813c1e8721830ff9c
 
 
-    Elastic deformation of images as described in [Simard2003]_.
-    .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
-       Convolutional Neural Networks applied to Visual Document Analysis", in
-       Proc. of the International Conference on Document Analysis and
-       Recognition, 2003.
+    Elastic deformation of images as described in Simard, 2003
+    (DOI 10.1109/ICDAR.2003.1227801)
 
-        Args:
-            sigma: Sigma parameter of the gaussian distribution from which
-                the local displacements are drawn.
-            alpha: Factor by which all random displacements are multiplied.
-            channels: If ``channels`` is ``None``, the change is applied to
-                all channels of the input tensor.
-                If ``channels`` is a ``Sequence[int]``, change is only applied
-                to the specified channels.
-            prob: probability (between 0 and 1) with which to perform this
-                augmentation. The input is returned unmodified with a probability
-                of ``1 - prob``
-            target_discrete_ix: list
-                List of target channels that contain discrete values.
-                By default (``None``), every channel is is seen as discrete (this is
-                generally the case for classification tasks).
-                This information is used to decide what kind of interpolation should
-                be used for reading target data:
+    Args:
+        sigma: Sigma parameter of the gaussian smoothing performed on the
+            random displacement field. High ``sigma`` values (> 4) lead
+            to less randomness and more spatial consistency.
+            Lower values
+        alpha: Factor by which all random displacements are multiplied.
+            Each local displacement is drawn from the range
+            ``[-alpha, alpha]``, so e.g. for ``alpha=1`` you won't see
+            much of an effect.
+        channels: If ``channels`` is ``None``, the change is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, change is only applied
+            to the specified channels.
+        prob: probability (between 0 and 1) with which to perform this
+            augmentation. The input is returned unmodified with a probability
+            of ``1 - prob``
+        target_discrete_ix: list
+            List of target channels that contain discrete values.
+            By default (``None``), every channel is is seen as discrete (this is
+            generally the case for classification tasks).
+            This information is used to decide what kind of interpolation should
+            be used for reading target data:
 
-                    - discrete targets are obtained by nearest-neighbor interpolation
-                    - non-discrete (continuous) targets are linearly interpolated.
+                - discrete targets are obtained by nearest-neighbor interpolation
+                - non-discrete (continuous) targets are linearly interpolated.
+        aniso_factor: Factor by which to divide the deformation strength in the
+            z axis. E.g. if the data has half resolution in the z dimension, set
+            ``aniso_factor = 2``. By default it is ``1``, so every spatial
+            dimension is treated equally.
+        draw_debug_grid: If ``True``, draw a 16-spaced grid into the image to
+            visualize deformations. This is only for debugging purposes and
+            should never be enabled during training.
 
-        The input image should be of dimensions (C, H, W) or (C, D, H, W).
-        C must be included.
-
+    The input image should be of dimensions (C, H, W) or (C, D, H, W).
+    C must be included.
     """
 
     def __init__(
             self,
             sigma: float = 4,
-            alpha: float = 10,
+            alpha: float = 40,
             channels: Optional[Sequence[int]] = None,
             prob: float = 0.25,
-            target_discrete_ix: Optional[list]= None,
-
+            target_discrete_ix: Optional[Sequence[int]] = None,
+            aniso_factor: float = 1.,
+            draw_debug_grid: bool = False
     ):
         self.sigma = sigma
         self.alpha = alpha
         self.channels = channels
         self.prob = prob
         self.target_discrete_ix = target_discrete_ix
+        self.aniso_factor = aniso_factor
+        self.draw_debug_grid = draw_debug_grid
 
     def __call__(
             self,
@@ -656,28 +699,69 @@ class ElasticTransform:
 
         # TODO (low priority): This could be written for n-d without explicit dimensions.
         if inp.ndim == 4:
-            shape = inp[0].shape
-            if target is not None and inp.shape[-3:] != target.shape[-3:]:
-                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
-            dz = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            z, y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), np.arange(shape[2]), indexing='ij')
-            indices = np.reshape(z + dz, (-1, 1)), np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+            if self.draw_debug_grid:
+                inp, target = _draw_debug_grid(inp, target)
+            ish, tsh = np.array(inp.shape[-3:]), np.array(target.shape[-3:])
+            dz = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            z, y, x = np.array(
+                np.meshgrid(np.arange(ish[0]), np.arange(ish[1]), np.arange(ish[2]), indexing='ij'),
+                dtype=np.float64
+            )
+            dz /= self.aniso_factor
+            z += dz
+            y += dy
+            x += dx
+            indices = np.reshape(z, (-1, 1)), np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
+
+            # If there is a target, apply the same deformation field to the target
+            if target is not None and np.any(ish != tsh):
+                if self.draw_debug_grid:
+                    inp, target = _draw_debug_grid(inp, target)
+                # Crop input re-indexing arrays to the target region and transform coordinates
+                #  to the target' own frame by subtracting the input-target offset
+                lo = (ish - tsh) // 2
+                hi = ish - lo
+                tcrop = tuple([slice(lo[i], hi[i]) for i in range(3)])
+                target_indices = (
+                    np.reshape(z[tcrop] - lo[0], (-1, 1)),
+                    np.reshape(y[tcrop] - lo[1], (-1, 1)),
+                    np.reshape(x[tcrop] - lo[2], (-1, 1))
+                )
+            else:
+                target_indices = indices
         elif inp.ndim == 3:
-            shape = inp[0].shape
-            if target is not None and inp.shape[-2:] != target.shape[-2:]:
-                raise NotImplementedError("ElasticTransform does not support differently-shaped targets!")
-            dy = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            dx = gaussian_filter((np.random.rand(*shape) * 2 - 1), self.sigma, mode="constant", cval=0) * self.alpha
-            y, x = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]))
-            indices = np.reshape(y + dy, (-1, 1)), np.reshape(x + dx, (-1, 1))
+            ish, tsh = np.array(inp.shape[-2:]), np.array(target.shape[-2:])
+            dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
+            y, x = np.array(
+                np.meshgrid(np.arange(ish[0]), np.arange(ish[1])),
+                dtype=np.float64
+            )
+            y += dy
+            x += dx
+            indices = np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
+
+            # If there is a target, apply the same deformation field to the target
+            if target is not None and np.any(ish != tsh):
+                # Crop input re-indexing arrays to the target region and transform coordinates
+                #  to the target' own frame by subtracting the input-target offset
+                lo = (ish - tsh) // 2
+                hi = ish - lo
+                tcrop = tuple([slice(lo[i], hi[i]) for i in range(2)])
+                target_indices = (
+                    np.reshape(y[tcrop] - lo[0], (-1, 1)),
+                    np.reshape(x[tcrop] - lo[1], (-1, 1))
+                )
+            else:
+                target_indices = indices
         else:
             raise ValueError("Input dimension not understood!")
 
         deformed_img = np.empty_like(inp)
         for c in channels:
-            deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(shape)
+            deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(ish)
 
         if target is None:
             return deformed_img, target
@@ -712,11 +796,10 @@ class ElasticTransform:
             if target_c:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
-                    deformed_target[tc] = map_coordinates(target[tc], indices, order=target_order).reshape(target_shape)
+                    deformed_target[tc] = map_coordinates(target[tc], target_indices, order=target_order).reshape(target_shape)
             else:
                 target_order = 0 if self.target_discrete_ix[0] is True else 1
-                deformed_target = map_coordinates(target, indices, order=target_order).reshape(target_shape)
-
+                deformed_target = map_coordinates(target, target_indices, order=target_order).reshape(target_shape)
             return deformed_img, deformed_target
 
 
@@ -744,6 +827,7 @@ class RandomFlip:
     Args:
         ndim_spatial: Number of spatial dimension in input, e.g.
             ``ndim_spatial=2`` for input shape (N, C, H, W)
+
     """
     def __init__(
             self,

@@ -95,7 +95,8 @@ class PtConv(LayerBase):
         self.l2 = nn.Linear(2*n_centers, n_centers)
         self.l3 = nn.Linear(n_centers, n_centers)
 
-    def forward(self, input, points, K, next_pts=None, normalize=False, indices_=None, return_indices=False, dilation=1):
+    def forward(self, inp, points, K, next_pts=None, normalize=False, indices_=None,
+                return_indices=False, dilation=1):
         if indices_ is None:
             if isinstance(next_pts, int) and points.size(1) != next_pts:
                 # convolution with reduction
@@ -115,8 +116,8 @@ class PtConv(LayerBase):
         else:
             indices = indices_
 
-        batch_size = input.size(0)
-        n_pts = input.size(1)
+        batch_size = inp.size(0)
+        n_pts = inp.size(1)
 
         if dilation > 1:
             indices = indices[:, :, torch.randperm(indices.size(2))]
@@ -127,7 +128,7 @@ class PtConv(LayerBase):
         indices = indices + add_indices.view(-1, 1, 1)
 
         # get the features and point cooridnates associated with the indices
-        features = input.view(-1, input.size(2))[indices]
+        features = inp.view(-1, inp.size(2))[indices]
         pts = points.view(-1, points.size(2))[indices]
 
         # center the neighborhoods
@@ -195,17 +196,17 @@ class SegSmall(nn.Module):
 
         self.fcout = nn.Linear(pl, output_channels)
 
-        self.bn2 = nn.BatchNorm1d(pl)
-        self.bn3 = nn.BatchNorm1d(pl)
-        self.bn4 = nn.BatchNorm1d(2 * pl)
-        self.bn5 = nn.BatchNorm1d(2 * pl)
-        self.bn6 = nn.BatchNorm1d(2 * pl)
+        self.bn2 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
 
-        self.bn5d = nn.BatchNorm1d(2 * pl)
-        self.bn4d = nn.BatchNorm1d(2 * pl)
-        self.bn3d = nn.BatchNorm1d(pl)
-        self.bn2d = nn.BatchNorm1d(pl)
-        self.bn1d = nn.BatchNorm1d(pl)
+        self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3d = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2d = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn1d = nn.BatchNorm1d(pl, track_running_stats=False)
 
         self.drop = nn.Dropout(0.5)
 
@@ -283,20 +284,20 @@ class SegBig(nn.Module):
 
         self.fcout = nn.Linear(pl + pl, output_channels)
 
-        self.bn0 = nn.BatchNorm1d(pl)
-        self.bn1 = nn.BatchNorm1d(pl)
-        self.bn2 = nn.BatchNorm1d(pl)
-        self.bn3 = nn.BatchNorm1d(pl)
-        self.bn4 = nn.BatchNorm1d(2 * pl)
-        self.bn5 = nn.BatchNorm1d(2 * pl)
-        self.bn6 = nn.BatchNorm1d(2 * pl)
+        self.bn0 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
 
-        self.bn5d = nn.BatchNorm1d(2 * pl)
-        self.bn4d = nn.BatchNorm1d(2 * pl)
-        self.bn3d = nn.BatchNorm1d(pl)
-        self.bn2d = nn.BatchNorm1d(pl)
-        self.bn1d = nn.BatchNorm1d(pl)
-        self.bn0d = nn.BatchNorm1d(pl)
+        self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3d = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2d = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn1d = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn0d = nn.BatchNorm1d(pl, track_running_stats=False)
 
         self.drop = nn.Dropout(dropout)
 
@@ -381,14 +382,13 @@ class ModelNet40(nn.Module):
         self.fcout = nn.Linear(8 * pl, output_channels)
 
         # batchnorms
-        self.bn1 = nn.BatchNorm1d(pl)
-        self.bn2 = nn.BatchNorm1d(2 * pl)
-        self.bn3 = nn.BatchNorm1d(4 * pl)
-        self.bn4 = nn.BatchNorm1d(4 * pl)
-        self.bn5 = nn.BatchNorm1d(8 * pl)
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
 
         self.dropout = nn.Dropout(0.5)
-
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
@@ -406,9 +406,149 @@ class ModelNet40(nn.Module):
 
         x5, _ = self.cv5(x4, pts4, 16, 1)
         x5 = self.relu(apply_bn(x5, self.bn5))
-
         xout = x5.view(x5.size(0), -1)
         xout = self.dropout(xout)
         xout = self.fcout(xout)
 
         return xout
+
+
+class ModelNetBig(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3):
+        super(ModelNetBig, self).__init__()
+
+        n_centers = 16
+        pl = 32
+
+        # convolutions
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension)
+        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
+        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
+        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension)
+
+        # last layer
+        self.fcout = nn.Linear(8 * pl, output_channels)
+
+        # batchnorms
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+
+        self.dropout = nn.Dropout(0.5)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, input_pts):
+        x1, pts1 = self.cv1(x, input_pts, 32)
+        x1 = self.relu(apply_bn(x1, self.bn1))
+
+        x2, pts2 = self.cv2(x1, pts1, 32, 1024)
+        x2 = self.relu(apply_bn(x2, self.bn2))
+
+        x3, pts3 = self.cv3(x2, pts2, 16, 256)
+        x3 = self.relu(apply_bn(x3, self.bn3))
+
+        x4, pts4 = self.cv4(x3, pts3, 16, 64)
+        x4 = self.relu(apply_bn(x4, self.bn4))
+
+        x5, _ = self.cv5(x4, pts4, 16, 1)
+        x5 = self.relu(apply_bn(x5, self.bn5))
+        xout = x5.view(x5.size(0), -1)
+        xout = self.dropout(xout)
+        xout = self.fcout(xout)
+
+        return xout
+
+
+class ModelNetAttention(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3,
+                 dropout=0.1, npoints=20000):
+        super(ModelNetAttention, self).__init__()
+
+        n_centers = 16
+        pl = 32
+
+        # convolutions
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension)
+        self.cv3 = PtConv(2 * pl, 2 * pl, n_centers, dimension)
+        self.cv4 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
+        self.cv5 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
+
+        # last layer
+        self.fcout = nn.Linear(4 * pl, output_channels)
+
+        # attention
+        self.att1 = Attention(npoints)
+
+        # batchnorms
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, input_pts):
+        x1, pts1 = self.cv1(x, input_pts, 32)
+        x1 = self.relu(apply_bn(x1, self.bn1))
+
+        # learn to select the basis points in the first reduction step
+        att_w = self.att1(x1.transpose(1, 2))
+        att_ixs = torch.argsort(att_w, dim=1)[:, :1024].unsqueeze(2)
+        att_ixs = torch.cat([att_ixs, att_ixs, att_ixs], dim=2)
+        pts2 = torch.gather(pts1, 1, att_ixs)
+
+        x2, pts2 = self.cv2(x1, pts1, 32, pts2)
+        x2 = self.relu(apply_bn(x2, self.bn2))
+
+        x3, pts3 = self.cv3(x2, pts2, 16, 256)
+        x3 = self.relu(apply_bn(x3, self.bn3))
+
+        x4, pts4 = self.cv4(x3, pts3, 16, 64)
+        x4 = self.relu(apply_bn(x4, self.bn4))
+
+        x5, _ = self.cv5(x4, pts4, 16, 1)
+        x5 = self.relu(apply_bn(x5, self.bn5))
+        xout = x5.view(x5.size(0), -1)
+        xout = self.dropout(xout)
+        xout = self.fcout(xout)
+
+        return xout
+
+
+def new_parameter(*size):
+    """
+    # from https://pytorch-nlp-tutorial-ny2018.readthedocs.io/en/latest/day2/patterns/attention.html
+    """
+    out = nn.Parameter(torch.FloatTensor(*size))
+    torch.nn.init.xavier_normal_(out)
+    return out
+
+
+class Attention(nn.Module):
+    """
+    # from https://pytorch-nlp-tutorial-ny2018.readthedocs.io/en/latest/day2/patterns/attention.html
+    attn = Attention(100)
+    x = Variable(torch.randn(16,30,100))
+    attn(x).size() == (16,100)
+    """
+    def __init__(self, attention_size):
+        super(Attention, self).__init__()
+        self.attention = new_parameter(attention_size, 1)
+
+    def forward(self, x_in):
+        # after this, we have (batch, dim1) with a diff weight per each cell
+        attention_score = torch.matmul(x_in, self.attention).squeeze()
+        attention_score = F.softmax(attention_score, dim=-1).view(x_in.size(0), x_in.size(1), 1)
+        scored_x = x_in * attention_score
+
+        # now, sum across dim 1 to get the expected feature vector
+        condensed_x = torch.sum(scored_x, dim=1)
+        return condensed_x

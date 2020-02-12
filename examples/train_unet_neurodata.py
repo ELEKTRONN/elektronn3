@@ -85,13 +85,16 @@ else:
     device = torch.device('cpu')
 logger.info(f'Running on device: {device}')
 
+out_channels = 2
 model = UNet(
+    out_channels=out_channels,
     n_blocks=4,
     start_filts=32,
     planar_blocks=(0,),
     activation='relu',
-    batch_norm=True,
+    normalization='group',
     # conv_mode='valid',
+    # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
 ).to(device)
 # Example for a model-compatible input.
@@ -191,7 +194,6 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': aniso_factor,
     'patch_shape': (44, 88, 88),
     # 'offset': (8, 20, 20),
-    'num_classes': 2,
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
 train_dataset = PatchCreator(
@@ -225,6 +227,14 @@ preview_batch = get_preview_batch(
     preview_shape=(32, 320, 320),
     transform=transforms.Normalize(mean=dataset_mean, std=dataset_std)
 )
+# Options for the preview inference (see elektronn3.inference.Predictor).
+# Attention: These values are highly dependent on model and data shapes!
+inference_kwargs = {
+    'tile_shape': (32, 64, 64),
+    'overlap_shape': (32, 64, 64),
+    'offset': None,
+    'apply_softmax': True,
+}
 
 optimizer = optim.SGD(
     model.parameters(),
@@ -256,17 +266,20 @@ else:
     if lr_sched_state_dict is not None:
         lr_sched.load_state_dict(lr_sched_state_dict)
 
-# All these metrics assume a binary classification problem. If you have
-#  non-binary targets, remember to adapt the metrics!
-# TODO: Default to mean metrics instead of binary versions?
-valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
+# Validation metrics
+valid_metrics = {  # mean metrics
+    'val_accuracy_mean': metrics.Accuracy(),
+    'val_precision_mean': metrics.Precision(),
+    'val_recall_mean': metrics.Recall(),
+    'val_DSC_mean': metrics.DSC(),
+    'val_IoU_mean': metrics.IoU(),
 }
-
+if out_channels > 2:
+    # Add separate per-class accuracy metrics only if there are more than 2 classes
+    valid_metrics.update({
+        f'val_IoU_c{i}': metrics.Accuracy(i)
+        for i in range(out_channels)
+    })
 
 crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
@@ -280,7 +293,7 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batchsize=1,
+    batch_size=1,
     num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
@@ -290,14 +303,11 @@ trainer = Trainer(
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
     preview_interval=5,
+    inference_kwargs=inference_kwargs,
     # enable_videos=True,  # Uncomment to enable videos in tensorboard
-    offset=train_dataset.offset,
-    apply_softmax_for_prediction=True,
-    num_classes=train_dataset.num_classes,
-    # TODO: Tune these:
-    preview_tile_shape=(32, 64, 64),
-    preview_overlap_shape=(32, 64, 64),
+    out_channels=out_channels,
     ipython_shell=args.ipython,
+    # extra_save_steps=range(0, max_steps, 10_000),
     # mixed_precision=True,  # Enable to use Apex for mixed precision training
 )
 
