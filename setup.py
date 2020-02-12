@@ -8,7 +8,7 @@ if on_rtd:
     install_requires = []
 else:
     install_requires = [
-        'torch>=1.3.0',
+        'torch==1.1.0',
         'numpy',
         'scipy',
         'h5py',

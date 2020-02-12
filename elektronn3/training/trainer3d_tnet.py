@@ -439,7 +439,6 @@ class Trainer3d:
 
         timer = Timer()
         batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        batch_num = 0
         for i, batch in batch_iter:
             pts = batch['pts']
             features = batch['features']
