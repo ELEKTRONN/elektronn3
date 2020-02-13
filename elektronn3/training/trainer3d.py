@@ -443,19 +443,11 @@ class Trainer3d:
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
+
             dfeats = features.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
 
-            # dinp: (batch_size, sample_num, 3)
-            # dfeats: (batch_size, sample_num, 1)
-            # dtarget: (batch_size, sample_num)
-            # dout: (batch_size, sample_num, num_classes)
             dout = self.model(dfeats, dinp)
-
-            # # calculate loss similar to method of aboulch (convpoint repo).
-            # dloss = 0
-            # for i in range(dout.size(0)):
-            #     dloss += self.criterion(dout[i], dtarget[i])
 
             dout_flat = dout.view(-1, self.num_classes)
             dtarget_flat = dtarget.view(-1)
@@ -587,8 +579,33 @@ class Trainer3d:
 
         # Iterate trough validation dataset and predict all chunks with current model.
         if not hasattr(self.valid_dataset, 'hc_names'):
-            # TODO: add validation metrics
+            val_loss = []
+            stats = {name: [] for name in self.valid_metrics.keys()}
+            batch_iter = tqdm(
+                enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
+                dynamic_ncols=True
+            )
+            for i, batch in batch_iter:
+                pts = batch['pts']
+                features = batch['features']
+                target = batch['target']
+                dinp = pts.to(self.device, non_blocking=True)
+                dfeats = features.to(self.device, non_blocking=True)
+                dtarget = target.to(self.device, non_blocking=True)
+                dout = self.model(dfeats, dinp)
+                val_loss.append(self.criterion(dout, dtarget).item())
+                out = dout.detach().cpu()
+                for name, evaluator in self.valid_metrics.items():
+                    stats[name].append(evaluator(target, out))
+
+            stats['val_loss'] = np.mean(val_loss)
+            stats['val_loss_std'] = np.std(val_loss)
+            for name in self.valid_metrics.keys():
+                stats[name] = np.nanmean(stats[name])
+
+            self.model.train()  # Reset model to training mode
             return
+
         for hc in self.valid_dataset.hc_names:
             merged = None
             for batch in tqdm(range(math.ceil(self.valid_dataset.get_hybrid_length(hc) / self.batchsize)), 'Validate'):

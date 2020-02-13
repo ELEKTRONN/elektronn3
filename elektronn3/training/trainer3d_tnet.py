@@ -435,7 +435,8 @@ class Trainer3dTriplet:
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target',
-                                                                            'error', 'loss_l2']}
+                                                                            'error', 'loss_l2',
+                                                                            'loss_orig']}
 
         timer = Timer()
         batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
@@ -445,6 +446,7 @@ class Trainer3dTriplet:
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
+
             dfeats = features.to(self.device, non_blocking=True)
 
             dA, dB, z0, z1, z2 = self.model(dfeats, dinp)
@@ -453,10 +455,7 @@ class Trainer3dTriplet:
             dloss = self.criterion(dA, dB, target)
             L_l2 = torch.mean(
                 torch.cat((z0.norm(1, dim=1), z1.norm(1, dim=1), z2.norm(1, dim=1)), dim=0))
-            misc['loss_l2'] += [self.alpha * float(L_l2)]
             dloss = dloss + self.alpha * L_l2
-            error = calculate_error(dA, dB)
-            misc['error'] += [error]
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -473,6 +472,11 @@ class Trainer3dTriplet:
             # End of core training loop on self.device
 
             with torch.no_grad():
+                misc['loss_l2'] += [self.alpha * float(L_l2)]
+                misc['loss_orig'] += [float(dloss)]
+                error = calculate_error(dA, dB)
+                misc['error'] += [error]
+
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)

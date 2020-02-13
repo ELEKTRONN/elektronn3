@@ -32,8 +32,8 @@ def indices_conv_reduction(input_pts, K, npts):
     indices = torch.from_numpy(indices).long()
     queries = torch.from_numpy(queries).float()
     if input_pts.is_cuda:
-        indices = indices.cuda()
-        queries = queries.cuda()
+        indices = indices.to(input_pts.device)
+        queries = queries.to(input_pts.device)
 
     return indices, queries
 
@@ -43,7 +43,7 @@ def indices_conv(input_pts, K):
         nearest_neighbors.knn_batch(input_pts.cpu().detach().numpy(), input_pts.cpu().detach().numpy(), K, omp=True)
     indices = torch.from_numpy(indices).long()
     if input_pts.is_cuda:
-        indices = indices.cuda()
+        indices = indices.to(input_pts.device)
     return indices, input_pts
 
 
@@ -52,7 +52,7 @@ def indices_deconv(input_pts, next_pts, K):
         nearest_neighbors.knn_batch(input_pts.cpu().detach().numpy(), next_pts.cpu().detach().numpy(), K, omp=True)
     indices = torch.from_numpy(indices).long()
     if input_pts.is_cuda:
-        indices = indices.cuda()
+        indices = indices.to(input_pts.device)
     return indices, next_pts
 
 
@@ -124,7 +124,7 @@ class PtConv(LayerBase):
             indices = indices[:, :, :K]
 
         # compute indices for indexing points
-        add_indices = torch.arange(batch_size).type(indices.type()) * n_pts
+        add_indices = torch.arange(batch_size).type(indices.type()).to(indices.device) * n_pts
         indices = indices + add_indices.view(-1, 1, 1)
 
         # get the features and point cooridnates associated with the indices
@@ -176,7 +176,7 @@ class PtConv(LayerBase):
 
 
 class SegSmall(nn.Module):
-    def __init__(self, input_channels, output_channels, dimension=3):
+    def __init__(self, input_channels, output_channels, dimension=3, dropout=0):
         super(SegSmall, self).__init__()
 
         n_centers = 16
@@ -208,7 +208,7 @@ class SegSmall(nn.Module):
         self.bn2d = nn.BatchNorm1d(pl, track_running_stats=False)
         self.bn1d = nn.BatchNorm1d(pl, track_running_stats=False)
 
-        self.drop = nn.Dropout(0.5)
+        self.drop = nn.Dropout(dropout)
 
     def forward(self, x, input_pts):
 
@@ -365,7 +365,7 @@ class SegBig(nn.Module):
 
 class ModelNet40(nn.Module):
 
-    def __init__(self, input_channels, output_channels, dimension=3):
+    def __init__(self, input_channels, output_channels, dimension=3, dropout=0.1):
         super(ModelNet40, self).__init__()
 
         n_centers = 16
@@ -388,7 +388,7 @@ class ModelNet40(nn.Module):
         self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
         self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
 
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
@@ -415,7 +415,7 @@ class ModelNet40(nn.Module):
 
 class ModelNetBig(nn.Module):
 
-    def __init__(self, input_channels, output_channels, dimension=3):
+    def __init__(self, input_channels, output_channels, dimension=3, dropout=0.1):
         super(ModelNetBig, self).__init__()
 
         n_centers = 16
@@ -438,7 +438,7 @@ class ModelNetBig(nn.Module):
         self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
         self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
 
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
@@ -499,7 +499,7 @@ class ModelNetAttention(nn.Module):
         x1, pts1 = self.cv1(x, input_pts, 32)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
-        # learn to select the basis points in the first reduction step
+        # learn to select the basis points for the first reduction step
         att_w = self.att1(x1.transpose(1, 2))
         att_ixs = torch.argsort(att_w, dim=1)[:, :1024].unsqueeze(2)
         att_ixs = torch.cat([att_ixs, att_ixs, att_ixs], dim=2)
