@@ -230,7 +230,7 @@ class Trainer3d:
             device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
-            valid_dataset: Optional[ChunkHandler] = None,
+            valid_dataset: Optional[Union[ChunkHandler, torch.utils.data.Dataset]] = None,
             pred_mapper: Optional[PredictionMapper] = None,
             val_freq: int = 1,
             valid_metrics: Optional[Dict] = None,
@@ -363,8 +363,12 @@ class Trainer3d:
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=60 if self.num_workers > 0 else 0,
-            worker_init_fn=_worker_init_fn
-        )
+            worker_init_fn=_worker_init_fn)
+
+        if valid_dataset is not None:
+            self.valid_loader = DataLoader(
+                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0,
+                pin_memory=True, worker_init_fn=_worker_init_fn)
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -383,9 +387,11 @@ class Trainer3d:
                 stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
-                stats['val_loss'] = nan
                 if self.epoch == 1 or self.epoch % self.val_freq == 0:
-                    self._validate()
+                    if self.valid_dataset is None:
+                        stats['val_loss'] = nan
+                    else:
+                        stats.update(self._validate())
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -593,8 +599,12 @@ class Trainer3d:
                 dfeats = features.to(self.device, non_blocking=True)
                 dtarget = target.to(self.device, non_blocking=True)
                 dout = self.model(dfeats, dinp)
+
+                dout = dout.view(-1, self.num_classes)
+                dtarget = dtarget.view(-1)
                 val_loss.append(self.criterion(dout, dtarget).item())
                 out = dout.detach().cpu()
+                target = dtarget.detach().cpu()
                 for name, evaluator in self.valid_metrics.items():
                     stats[name].append(evaluator(target, out))
 
@@ -604,7 +614,7 @@ class Trainer3d:
                 stats[name] = np.nanmean(stats[name])
 
             self.model.train()  # Reset model to training mode
-            return
+            return stats
 
         for hc in self.valid_dataset.hc_names:
             merged = None
