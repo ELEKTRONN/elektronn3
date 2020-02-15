@@ -3,7 +3,7 @@ from distutils.extension import Extension
 from Cython.Distutils import build_ext
 import numpy
 
-
+# TODO: add to e3 setup.py
 
 ext_modules = [Extension(
        "nearest_neighbors",

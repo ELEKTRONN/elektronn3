@@ -591,6 +591,8 @@ class Trainer3d:
                 enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
                 dynamic_ncols=True
             )
+            outs = []
+            targets = []
             for i, batch in batch_iter:
                 pts = batch['pts']
                 features = batch['features']
@@ -603,10 +605,10 @@ class Trainer3d:
                 dout = dout.view(-1, self.num_classes)
                 dtarget = dtarget.view(-1)
                 val_loss.append(self.criterion(dout, dtarget).item())
-                out = dout.detach().cpu()
-                target = dtarget.detach().cpu()
-                for name, evaluator in self.valid_metrics.items():
-                    stats[name].append(evaluator(target, out))
+                outs.append(dout.detach().cpu())
+                targets.append(dtarget.detach().cpu())
+            for name, evaluator in self.valid_metrics.items():
+                stats[name].append(evaluator(torch.cat(targets), torch.cat(outs)))
 
             stats['val_loss'] = np.mean(val_loss)
             stats['val_loss_std'] = np.std(val_loss)

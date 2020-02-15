@@ -523,6 +523,94 @@ class ModelNetAttention(nn.Module):
         return xout
 
 
+class ModelNetSelection(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3,
+                 dropout=0.1, npoints=20000):
+        super(ModelNetSelection, self).__init__()
+
+        n_centers = 16
+        pl = 32
+
+        # convolutions
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension)
+        self.cv3 = PtConv(2 * pl, 2 * pl, n_centers, dimension)
+        self.cv4 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
+        self.cv5 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
+
+        # last layer
+        self.fcout = nn.Linear(4 * pl, output_channels)
+
+        # selection
+        self.select1 = SelectionLayer(pl)
+
+        # batchnorms
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, input_pts):
+        x1, pts1 = self.cv1(x, input_pts, 32)
+        x1 = self.relu(apply_bn(x1, self.bn1))
+
+        # learn to select the basis points for the first reduction step
+        pts2 = self.select1(x1, 1024, pts1)
+
+        x2, pts2 = self.cv2(x1, pts1, 32, pts2)
+        x2 = self.relu(apply_bn(x2, self.bn2))
+
+        x3, pts3 = self.cv3(x2, pts2, 16, 256)
+        x3 = self.relu(apply_bn(x3, self.bn3))
+
+        x4, pts4 = self.cv4(x3, pts3, 16, 64)
+        x4 = self.relu(apply_bn(x4, self.bn4))
+
+        x5, _ = self.cv5(x4, pts4, 16, 1)
+        x5 = self.relu(apply_bn(x5, self.bn5))
+        xout = x5.view(x5.size(0), -1)
+        xout = self.dropout(xout)
+        xout = self.fcout(xout)
+
+        return xout
+
+
+class SelectionLayer(nn.Module):
+    def __init__(self, input_channels):
+        super(SelectionLayer, self).__init__()
+        self.selection = nn.Linear(input_channels, 1)
+        self.bn = nn.BatchNorm1d(1, track_running_stats=False)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x_in, top_n, x_select=None):
+        """
+        Linear layer which learns to select `top_n` elements from `x_select`
+        based on the features `x_in`.
+
+        Args:
+            x_in: Feature tensor used for selection (B x N x C).
+            top_n: Number of elements returned for every sample in the batch.
+            x_select: If None, will be set to `x_in`.
+                Shape required to be (B, N, C)
+
+        Returns:
+            The `top_n` selection of x_select (B x top_n x C).
+        """
+        if x_select is None:
+            x_select = x_in
+        selection_score = self.selection(x_in)
+        selection_score = self.relu(apply_bn(selection_score, self.bn))
+        att_ixs = torch.argsort(selection_score, dim=1)[:, :top_n]
+        # TODO: any more generic way to create an appropriate index used by torch.gather?
+        att_ixs = torch.cat([att_ixs] * x_select.size(2), dim=2)
+        return torch.gather(x_select, 1, att_ixs)
+
+
 def new_parameter(*size):
     """
     # from https://pytorch-nlp-tutorial-ny2018.readthedocs.io/en/latest/day2/patterns/attention.html
