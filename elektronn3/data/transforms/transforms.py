@@ -208,7 +208,6 @@ class SmoothOneHotTarget:
         return inp, onehot
 
 
-# TODO: Vector distance transform
 class DistanceTransformTarget:
     """Converts discrete binary label target tensors to their (signed)
     euclidean distance transform (EDT) representation.
@@ -222,26 +221,50 @@ class DistanceTransformTarget:
 
             and then divided by ``maxdist``
         normalize_fn: Function to apply to distance map for normalization.
-        inverted: Invert target labels before computing transform.
+        inverted: Invert target labels before computing transform if ``True``.
+             This means the distance map will show the distance to the nearest
+             foreground pixel at each background pixel location (which is the
+             opposite behavior of standard distance transform).
         signed: Compute signed distance transform (SEDT), where foreground
             regions are not 0 but the negative distance to the nearest
             foreground border.
+        vector: Return distance vector map instead of scalars.
     """
     def __init__(
             self,
             maxdist: Optional[float] = 200.,
             normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
             inverted: bool = True,
-            signed: bool = False
+            signed: bool = False,
+            vector: bool = True
     ):
         self.maxdist = maxdist
         self.normalize_fn = normalize_fn
         self.inverted = inverted
         self.signed = signed
+        self.vector = vector
 
     def clipnorm(self, dist: np.ndarray) -> np.ndarray:
         m = self.maxdist
         return np.clip(dist, -m, m) / m if self.signed else np.clip(dist, 0., m) / m
+
+    def edt(self, target):
+        if self.vector:
+            sh = target.shape
+            if target.ndim == 2:
+                coords = np.mgrid[:sh[0], :sh[1]]
+            elif target.ndim == 3:
+                coords = np.mgrid[:sh[0], :sh[1], :sh[2]]
+            else:
+                raise RuntimeError(f'Target shape {sh} not understood.')
+            inds = distance_transform_edt(
+                target, return_distances=False, return_indices=True
+            ).astype(np.float32)
+            dist = inds - coords
+            # assert np.isclose(np.sqrt(dist[0] ** 2 + dist[1] ** 2), distance_transform_edt(target))
+        else:
+            dist = distance_transform_edt(~target).astype(np.float32)[None]
+        return dist
 
     def __call__(
             self,
@@ -255,18 +278,16 @@ class DistanceTransformTarget:
         # if target.min() == 1:
         #     dist = np.full_like(target, np.inf)
         #     return inp, dist
-        # distance_transform_edt(~im, return_distances=False, return_indices=True).astype(np.float32)  # index matrix
-        dist = distance_transform_edt(target).astype(np.float32)
+        dist = self.edt(target)
         if self.signed:
             # Compute same transform on the inverted target. The inverse transform can be
             #  subtracted from the original transform to get a signed distance transform.
-            invdist = distance_transform_edt(~target).astype(np.float32)
+            invdist = self.edt(~target)
             dist -= invdist
         if self.maxdist is not None:
             dist = self.clipnorm(dist)
         if self.normalize_fn is not None:
             dist = self.normalize_fn(dist)
-        dist = dist[None]  # Add singleton C dim
         return inp, dist
 
 
