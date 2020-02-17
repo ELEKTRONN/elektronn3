@@ -24,6 +24,8 @@ import skimage.transform
 
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
+from scipy.ndimage.morphology import distance_transform_edt
+
 
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
@@ -204,6 +206,68 @@ class SmoothOneHotTarget:
         onehot = np.moveaxis(eye[target], -1, 0)
         assert np.all(onehot.argmax(0) == target)
         return inp, onehot
+
+
+# TODO: Vector distance transform
+class DistanceTransformTarget:
+    """Converts discrete binary label target tensors to their (signed)
+    euclidean distance transform (EDT) representation.
+
+    Args:
+        maxdist: Maximum distance to clip the values to. If ``maxdist`` is not
+            ``None``, distance values are clipped to
+
+            - ``[0, maxdist]`` if ``signed=False``
+            - ``[-maxdist, maxdist]`` if ``signed=True``
+
+            and then divided by ``maxdist``
+        normalize_fn: Function to apply to distance map for normalization.
+        inverted: Invert target labels before computing transform.
+        signed: Compute signed distance transform (SEDT), where foreground
+            regions are not 0 but the negative distance to the nearest
+            foreground border.
+    """
+    def __init__(
+            self,
+            maxdist: Optional[float] = 200.,
+            normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+            inverted: bool = True,
+            signed: bool = False
+    ):
+        self.maxdist = maxdist
+        self.normalize_fn = normalize_fn
+        self.inverted = inverted
+        self.signed = signed
+
+    def clipnorm(self, dist: np.ndarray) -> np.ndarray:
+        m = self.maxdist
+        return np.clip(dist, -m, m) / m if self.signed else np.clip(dist, 0., m) / m
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # returned without modifications
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+
+        target = target > 0  # Ensure np.bool
+        if self.inverted:
+            target = ~target
+        # if target.min() == 1:
+        #     dist = np.full_like(target, np.inf)
+        #     return inp, dist
+        # distance_transform_edt(~im, return_distances=False, return_indices=True).astype(np.float32)  # index matrix
+        dist = distance_transform_edt(target).astype(np.float32)
+        if self.signed:
+            # Compute same transform on the inverted target. The inverse transform can be
+            #  subtracted from the original transform to get a signed distance transform.
+            invdist = distance_transform_edt(~target).astype(np.float32)
+            dist -= invdist
+        if self.maxdist is not None:
+            dist = self.clipnorm(dist)
+        if self.normalize_fn is not None:
+            dist = self.normalize_fn(dist)
+        dist = dist[None]  # Add singleton C dim
+        return inp, dist
 
 
 class Normalize:
