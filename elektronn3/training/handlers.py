@@ -42,7 +42,9 @@ def plot_image(
         cmap=None,
         out_channels=None,
         colorbar=True,
-        filename=''
+        filename='',
+        vmin=None,
+        vmax=None
 ) -> matplotlib.figure.Figure:
     """Plots a 2D image to a malplotlib figure.
 
@@ -51,7 +53,6 @@ def plot_image(
     specify the global number of possible classes in ``out_channels``."""
 
     # Determine colormap and set discrete color values if needed.
-    vmin, vmax = None, None
     ticks = None
     ticklabels = None
     if cmap is None and out_channels is not None:
@@ -301,7 +302,6 @@ def _tb_log_sample_images(
             target_cmap = None
         elif target_slice.shape[0] == 1:
             target_slice = target_slice[0]
-            out_slice = out_slice[0]
             target_cmap = 'gray'
         else:
             raise RuntimeError(
@@ -351,9 +351,14 @@ def _tb_log_sample_images(
         global_step=trainer.step
     )
     if target_batch is not None:
+        _out_channels = trainer.out_channels if is_classification else None
+        _cmap = None if is_classification else 'gray'
         trainer.tb.add_figure(
             f'{group}/target',
-            plot_image(target_slice, out_channels=trainer.out_channels, filename=name),
+            plot_image(
+                target_slice, out_channels=_out_channels, filename=name, cmap=_cmap
+                # vmin=0., vmax=1.
+            ),
             global_step=trainer.step
         )
 
@@ -369,7 +374,10 @@ def _tb_log_sample_images(
     for c in range(out_slice.shape[0]):
         trainer.tb.add_figure(
             f'{group}/out{c}',
-            plot_image(out_slice[c], cmap='gray', filename=name),
+            plot_image(
+                out_slice[c], cmap='gray', filename=name,
+                # vmin=0., vmax=1.
+            ),
             global_step=trainer.step
         )
 
