@@ -424,34 +424,34 @@ class ModelNetBig(nn.Module):
         # convolutions
         self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
         self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension)
-        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
-        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
-        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension)
+        self.cv3 = PtConv(2 * pl, 2 * pl, n_centers, dimension)
+        self.cv4 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
+        self.cv5 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
 
         # last layer
-        self.fcout = nn.Linear(8 * pl, output_channels)
+        self.fcout = nn.Linear(4 * pl, output_channels)
 
         # batchnorms
         self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
         self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-        self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
         self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
-        self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
 
         self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
-        x1, pts1 = self.cv1(x, input_pts, 32)
+        x1, pts1 = self.cv1(x, input_pts, 32, input_pts.size(1) // 2)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
-        x2, pts2 = self.cv2(x1, pts1, 32, 1024)
+        x2, pts2 = self.cv2(x1, pts1, 32, 2048)
         x2 = self.relu(apply_bn(x2, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, 16, 256)
+        x3, pts3 = self.cv3(x2, pts2, 16, 512)
         x3 = self.relu(apply_bn(x3, self.bn3))
 
-        x4, pts4 = self.cv4(x3, pts3, 16, 64)
+        x4, pts4 = self.cv4(x3, pts3, 16, 128)
         x4 = self.relu(apply_bn(x4, self.bn4))
 
         x5, _ = self.cv5(x4, pts4, 16, 1)
@@ -512,6 +512,66 @@ class ModelNetAttention(nn.Module):
         x3 = self.relu(apply_bn(x3, self.bn3))
 
         x4, pts4 = self.cv4(x3, pts3, 16, 64)
+        x4 = self.relu(apply_bn(x4, self.bn4))
+
+        x5, _ = self.cv5(x4, pts4, 16, 1)
+        x5 = self.relu(apply_bn(x5, self.bn5))
+        xout = x5.view(x5.size(0), -1)
+        xout = self.dropout(xout)
+        xout = self.fcout(xout)
+
+        return xout
+
+
+class ModelNetAttentionBig(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3,
+                 dropout=0.1, npoints=20000):
+        super(ModelNetAttentionBig, self).__init__()
+
+        n_centers = 16
+        pl = 48
+
+        # convolutions
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension)
+        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
+        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
+        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension)
+
+        # last layer
+        self.fcout = nn.Linear(8 * pl, output_channels)
+
+        # attention
+        self.att1 = Attention(npoints // 2)
+
+        # batchnorms
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, input_pts):
+        x1, pts1 = self.cv1(x, input_pts, 32, input_pts.size(1) // 2)
+        x1 = self.relu(apply_bn(x1, self.bn1))
+
+        # learn to select the basis points for the first reduction step
+        att_w = self.att1(x1.transpose(1, 2))
+        att_ixs = torch.argsort(att_w, dim=1)[:, :2048].unsqueeze(2)
+        att_ixs = torch.cat([att_ixs, att_ixs, att_ixs], dim=2)
+        pts2 = torch.gather(pts1, 1, att_ixs)
+
+        x2, pts2 = self.cv2(x1, pts1, 32, pts2)
+        x2 = self.relu(apply_bn(x2, self.bn2))
+
+        x3, pts3 = self.cv3(x2, pts2, 16, 512)
+        x3 = self.relu(apply_bn(x3, self.bn3))
+
+        x4, pts4 = self.cv4(x3, pts3, 16, 128)
         x4 = self.relu(apply_bn(x4, self.bn4))
 
         x5, _ = self.cv5(x4, pts4, 16, 1)
@@ -612,7 +672,7 @@ class ModelNetSelectionBig(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
-        x1, pts1 = self.cv1(x, input_pts, 32, len(input_pts) // 2)
+        x1, pts1 = self.cv1(x, input_pts, 32, input_pts.size(1) // 2)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
         # learn to select 2048 basis points for this reduction step
