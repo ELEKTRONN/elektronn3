@@ -212,14 +212,10 @@ class DistanceTransformTarget:
     """Converts discrete binary label target tensors to their (signed)
     euclidean distance transform (EDT) representation.
 
+    Based on the method proposed in https://arxiv.org/abs/1805.02718.
+
     Args:
-        maxdist: Maximum distance to clip the values to. If ``maxdist`` is not
-            ``None``, distance values are clipped to
-
-            - ``[0, maxdist]`` if ``signed=False``
-            - ``[-maxdist, maxdist]`` if ``signed=True``
-
-            and then divided by ``maxdist``
+        scale: Scalar value to divide distances before applying normalization
         normalize_fn: Function to apply to distance map for normalization.
         inverted: Invert target labels before computing transform if ``True``.
              This means the distance map will show the distance to the nearest
@@ -232,21 +228,17 @@ class DistanceTransformTarget:
     """
     def __init__(
             self,
-            maxdist: Optional[float] = 200.,
-            normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+            scale: Optional[float] = 50.,
+            normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = np.tanh,
             inverted: bool = True,
-            signed: bool = False,
-            vector: bool = True
+            signed: bool = True,
+            vector: bool = False
     ):
-        self.maxdist = maxdist
+        self.scale = scale
         self.normalize_fn = normalize_fn
         self.inverted = inverted
         self.signed = signed
         self.vector = vector
-
-    def clipnorm(self, dist: np.ndarray) -> np.ndarray:
-        m = self.maxdist
-        return np.clip(dist, -m, m) / m if self.signed else np.clip(dist, 0., m) / m
 
     def edt(self, target):
         if self.vector:
@@ -263,7 +255,7 @@ class DistanceTransformTarget:
             dist = inds - coords
             # assert np.isclose(np.sqrt(dist[0] ** 2 + dist[1] ** 2), distance_transform_edt(target))
         else:
-            dist = distance_transform_edt(~target).astype(np.float32)[None]
+            dist = distance_transform_edt(target).astype(np.float32)[None]
         return dist
 
     def __call__(
@@ -271,10 +263,12 @@ class DistanceTransformTarget:
             inp: np.ndarray,  # returned without modifications
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
-
-        target = target > 0  # Ensure np.bool
+        # assert target.max() <= 1
+        # Ensure np.bool dtype, invert if needed
         if self.inverted:
-            target = ~target
+            target = target == 0
+        else:
+            target = target > 0
         # if target.min() == 1:
         #     dist = np.full_like(target, np.inf)
         #     return inp, dist
@@ -284,10 +278,8 @@ class DistanceTransformTarget:
             #  subtracted from the original transform to get a signed distance transform.
             invdist = self.edt(~target)
             dist -= invdist
-        if self.maxdist is not None:
-            dist = self.clipnorm(dist)
         if self.normalize_fn is not None:
-            dist = self.normalize_fn(dist)
+            dist = self.normalize_fn(dist / self.scale)
         return inp, dist
 
 
