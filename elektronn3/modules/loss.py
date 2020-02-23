@@ -105,6 +105,35 @@ class GAPTripletMarginLoss(nn.TripletMarginLoss):
             global_average_pooling(negative)
         )
 
+
+class DistanceWeightedMSELoss(nn.Module):
+    """Weighted MSE loss for signed euclidean distance transform targets.
+
+    By setting ``fg_weight`` to a high value, the errors in foreground
+    regions are more strongly penalized.
+    If ``fg_weight=1``, this loss is equivalent to ``torch.nn.MSELoss``.
+
+    Requires that targets are transformed with
+    :py:class:`elektronn3.data.transforms.DistanceTransformTarget`
+
+    Per-pixel weights are assigned on the targets as follows:
+    - each foreground pixel is weighted by ``fg_weight``
+    - each background pixel is weighted by 1.
+    """
+    def __init__(self, fg_weight=100.):
+        super().__init__()
+        self.fg_weight = fg_weight
+
+    def forward(self, output, target):
+        mse = nn.functional.mse_loss(output, target, reduction='none')
+        with torch.no_grad():
+            # This assumes that the target is in the (-1, 1) value range (tanh)
+            #  and that regions with value <= 0 are foreground.
+            weight = torch.ones_like(target)
+            weight[target <= 0] = self.fg_weight
+        return torch.mean(weight * mse)
+
+
 def _channelwise_sum(x: torch.Tensor):
     """Sum-reduce all dimensions of a tensor except dimension 1 (C)"""
     reduce_dims = tuple([0] + list(range(x.dim()))[2:])  # = (0, 2, 3, ...)
