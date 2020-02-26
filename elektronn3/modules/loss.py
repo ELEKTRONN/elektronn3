@@ -120,9 +120,10 @@ class DistanceWeightedMSELoss(nn.Module):
     - each foreground pixel is weighted by ``fg_weight``
     - each background pixel is weighted by 1.
     """
-    def __init__(self, fg_weight=100.):
+    def __init__(self, fg_weight=100., mask_borders=40):
         super().__init__()
         self.fg_weight = fg_weight
+        self.mask_borders = mask_borders
 
     def forward(self, output, target):
         mse = nn.functional.mse_loss(output, target, reduction='none')
@@ -131,6 +132,10 @@ class DistanceWeightedMSELoss(nn.Module):
             #  and that regions with value <= 0 are foreground.
             weight = torch.ones_like(target)
             weight[target <= 0] = self.fg_weight
+            if self.mask_borders is not None:  # Mask out invalid regions that come from same-padding
+                o = self.mask_borders
+                weight[:, :, :o, :o] = 0.
+                weight[:, :, target.shape[-2] - o:, target.shape[-1] - o:] = 0.
         return torch.mean(weight * mse)
 
 
