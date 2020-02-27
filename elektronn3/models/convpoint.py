@@ -530,7 +530,8 @@ class ModelNetAttentionBig(nn.Module):
         super(ModelNetAttentionBig, self).__init__()
 
         n_centers = 16
-        pl = 48
+        pl = 64
+        self.npoints = npoints
 
         # convolutions
         self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
@@ -543,8 +544,7 @@ class ModelNetAttentionBig(nn.Module):
         self.fcout = nn.Linear(8 * pl, output_channels)
 
         # attention
-        self.att1 = Attention(npoints // 2)
-
+        self.att1 = Attention(self.npoints // 3)
         # batchnorms
         self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
         self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
@@ -556,7 +556,10 @@ class ModelNetAttentionBig(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
-        x1, pts1 = self.cv1(x, input_pts, 32, input_pts.size(1) // 2)
+        if input_pts.size(1) != self.npoints:
+            raise ValueError(f'Number of input points {input_pts.size(1)} does '
+                             f'not match the attention layer {self.npoints}.')
+        x1, pts1 = self.cv1(x, input_pts, 32, self.npoints // 3)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
         # learn to select the basis points for the first reduction step
