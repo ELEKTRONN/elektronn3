@@ -342,7 +342,7 @@ class Trainer:
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
-
+            self.tb.add_graph(self.model)
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
