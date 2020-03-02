@@ -610,7 +610,7 @@ class Trainer3d:
                 val_loss.append(self.criterion(dout, dtarget).item())
                 outs.append(dout.detach().cpu())
                 targets.append(dtarget.detach().cpu())
-            target = torch.cat(targets)
+            targets = torch.cat(targets)
             for name, evaluator in self.valid_metrics.items():
                 stats[name].append(evaluator(targets, torch.cat(outs)))
 
