@@ -42,6 +42,3 @@ dependencies:
   - sphinx >=2.2
   - sphinx_rtd_theme >=0.4
   - sphinx-autodoc-typehints >=1.6
-
-  - pip:
-      - git+https://gitlab.mpcdf.mpg.de/pschuber/MorphX.git

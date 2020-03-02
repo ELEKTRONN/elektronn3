@@ -358,7 +358,10 @@ class Trainer3d:
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
-            self.tb.add_graph(self.model)
+            try:
+                self.tb.add_graph(self.model, self.example_input)
+            except Exception as e:
+                logger.warning(f'Could not add model graph to tensorboard.\n{e}')
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
@@ -607,11 +610,13 @@ class Trainer3d:
                 val_loss.append(self.criterion(dout, dtarget).item())
                 outs.append(dout.detach().cpu())
                 targets.append(dtarget.detach().cpu())
+            target = torch.cat(targets)
             for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(torch.cat(targets), torch.cat(outs)))
+                stats[name].append(evaluator(targets, torch.cat(outs)))
 
             stats['val_loss'] = np.mean(val_loss)
             stats['val_loss_std'] = np.std(val_loss)
+            stats['val_mean_target'] = np.mean(targets)
             for name in self.valid_metrics.keys():
                 stats[name] = np.nanmean(stats[name])
 

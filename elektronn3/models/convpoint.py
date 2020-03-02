@@ -17,7 +17,10 @@ import numpy as np
 import math
 import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighbors
 from abc import ABC
-
+try:
+    from torch_geometric.nn import XConv, fps, global_mean_pool
+except ImportError as e:
+    print('XConv layer not available.', e)
 
 # STATIC HELPER FUNCTIONS #
 
@@ -379,7 +382,8 @@ class ModelNet40(nn.Module):
         self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension)
 
         # last layer
-        self.fcout = nn.Linear(8 * pl, output_channels)
+        self.lin1 = nn.Linear(8 * pl, 2 * pl)
+        self.lin2 = nn.Linear(2 * pl, output_channels)
 
         # batchnorms
         self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
@@ -391,26 +395,28 @@ class ModelNet40(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x, input_pts):
-        x1, pts1 = self.cv1(x, input_pts, 32, 2048)
-        x1 = self.relu(apply_bn(x1, self.bn1))
+    def forward(self, x, pts):
+        x, pts = self.cv1(x, pts, 32, 4096)
+        x = self.relu(apply_bn(x, self.bn1))
 
-        x2, pts2 = self.cv2(x1, pts1, 32, 512)
-        x2 = self.relu(apply_bn(x2, self.bn2))
+        x, pts = self.cv2(x, pts, 32, 1024)
+        x = self.relu(apply_bn(x, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, 16, 128)
-        x3 = self.relu(apply_bn(x3, self.bn3))
+        x, pts = self.cv3(x, pts, 16, 512)
+        x = self.relu(apply_bn(x, self.bn3))
 
-        x4, pts4 = self.cv4(x3, pts3, 16, 32)
-        x4 = self.relu(apply_bn(x4, self.bn4))
+        x, pts = self.cv4(x, pts, 16, 256)
+        x = self.relu(apply_bn(x, self.bn4))
 
-        x5, _ = self.cv5(x4, pts4, 16, 1)
-        x5 = self.relu(apply_bn(x5, self.bn5))
-        xout = x5.view(x5.size(0), -1)
-        xout = self.dropout(xout)
-        xout = self.fcout(xout)
+        x, pts = self.cv5(x, pts, 16, 128)
+        x = self.relu(apply_bn(x, self.bn5))
+        x = x.mean(1)  # calculate mean across points -> aggregate evidence
 
-        return xout
+        x = self.dropout(x)
+        x = self.lin1(x)
+        x = self.lin2(x)
+
+        return x
 
 
 class ModelNetBig(nn.Module):
@@ -759,3 +765,67 @@ class Attention(nn.Module):
         # now, sum across dim 1 to get the expected feature vector
         condensed_x = torch.sum(scored_x, dim=1)
         return condensed_x
+
+
+class ModelNet40xConv(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3, dropout=0.1):
+        super(ModelNet40xConv, self).__init__()
+
+        pl = 32
+
+        # convolutions
+        self.cv1 = XConv(input_channels, pl, dimension, 8, hidden_channels=32)
+        self.cv2 = XConv(pl, 2 * pl, dimension, 8, hidden_channels=64, dilation=2)
+        self.cv3 = XConv(2 * pl, 4 * pl, dimension, 12, hidden_channels=128, dilation=2)
+        self.cv4 = XConv(4 * pl, 4 * pl, dimension, 16, hidden_channels=128, dilation=2)
+        self.cv5 = XConv(4 * pl, 8 * pl, dimension, 16, hidden_channels=256, dilation=2)
+
+        # last layer
+        self.lin1 = nn.Linear(8 * pl, 2 * pl)
+        self.lin2 = nn.Linear(2 * pl, output_channels)
+
+        # batchnorms
+        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x, pos):
+        nbatches = x.size(0)
+        npts = x.size(1)
+        x = x.view(-1, x.size(-1))
+        pos = pos.view(-1, pos.size(-1))
+        batch = torch.tensor(np.repeat(np.arange(nbatches), npts)).to(pos.device)
+
+        x = self.cv1(x, pos, batch)
+        idx = fps(pos, batch, ratio=0.33)
+        x, pos, batch = x[idx], pos[idx], batch[idx]
+        x = self.relu(self.bn1(x))
+        x = self.cv2(x, pos, batch)
+
+        x = self.relu(self.bn2(x))
+        idx = fps(pos, batch, ratio=0.33)
+        x, pos, batch = x[idx], pos[idx], batch[idx]
+        x = self.cv3(x, pos, batch)
+
+        x = self.relu(self.bn3(x))
+        idx = fps(pos, batch, ratio=0.33)
+        x, pos, batch = x[idx], pos[idx], batch[idx]
+        x = self.cv4(x, pos, batch)
+
+        x = self.relu(self.bn4(x))
+        x = self.cv5(x, pos, batch)
+
+        x = global_mean_pool(x, batch)
+
+        x = self.relu(self.bn5(x))
+        x = self.dropout(x)
+        x = self.lin1(x)
+        x = self.lin2(x)
+
+        return x
