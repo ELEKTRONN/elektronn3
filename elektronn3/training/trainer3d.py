@@ -7,11 +7,12 @@
 import datetime
 from collections import deque
 
+import math
 import gc
 import logging
 import os
 import shutil
-import random
+import warnings
 
 from itertools import islice
 from math import nan
@@ -38,6 +39,8 @@ from torch.utils import collect_env
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
+# from morphx.data.chunkhandler import ChunkHandler
+from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import clouds
 
@@ -51,6 +54,7 @@ class NaNException(RuntimeError):
 
 def _worker_init_fn(worker_id: int) -> None:
     """Sets a unique but deterministic random seed for background workers.
+
     Only sets the seed for NumPy because PyTorch and Python's own RNGs
     take care of reseeding on their own.
     See https://github.com/numpy/numpy/issues/9650."""
@@ -89,12 +93,15 @@ def _change_log_file_to(
 
 class Trainer3d:
     """ Training loop abstraction with IPython and tensorboard integration.
+
     Hitting Ctrl-C anytime during the training will drop you to the IPython
     training shell where you can access training data and make interactive
     changes.
     To continue training, hit Ctrl-D twice.
     If you want the process to terminate after leaving the shell, set
     ``self.terminate = True`` inside it and then hit Ctrl-D twice.
+
+
     Args:
         model: PyTorch model (``nn.Module``) that shall be trained.
             Please make sure that the output shape of the ``model``
@@ -224,7 +231,10 @@ class Trainer3d:
             device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
-            valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            valid_dataset: torch.utils.data.Dataset,
+            # valid_dataset: Optional[Union[ChunkHandler, torch.utils.data.Dataset]] = None,
+            pred_mapper: Optional[PredictionMapper] = None,
+            val_freq: int = 1,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
@@ -233,7 +243,7 @@ class Trainer3d:
             preview_interval: int = 5,
             offset: Optional[Sequence[int]] = None,
             exp_name: Optional[str] = None,
-            example_input: Optional[torch.Tensor] = None,
+            example_input: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
             enable_save_trace: bool = False,
             batchsize: int = 1,
             num_workers: int = 0,
@@ -277,6 +287,8 @@ class Trainer3d:
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.pred_mapper = pred_mapper
+        self.val_freq = val_freq
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
         self.preview_tile_shape = preview_tile_shape
@@ -364,11 +376,8 @@ class Trainer3d:
         # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
-                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
-                worker_init_fn=_worker_init_fn
-            )
-        self.best_val_loss = np.inf  # Best recorded validation loss
-        self.best_tr_loss = np.inf
+                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0,
+                pin_memory=True, worker_init_fn=_worker_init_fn)
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -387,11 +396,11 @@ class Trainer3d:
                 stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
-                if self.valid_dataset is None:
-                    stats['val_loss'] = nan
-                else:
-                    valid_stats = self._validate()
-                    stats.update(valid_stats)
+                if self.epoch == 1 or self.epoch % self.val_freq == 0:
+                    if self.valid_dataset is None:
+                        stats['val_loss'] = nan
+                    else:
+                        stats.update(self._validate())
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -402,10 +411,6 @@ class Trainer3d:
 
                 # Save trained model state
                 self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
-                # TODO: Support other metrics for determining what's the "best" model?
-                if stats['val_loss'] < self.best_val_loss:
-                    self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -448,28 +453,21 @@ class Trainer3d:
         batch_num = 0
         for i, batch in batch_iter:
             pts = batch['pts']
+            nodes = batch['nodes']
             features = batch['features']
             target = batch['target']
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
+            dnode = nodes.to(self.device, non_blocking=True)
             dfeats = features.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
 
-            # dinp: (batch_size, sample_num, 3)
-            # dfeats: (batch_size, sample_num, 1)
-            # dtarget: (batch_size, sample_num)
-            # dout: (batch_size, sample_num, num_classes)
-            dout = self.model(dfeats, dinp)
+            dout = self.model(dfeats, dinp, dnode)
 
-            # calculate loss similar to method of aboulch (convpoint repo).
-            dloss = 0
-            for i in range(dout.size(0)):
-                dloss += self.criterion(dout[i], dtarget[i])
-
-            # dout_flat = dout.view(-1, 5)
-            # dtarget_flat = dtarget.view(-1)
-            # dloss = self.criterion(dout_flat, dtarget_flat)
+            dout_flat = dout.view(-1, self.num_classes)
+            dtarget_flat = dtarget.view(-1)
+            dloss = self.criterion(dout_flat, dtarget_flat)
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -487,14 +485,17 @@ class Trainer3d:
 
             with torch.no_grad():
                 # save samples of every 20th batch of every 20th epoch for visualization
-                if self.epoch % 10 == 0:
+                if self.epoch % 10 == 0 and target.size(1) == pts.size(1):
                     if batch_num % 20 == 0:
                         results = []
                         for j in range(pts.size(0)):
-                            orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
-                            pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
+                            labels = target[j].cpu().numpy()
+                            pred = np.argmax(dout[j].cpu().numpy(), axis=1)
+                            orig = PointCloud(pts[j].cpu().numpy(), labels=labels)
+                            pred = PointCloud(pts[j].cpu().numpy(), labels=pred)
                             results.append(orig)
                             results.append(pred)
+                        # 'save_cloudlist' does not exist
                         clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
                     batch_num += 1
 
@@ -585,45 +586,93 @@ class Trainer3d:
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     @torch.no_grad()
-    def _validate(self) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
+    def _validate(self):
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
-        val_loss = []
-        stats = {name: [] for name in self.valid_metrics.keys()}
-        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
-        for i, batch in batch_iter:
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            inp, feats, target = batch['pts'], batch['features'], batch['lbs']
-            dinp = inp.to(self.device, non_blocking=True)
-            dfeats = feats.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
-            dout = self.model(dfeats, dinp)
+        # Iterate trough validation dataset and predict all chunks with current model.
+        if not hasattr(self.valid_dataset, 'hc_names'):
+            val_loss = []
+            stats = {name: [] for name in self.valid_metrics.keys()}
+            batch_iter = tqdm(
+                enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
+                dynamic_ncols=True
+            )
+            outs = []
+            targets = []
+            for i, batch in batch_iter:
+                pts = batch['pts']
+                nodes = batch['nodes']
+                features = batch['features']
+                target = batch['target']
+                dinp = pts.to(self.device, non_blocking=True)
+                dnode = nodes.to(self.device, non_blocking=True)
+                dfeats = features.to(self.device, non_blocking=True)
+                dtarget = target.to(self.device, non_blocking=True)
+                dout = self.model(dfeats, dinp, dnode)
 
-            # dout has shape of (batch_size, point_number, classes)
-            # dtarget has shape of (batch_size, point_number)
-            # transform dout to shape (batch_size*point_number, classes) and dtarget to (batch_size*point_number)
-            # => shape conform to (N,C) and (N) instead of (N,C,d1) and (N,d1)
-            dout = dout.view(-1, 5)
-            dtarget = dtarget.view(-1)
-
-            val_loss.append(self.criterion(dout, dtarget).item())
-            out = dout.detach().cpu()
-            target = target.view(-1)
-            target = target.reshape(len(target),1)
+                dout = dout.view(-1, self.num_classes)
+                dtarget = dtarget.view(-1)
+                val_loss.append(self.criterion(dout, dtarget).item())
+                outs.append(dout.detach().cpu())
+                targets.append(dtarget.detach().cpu())
             for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(target, out, self.num_classes))
+                stats[name].append(evaluator(torch.cat(targets), torch.cat(outs)))
 
-        stats['val_loss'] = np.mean(val_loss)
-        stats['val_loss_std'] = np.std(val_loss)
-        for name in self.valid_metrics.keys():
-            stats[name] = np.nanmean(stats[name])
+            stats['val_loss'] = np.mean(val_loss)
+            stats['val_loss_std'] = np.std(val_loss)
+            for name in self.valid_metrics.keys():
+                stats[name] = np.nanmean(stats[name])
+
+            self.model.train()  # Reset model to training mode
+            return stats
+
+        for hc in self.valid_dataset.hc_names:
+            merged = None
+            for batch in tqdm(range(math.ceil(self.valid_dataset.get_hybrid_length(hc) / self.batchsize)), 'Validate'):
+                pts = torch.zeros((self.batchsize, self.valid_dataset.sample_num, 3))
+                feats = torch.ones((self.batchsize, self.valid_dataset.sample_num, 1))
+                centroids = torch.ones((self.batchsize, 3))
+
+                for j in range(self.batchsize):
+                    chunk, centroid = self.valid_dataset[(hc, batch*self.batchsize+j)]
+                    centroids[j] = torch.from_numpy(centroid)
+                    pts[j] = torch.from_numpy(chunk.vertices)
+
+                pts = pts.to(self.device, non_blocking=True)
+                feats = feats.to(self.device, non_blocking=True)
+                outputs = self.model(feats, pts)
+                pts = pts.cpu().detach().numpy()
+                output_np = outputs.cpu().detach().numpy()
+                output_np = np.argmax(output_np, axis=2)
+
+                for j in range(self.batchsize):
+                    if not np.all(pts[j] == 0):
+                        prediction = PointCloud(pts[j], output_np[j])
+
+                        # TODO: Find better solution for handling inverse transformations
+                        transform = self.valid_dataset.transform
+                        assert isinstance(transform.transforms[0], clouds.Normalization)
+                        assert isinstance(transform.transforms[1], clouds.Center)
+
+                        # Inverse transformation
+                        prediction.move(centroids[j].numpy())
+                        prediction.scale(self.valid_dataset.chunk_size)
+
+                        if merged is None:
+                            merged = prediction
+                        else:
+                            merged = clouds.merge_clouds(merged, prediction)
+
+                        self.pred_mapper.map_predictions(prediction, hc, batch*self.batchsize+j)
+
+            # Save validation as original PointCloud with predictions and as PointCloud containing all merged chunks.
+            name = 'epoch_{}'.format(self.epoch)
+            self.pred_mapper.save_prediction(name=name)
+            save_path = self.pred_mapper.save_path
+            clouds.save_cloud(merged, save_path, name=name+'_merged')
 
         self.model.train()  # Reset model to training mode
 
-        return stats
-
-# TODO: Instead of using specific keys like val_loss, enable passing info as an
-#       extra dict whose contents will be added to the state_dict
     def _save_model(
             self,
             suffix: str = '',
@@ -632,10 +681,15 @@ class Trainer3d:
             val_loss=np.nan
     ) -> None:
         """Save/serialize trained model state to files.
-        Writes the following files in the ``self.save_path``:
-        - ``state_dicts.pth`` contains the a dict that holds the ``state_dict``
-          of the trained model, the ``state_dict`` of the optimizer and
-          some meta information (global step, epoch, best validation loss)
+
+        If the model uses a parallel wrapper like ``torch.nn.DataParallel``,
+        this is automatically detected and the wrapped model is saved directly
+        to make later deserialization easier. This can be disabled by setting
+        ``unwrap_parallel=False``.
+
+        Writes to two files in the ``self.save_path``:
+
+        - ``state_dict.pth`` contains the ``state_dict`` of the trained model.
           The included parameters can be read and used to overwrite another
           model's ``state_dict``. The model code (architecture) itself is not
           included in this file.
@@ -700,21 +754,24 @@ class Trainer3d:
             'lr_sched_state_dict': lr_sched_state,
             'global_step': self.step,
             'epoch': self.epoch,
-            'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
         }, state_dict_path)
-        log(f'Saved state_dict as {state_dict_path}')
+        logger.info(f'Saved state_dict as {state_dict_path}')
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
-            log(f'Saved model as {model_path}')
+            logger.info(f'Saved model as {model_path}')
             if self.example_input is not None and self.enable_save_trace:
                 # Additionally trace and serialize the model in eval + train mode
                 model_path += 's'
-                traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    traced = torch.jit.trace(model.eval(), self.example_input)
                 traced.save(model_path)
-                log(f'Saved jit-traced model as {model_path}')
+                logger.info(f'Saved jit-traced model as {model_path}')
                 # Uncomment these lines if separate traces for train/eval are required:
+                # traced_eval = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+                # traced_eval.save('eval_' + model_path)
                 # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
                 # traced_train.save('train_' + model_path)
         except (TypeError, PickleError) as exc:
@@ -724,7 +781,7 @@ class Trainer3d:
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
                 model.save(model_path)
-                log(f'Saved jitted model as {model_path}')
+                logger.info(f'Saved jitted model as {model_path}')
             else:
                 raise exc
         finally:
