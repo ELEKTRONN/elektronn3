@@ -263,7 +263,7 @@ else:
         max_lr=0.1,
         step_size_up=10000,
         step_size_down=10000,
-        cycle_momentum=True
+        cycle_momentum=True if 'momentum' in optimizer.defaults else False
     )
     if optimizer_state_dict is not None:
         optimizer.load_state_dict(optimizer_state_dict)
