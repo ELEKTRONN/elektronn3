@@ -345,7 +345,7 @@ class Trainer:
             try:
                 self.tb.add_graph(self.model, self.example_input)
             except Exception as e:
-                logger.warning(f'Could add model grapg to tensorboard.\n{e}')
+                logger.warning(f'Could not add model graph to tensorboard.\n{e}')
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,

@@ -610,11 +610,13 @@ class Trainer3d:
                 val_loss.append(self.criterion(dout, dtarget).item())
                 outs.append(dout.detach().cpu())
                 targets.append(dtarget.detach().cpu())
+            targets = torch.cat(targets)
             for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(torch.cat(targets), torch.cat(outs)))
+                stats[name].append(evaluator(targets, torch.cat(outs)))
 
             stats['val_loss'] = np.mean(val_loss)
             stats['val_loss_std'] = np.std(val_loss)
+            stats['val_mean_target'] = np.mean(targets)
             for name in self.valid_metrics.keys():
                 stats[name] = np.nanmean(stats[name])
 
