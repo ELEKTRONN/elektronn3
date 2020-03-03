@@ -278,9 +278,6 @@ class DistanceTransformTarget:
             target = target == 0
         else:
             target = target > 0
-        # if target.min() == 1:
-        #     dist = np.full_like(target, np.inf)
-        #     return inp, dist
         dist = self.edt(target)
         if self.signed:
             # Compute same transform on the inverted target. The inverse transform can be
@@ -1007,6 +1004,22 @@ class RandomRotate2d:
                     rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
 
         return rinp, rtarget
+
+
+class Clahe2d:
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        assert inp.ndim == 3, 'Only 2D data is supported'
+        orig_dtype = inp.dtype
+        inp = inp.astype(np.uint8)  # equalize_adapthist() requires uint8
+        clahe_inp = np.empty_like(inp)
+        for c in range(inp.shape[0]):
+            clahe_inp[c] = skimage.exposure.equalize_adapthist(inp[c])
+        clahe_inp = clahe_inp.astype(orig_dtype)
+        return clahe_inp, target
 
 
 # TODO: Support other image shapes

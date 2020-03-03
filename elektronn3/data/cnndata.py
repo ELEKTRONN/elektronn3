@@ -747,3 +747,5 @@ class TripletData2d(data.Dataset):
 
     def __len__(self):
         return len(self.inp_paths) * self.epoch_multiplier
+
+# TODO: Warn if datasets have no content
