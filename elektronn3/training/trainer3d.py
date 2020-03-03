@@ -358,7 +358,10 @@ class Trainer3d:
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
-            self.tb.add_graph(self.model)
+            try:
+                self.tb.add_graph(self.model, self.example_input)
+            except Exception as e:
+                logger.warning(f'Could not add model graph to tensorboard.\n{e}')
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,

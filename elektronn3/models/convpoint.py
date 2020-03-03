@@ -419,7 +419,7 @@ class ModelNetBig(nn.Module):
         super(ModelNetBig, self).__init__()
 
         n_centers = 16
-        pl = 32
+        pl = 48
 
         # convolutions
         self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
@@ -442,16 +442,16 @@ class ModelNetBig(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts):
-        x1, pts1 = self.cv1(x, input_pts, 32, input_pts.size(1) // 2)
+        x1, pts1 = self.cv1(x, input_pts, 32, input_pts.size(1) // 10)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
-        x2, pts2 = self.cv2(x1, pts1, 32, 2048)
+        x2, pts2 = self.cv2(x1, pts1, 32, 1024)
         x2 = self.relu(apply_bn(x2, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, 16, 512)
+        x3, pts3 = self.cv3(x2, pts2, 16, 256)
         x3 = self.relu(apply_bn(x3, self.bn3))
 
-        x4, pts4 = self.cv4(x3, pts3, 16, 128)
+        x4, pts4 = self.cv4(x3, pts3, 16, 64)
         x4 = self.relu(apply_bn(x4, self.bn4))
 
         x5, _ = self.cv5(x4, pts4, 16, 1)
