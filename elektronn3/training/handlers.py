@@ -300,8 +300,10 @@ def _tb_log_sample_images(
             target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
             out_slice = np.moveaxis(out_slice, 0, -1)
             target_cmap = None
+        elif target_slice.shape[0] == 2:
+            pass
         elif target_slice.shape[0] == 1:
-            target_slice = target_slice[0]
+            # target_slice = target_slice[0]
             target_cmap = 'gray'
         else:
             raise RuntimeError(
@@ -353,14 +355,16 @@ def _tb_log_sample_images(
     if target_batch is not None:
         _out_channels = trainer.out_channels if is_classification else None
         _cmap = None if is_classification else 'gray'
-        trainer.tb.add_figure(
-            f'{group}/target',
-            plot_image(
-                target_slice, out_channels=_out_channels, filename=name, cmap=_cmap
-                # vmin=0., vmax=1.
-            ),
-            global_step=trainer.step
-        )
+        _target_slice = target_slice[None] if target_slice.ndim == 2 else target_slice
+        for c in range(_target_slice.shape[0]):
+            trainer.tb.add_figure(
+                f'{group}/target{c}',
+                plot_image(
+                    _target_slice[c], out_channels=_out_channels, filename=name, cmap=_cmap
+                    # vmin=0., vmax=1.
+                ),
+                global_step=trainer.step
+            )
 
     for key, img in images.items():
         if key.startswith('att'):
@@ -392,11 +396,13 @@ def _tb_log_sample_images(
                 global_step=trainer.step
             )
             if target_batch is not None and not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
-                trainer.tb.add_figure(
-                    f'{group}/target_overlay',
-                    plot_image(inp_slice, overlay=target_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
-                    global_step=trainer.step
-                )
+                _target_slice = target_slice[None] if target_slice.ndim == 2 else target_slice
+                for c in range(_target_slice.shape[0]):
+                    trainer.tb.add_figure(
+                        f'{group}/target_overlay',
+                        plot_image(inp_slice, overlay=_target_slice[c], overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
+                        global_step=trainer.step
+                    )
                 trainer.tb.add_figure(
                     f'{group}/pred_overlay',
                     plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
