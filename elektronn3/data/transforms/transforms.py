@@ -163,15 +163,18 @@ class RandomSlicewiseTransform:
 class DropIfTooMuchBG:
     """Filter transform that skips a sample if the background class is too
     dominant in the target."""
-    def __init__(self, bg_id=0, threshold=0.9):
+    def __init__(self, bg_id=0, threshold=0.9, prob=1.0):
         self.bg_id = bg_id
         self.threshold = threshold
+        self.prob = prob
 
     def __call__(
             self,
             inp: np.ndarray,
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
+        if np.random.rand() > self.prob:
+            return inp, target
         if np.sum(target == self.bg_id) / target.size > self.threshold:
             raise _DropSample
         return inp, target  # Return inp, target unmodified
