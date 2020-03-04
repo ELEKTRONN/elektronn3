@@ -368,7 +368,8 @@ class SegBig(nn.Module):
 
 class ModelNet40(nn.Module):
 
-    def __init__(self, input_channels, output_channels, dimension=3, dropout=0.1):
+    def __init__(self, input_channels, output_channels, dimension=3,
+                 dropout=0.1, use_bn=True):
         super(ModelNet40, self).__init__()
 
         n_centers = 16
@@ -386,11 +387,18 @@ class ModelNet40(nn.Module):
         self.lin2 = nn.Linear(2 * pl, output_channels)
 
         # batchnorms
-        self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
-        self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-        self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
-        self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
-        self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+        if use_bn:
+            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
+            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
+            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+        else:
+            self.bn1 = lambda x: x
+            self.bn2 = lambda x: x
+            self.bn3 = lambda x: x
+            self.bn4 = lambda x: x
+            self.bn5 = lambda x: x
 
         self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)

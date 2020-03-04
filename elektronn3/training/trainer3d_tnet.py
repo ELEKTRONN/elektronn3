@@ -257,7 +257,8 @@ class Trainer3dTriplet:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
-            alpha=1e-6
+            alpha=1e-6,
+            dataloader_kwargs: Optional[dict] = None
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -266,6 +267,8 @@ class Trainer3dTriplet:
                 'If preview_batch is set, you will also need to specify '
                 'preview_tile_shape and preview_overlap_shape or preview_offset!'
             )
+        if dataloader_kwargs is None:
+            dataloader_kwargs = dict()
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
@@ -368,8 +371,8 @@ class Trainer3dTriplet:
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60 if self.num_workers > 0 else 0,
-            worker_init_fn=_worker_init_fn
+            timeout=480 if self.num_workers > 0 else 0,
+            worker_init_fn=_worker_init_fn, **dataloader_kwargs
         )
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
@@ -444,15 +447,17 @@ class Trainer3dTriplet:
         timer = Timer()
         batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         for i, batch in batch_iter:
-            pts = batch['pts']
-            features = batch['features']
-
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            dinp = pts.to(self.device, non_blocking=True)
 
-            dfeats = features.to(self.device, non_blocking=True)
+            x0, x1, x2 = batch
+            for k in x0:
+                x0[k] = x0[k].to(self.device, non_blocking=True)
+                x1[k] = x1[k].to(self.device, non_blocking=True)
+                x2[k] = x2[k].to(self.device, non_blocking=True)
 
-            dA, dB, z0, z1, z2 = self.model(dfeats, dinp)
+            dA, dB, z0, z1, z2 = self.model((x0['features'], x0['pts']),
+                                            (x1['features'], x1['pts']),
+                                            (x2['features'], x2['pts']))
             target = torch.FloatTensor(dA.size()).fill_(-1).to(self.device)
             target = Variable(target)
             dloss = self.criterion(dA, dB, target)
@@ -465,13 +470,17 @@ class Trainer3dTriplet:
                 raise NaNException
 
             # update step
-            self.optimizer.zero_grad()
             if self.mixed_precision:
                 with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
                 dloss.backward()
-            self.optimizer.step()
+
+            # accumulate gradient over 5 batches -> single batch contains always the same cell ->
+            # mix targets
+            if (i+1) % 10 == 0:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
             # End of core training loop on self.device
 
             with torch.no_grad():

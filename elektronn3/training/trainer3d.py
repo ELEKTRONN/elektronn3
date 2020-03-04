@@ -256,6 +256,7 @@ class Trainer3d:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
+            dataloader_kwargs: Optional[dict] = None
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -264,6 +265,8 @@ class Trainer3d:
                 'If preview_batch is set, you will also need to specify '
                 'preview_tile_shape and preview_overlap_shape or preview_offset!'
             )
+        if dataloader_kwargs is None:
+            dataloader_kwargs = dict()
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
@@ -366,12 +369,12 @@ class Trainer3d:
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=60 if self.num_workers > 0 else 0,
-            worker_init_fn=_worker_init_fn)
+            worker_init_fn=_worker_init_fn, **dataloader_kwargs)
 
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
-                self.valid_dataset, self.batchsize, shuffle=True, num_workers=0,
-                pin_memory=True, worker_init_fn=_worker_init_fn)
+                self.valid_dataset, batch_size=self.batchsize, shuffle=True, num_workers=0,
+                pin_memory=True, worker_init_fn=_worker_init_fn, **dataloader_kwargs)
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -466,14 +469,16 @@ class Trainer3d:
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
 
-            # update step
-            self.optimizer.zero_grad()
             if self.mixed_precision:
                 with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
             else:
                 dloss.backward()
-            self.optimizer.step()
+            # accumulate gradient over 5 batches -> single batch contains always the same cell ->
+            # mix targets
+            if (i+1) % 10 == 0:
+                self.optimizer.step()
+                self.optimizer.zero_grad()
             # End of core training loop on self.device
 
             with torch.no_grad():
@@ -613,10 +618,9 @@ class Trainer3d:
             targets = torch.cat(targets)
             for name, evaluator in self.valid_metrics.items():
                 stats[name].append(evaluator(targets, torch.cat(outs)))
-
             stats['val_loss'] = np.mean(val_loss)
             stats['val_loss_std'] = np.std(val_loss)
-            stats['val_mean_target'] = np.mean(targets)
+            stats['val_mean_target'] = float(target.to(torch.float32).mean())
             for name in self.valid_metrics.keys():
                 stats[name] = np.nanmean(stats[name])
 
