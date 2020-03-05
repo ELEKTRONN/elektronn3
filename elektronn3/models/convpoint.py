@@ -25,6 +25,10 @@ except ImportError as e:
 # STATIC HELPER FUNCTIONS #
 
 
+def identity(x):
+    return x
+
+
 def apply_bn(x, bn):
     return bn(x.transpose(1, 2)).transpose(1, 2).contiguous()
 
@@ -394,11 +398,11 @@ class ModelNet40(nn.Module):
             self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
             self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
         else:
-            self.bn1 = lambda x: x
-            self.bn2 = lambda x: x
-            self.bn3 = lambda x: x
-            self.bn4 = lambda x: x
-            self.bn5 = lambda x: x
+            self.bn1 = identity
+            self.bn2 = identity
+            self.bn3 = identity
+            self.bn4 = identity
+            self.bn5 = identity
 
         self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
