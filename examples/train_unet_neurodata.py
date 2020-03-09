@@ -89,7 +89,7 @@ logger.info(f'Running on device: {device}')
 # hparams = {'n_blocks': 4, 'start_filts': 32, 'planar_blocks': (0,)}
 hparams = {}
 
-out_channels = 1
+out_channels = 2
 model = UNet(
     out_channels=out_channels,
     n_blocks=4,
@@ -182,7 +182,6 @@ if args.resume is not None:  # Load pretrained network
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.DistanceTransformTarget(),
     transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
 ]
 train_transform = transforms.Compose(common_transforms + [
@@ -237,7 +236,7 @@ inference_kwargs = {
     'tile_shape': (32, 64, 64),
     'overlap_shape': (32, 64, 64),
     'offset': None,
-    'apply_softmax': False,
+    'apply_softmax': True,
     'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True),
 }
 
@@ -289,31 +288,6 @@ if out_channels > 2:
 crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
 criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
-
-criterion = nn.MSELoss()
-
-
-# class DistanceMSELoss(nn.Module):
-#     def forward(self, output, target):
-#         # weight = torch.sum(target < 0, dtype=torch.float32) / target.numel()
-#         mse = nn.functional.mse_loss(output, target, reduction='none')
-#         with torch.no_grad():
-#             # This assumes that the target is in the (-1, 1) value range (tanh)
-#             # Per-pixel weights are higher the closer they are to an object.
-#             weight = 2. / (target + 1.)
-#             weight = np.clip(weight, None, 2.)
-#         return torch.mean(weight * mse)
-
-
-# class DistanceMSELoss(nn.Module):
-#     def forward(self, output, target):
-        # weight = torch.sum(target < 0, dtype=torch.float32) / target.numel()
-        # mse = nn.functional.mse_loss(output, target)
-        # return weight * mse
-
-
-# criterion = DistanceMSELoss()
-
 
 # Create trainer
 trainer = Trainer(
