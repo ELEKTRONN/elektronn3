@@ -143,29 +143,10 @@ def _tb_log_preview(
     inp_batch = inp_batch.numpy()
     if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(out_batch, 1).numpy()
+    else:
+        out_batch = out_batch.numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
-
-    inp_sh = np.array(inp_batch.shape[2:])
-    out_sh = np.array(out_batch.shape[2:])
-    # TODO: This does not fire yet, because out_batch is always of the same
-    #       spatial shape as the input if it comes out of
-    #       elektronn3.inference.Predictor...
-    #       Update: Padding is now handled in Predictor, so the code below may be obsolete.
-    if (out_batch.shape[2:] != inp_batch.shape[2:]) \
-            and not (out_batch.ndim == 2):
-        # Zero-pad output and target to match input shape
-        # Create a central slice with the size of the output
-        lo = (inp_sh - out_sh) // 2
-        hi = inp_sh - lo
-        slc = tuple([slice(None)] * 2 + [slice(l, h) for l, h in zip(lo, hi)])
-
-        padded_out_batch = np.zeros(
-            (inp_batch.shape[0], out_batch.shape[1], *inp_batch.shape[2:]),
-            dtype=out_batch.dtype
-        )
-        padded_out_batch[slc] = out_batch
-        out_batch = padded_out_batch
 
     if inp_batch.ndim == 5 and trainer.enable_videos:
         # 5D tensors -> 3D images -> We can make 2D videos out of them
