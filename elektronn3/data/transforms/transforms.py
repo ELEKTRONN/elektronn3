@@ -909,6 +909,8 @@ class SqueezeTarget:
             inp: np.ndarray,  # Returned without modifications
             target: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
+        if target is None:
+            return inp, target
         return inp, target.squeeze(axis=self.dim)
 
 

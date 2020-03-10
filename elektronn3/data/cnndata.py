@@ -140,8 +140,8 @@ class PatchCreator(data.Dataset):
     def __init__(
             self,
             input_sources: List[Tuple[str, str]],
-            target_sources: Optional[List[Tuple[str, str]]],
             patch_shape: Sequence[int],
+            target_sources: Optional[List[Tuple[str, str]]] = None,
             offset: Sequence[int] = (0, 0, 0),
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
