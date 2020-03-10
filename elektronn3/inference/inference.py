@@ -326,7 +326,7 @@ class Predictor:
 
             >>> from elektronn3.data import transforms
             >>> # m, s are mean, std of the inputs the model was trained on
-            >>> transform = transforms.Normalize(mean=m, std=s, inplace=True)
+            >>> transform = transforms.Normalize(mean=m, std=s)
         augmentations: List of test-time augmentations or integer that
             specifies the number of different flips to be performed as test-
             time augmentations.
@@ -531,12 +531,12 @@ class Predictor:
             except:
                 print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
         if self.transform is not None:
+            if isinstance(inp, torch.Tensor):
+                inp = inp.numpy()  # transforms currently only work with numpy ndarrays as in/output
+            transformed = np.empty_like(inp)
             for i in range(inp.shape[0]):  # Apply transform for each sample of the batch separately
-                transformed, _ = self.transform(inp[i], None)  # target=None because we don't have any here
-                # transforms are expected to return np.ndarrays, so if inp is a torch.Tensor, we need to cast manually
-                if isinstance(inp, torch.Tensor):
-                    transformed = torch.as_tensor(transformed, dtype=inp.dtype)
-                inp[i] = transformed
+                transformed[i], _ = self.transform(inp[i], None)  # target=None because we don't have any here
+            inp = transformed
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
