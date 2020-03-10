@@ -364,7 +364,7 @@ class Trainer3d:
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60 if self.num_workers > 0 else 0,
+            timeout=10000 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
 

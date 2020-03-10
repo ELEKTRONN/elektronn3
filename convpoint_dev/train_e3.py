@@ -3,7 +3,7 @@
 # Copyright (c) 2019 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Jonathan Klimesch, Yang Liu
-
+import open3d as o3d
 import os
 import torch
 import argparse
@@ -23,17 +23,19 @@ from plyfile import PlyData, PlyElement
 # PARSE PARAMETERS #
 
 parser = argparse.ArgumentParser(description='Train a network.')
-# parser.add_argument('--na', type=str, default="merger_convpoint_Feb27_1e-5_r10_sam20k", help='Experiment name')
-parser.add_argument('--na', type=str, default="test_training", help='Experiment name')
+parser.add_argument('--na', type=str, default="merger_convpoint_Mar04_1e-5_r10_sam20k", help='Experiment name')
+# parser.add_argument('--na', type=str, default="test_multi_worker", help='Experiment name')
 parser.add_argument('--tp', type=str, default="/wholebrain/scratch/yliu/merger_gt_semseg_pointcloud/gt_convpoint/", help='Train path')
 # parser.add_argument('--tp', type=str, default="/wholebrain/scratch/yliu/merger_gt_semseg_pointcloud/gt_results/", help='Train path')
 parser.add_argument('--sr', type=str, default="/wholebrain/scratch/yliu/pointcloud_train_result/", help='Save root')
-parser.add_argument('--bs', type=int, default=64, help='Batch size')
+parser.add_argument('--bs', type=int, default=16, help='Batch size')
 parser.add_argument('--sp', type=int, default=20000, help='Number of sample points, default is 10e3')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=2, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
+
+NUM_WORKER = 0
 
 args = parser.parse_args()
 
@@ -88,7 +90,7 @@ def test_chunked_pcl(train_ds, num_iter=10):
         # write vertices to mesh and test
         pts = vertices.numpy()
         BASE_DIR = os.path.dirname(os.path.realpath(__file__))
-        output_path = "/wholebrain/scratch/yliu/ConvPoint_test/"
+        output_path = "/wholebrain/scratch/yliu/ConvPoint_chunk_test/"
         if 1 in vertex_labels:
             fname = "test_{}_merger.ply".format(i)
         else:
@@ -204,9 +206,10 @@ input_channels = 1
 #     model = SegSmall(input_channels, num_classes)
 model = SegSkeleton(input_channels, num_classes)
 
-folder = "/wholebrain/scratch/yliu/pointcloud_train_result/merger_convpoint_Feb25_1e-5_r10_sam10k/"
-checkpoint = torch.load(os.path.join(folder, "state_dict.pth"))
-model.load_state_dict(checkpoint['model_state_dict'])
+# Load model weights
+# folder = "/wholebrain/scratch/yliu/pointcloud_train_result/merger_convpoint_Feb25_1e-5_r10_sam10k/"
+# checkpoint = torch.load(os.path.join(folder, "state_dict.pth"))
+# model.load_state_dict(checkpoint['model_state_dict'])
 
 if use_cuda:
     # if torch.cuda.device_count() > 1:
@@ -233,14 +236,14 @@ dataset_valid = TorchSetSkeleton(train_path, radius, npoints, valid_transform, c
 # valid_ds = torch.utils.data.Subset(dataset, indices[20000:21000])
 
 
-# #### TEST
+#### TEST
 # test_chunked_pcl(dataset_train, num_iter=100)
 # test_loading_time(train_ds)
 # test_num_nodes(dataset_train, num_iter=None)
-#
+
 # import pdb
 # pdb.set_trace()
-# #### END of TEST
+#### END of TEST
 
 
 # PREPARE AND START TRAINING #
@@ -279,7 +282,7 @@ trainer = Trainer3d(
     valid_dataset=dataset_valid,
     valid_metrics=valid_metrics,
     batchsize=batch_size,
-    num_workers=0,
+    num_workers=NUM_WORKER,
     save_root=save_root,
     num_classes=2,
     exp_name=name,
