@@ -5,7 +5,7 @@
 # Authors: Martin Drawitsch
 
 """Loss functions"""
-from typing import Sequence, Optional
+from typing import Sequence, Optional, Tuple, Callable, Union
 
 import torch
 
@@ -205,6 +205,83 @@ class DiceLoss(torch.nn.Module):
     def forward(self, output, target):
         probs = self.softmax(output)
         return self.dice(probs, target, weight=self.weight)
+
+
+class FMSegLoss(nn.Module):
+    """Self-supervised loss for semi-supervised semantic segmentation training,
+    mainly inspired by FixMatch, https://arxiv.org/abs/2001.07685.
+
+    This loss combines two different well-established semi-supervised learning techniques:
+
+    - consistency regularization: consistency against random flipping and
+      random rotation augmentatations is enforced
+    - pseudo-label training: model argmax predictions are treated as targets
+      for a pseudo-supervised cross-entropy training loss
+      This only works for settings where argmax makes sense (not suitable for
+      regression) and can be disabled with ``enable_psuedo_label=False``.
+
+    If pseudo-label training is enabled, the inner loss is cross entropy.
+    Otherwise, a mean squared error regression loss is used.
+
+    TODO: Find some segmentation-compatible alternative to the τ hyperparam of FixMatch
+          Maybe use some kind of output entropy measure, like in
+          Label Propagation for Deep Semi-supervised Learning, https://arxiv.org/abs/1904.04717 ?
+
+    """
+
+    def __init__(
+            self,
+            model: nn.Module,
+            # criterion: Optional[nn.Module] = None,
+            scale: float = 1.,
+            enable_pseudo_label: bool = True
+    ):
+        super().__init__()
+        self.model = model
+        # self.criterion = criterion
+        self.scale = scale
+        self.enable_pseudo_label = enable_pseudo_label
+
+    @staticmethod
+    def get_random_augmenters(
+            ndim: int
+    ) -> Tuple[Callable[[torch.Tensor], torch.Tensor], Callable[[torch.Tensor], torch.Tensor]]:
+        # Random rotation angle (in 90 degree steps)
+        k90 = torch.randint(0, 4, ()).item()
+        # Get a random selection of spatial dims (ranging from [] to [2, 3, ..., example.ndim - 1]
+        flip_dims_binary = torch.randint(0, 2, (ndim - 2,))
+        flip_dims = (torch.nonzero(flip_dims_binary).squeeze(1) + 2).tolist()
+
+        @torch.no_grad()  # TODO: Check if autograd could make a difference here
+        def augment(x: torch.Tensor) -> torch.Tensor:
+            x = torch.rot90(x, +k90, (-1, -2))
+            if len(flip_dims) > 0:
+                x = torch.flip(x, flip_dims)
+            return x
+
+        @torch.no_grad()
+        def reverse_augment(x: torch.Tensor) -> torch.Tensor:
+            if len(flip_dims) > 0:  # Check is necessary only on cuda
+                x = torch.flip(x, flip_dims)
+            x = torch.rot90(x, -k90, (-1, -2))
+            return x
+
+        return augment, reverse_augment
+
+    def forward(self, inp: torch.Tensor) -> torch.Tensor:
+        augment, reverse_augment = self.get_random_augmenters(ndim=inp.ndim)
+        aug = augment(inp)
+        out = self.model(inp)
+        aug_out = self.model(aug)
+        aug_out_reversed = reverse_augment(aug_out)
+
+        if self.enable_pseudo_label:
+            pseudo_label = torch.argmax(out, 1)
+            loss = nn.functional.cross_entropy(aug_out_reversed, pseudo_label)
+        else:
+            loss = nn.functional.mse_loss(aug_out_reversed, out)
+        scaled_loss = self.scale * loss
+        return scaled_loss
 
 
 # TODO: Rename and clean up
