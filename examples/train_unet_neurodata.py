@@ -182,7 +182,7 @@ if args.resume is not None:  # Load pretrained network
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
     # transforms.RandomRotate2d(prob=0.9),
@@ -237,7 +237,7 @@ inference_kwargs = {
     'overlap_shape': (32, 64, 64),
     'offset': None,
     'apply_softmax': True,
-    'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True),
+    'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std),
 }
 
 optimizer = optim.SGD(
