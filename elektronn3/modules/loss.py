@@ -207,45 +207,101 @@ class DiceLoss(torch.nn.Module):
         return self.dice(probs, target, weight=self.weight)
 
 
-class FMSegLoss(nn.Module):
+# TODO: There is some low-hanging fruit for performance optimization
+class FixMatchSegLoss(nn.Module):
     """Self-supervised loss for semi-supervised semantic segmentation training,
-    mainly inspired by FixMatch, https://arxiv.org/abs/2001.07685.
+    very similar to the `l_u` loss proposed in
+    FixMatch (https://arxiv.org/abs/2001.07685).
 
-    This loss combines two different well-established semi-supervised learning techniques:
+    The main difference to FixMatch is the kind of augmentations that are used
+    for consistency regularization. In FixMatch, so-called
+    "strong augmentations" are applied to the (already "weakly augmented"
+    inputs. Most of these strong augmentations only work for image-level
+    classification.
+    In ``FMSegLoss``, only simple, easily reversible geometric augmentations
+    are used currently
+    (random xy(z) flipping and random xy rotation in 90 degree steps).
+    TODO: Add more augmentations
 
-    - consistency regularization: consistency against random flipping and
-      random rotation augmentatations is enforced
+    This loss combines two different well-established semi-supervised learning
+    techniques:
+
+    - consistency regularization: consistency (equivariance) against random
+      flipping and random rotation augmentatations is enforced
     - pseudo-label training: model argmax predictions are treated as targets
       for a pseudo-supervised cross-entropy training loss
       This only works for settings where argmax makes sense (not suitable for
       regression) and can be disabled with ``enable_psuedo_label=False``.
 
-    If pseudo-label training is enabled, the inner loss is cross entropy.
-    Otherwise, a mean squared error regression loss is used.
-
-    TODO: Find some segmentation-compatible alternative to the τ hyperparam of FixMatch
-          Maybe use some kind of output entropy measure, like in
-          Label Propagation for Deep Semi-supervised Learning, https://arxiv.org/abs/1904.04717 ?
-
+    Args:
+        model: Neural network model to be trained.
+        scale: Scalar factor to be multiplied with the loss to adjust its
+            magnitude. (If this loss is combined with a standard supervised
+            cross entropy, ``scale`` corresponds to the lambda_u hyperparameter
+            in FixMatch
+        enable_pseudo_label: If ``enable_pseudo_label=True``, the inner loss is
+            the cross entropy between the argmax pseudo label tensor computed
+            from the weakly augmented input and the softmax model output on the
+            strongly augmented input. Since this internally uses
+            ``torch.nn.CrossEntropyLoss``, the ``model`` is expected to give
+            raw, unsoftmaxed outputs.
+            This only works for settings where computing the argmax and softmax
+            on the outputs makes sense (so classification, not regression).
+            If ``enable_pseudo_label=False``, a mean squared error regression
+            loss is computed directly on the difference between the two model
+            outputs, without computing or using pseudo-labels.
+            In this case, the loss is equivalent to the ``R`` loss proposed in
+            "Transformation Consistent Self-ensembling Model for
+            Semi-supervised Medical Image Segmentation"
+            (https://arxiv.org/abs/1903.00348).
+            This non-pseudo-label variant of the loss can also be used for
+            pixel-level regression training.
+        confidence_thresh: (Only applies if ``enable_pseudo_label=True``.)
+            The confidence threshold that determines how
+            confident the model has to be in each output element's
+            classification for it to contribute to the loss. All output
+            elements where none of the softmax class probs exceed this
+            threshold are masked out from the loss calculation and the resulting
+            loss is set to 0. In the FixMatch paper, this hyperparameter is
+            called tau.
+        ce_weight: (Only applies if ``enable_pseudo_label=True``.)
+            Class weight tensor for the inner cross-entropy loss. Should be
+            the same as the weight for the supervised cross-entropy loss.
     """
 
     def __init__(
             self,
             model: nn.Module,
-            # criterion: Optional[nn.Module] = None,
             scale: float = 1.,
-            enable_pseudo_label: bool = True
+            enable_pseudo_label: bool = True,
+            confidence_thresh: float = 0.9,
+            ce_weight=None
     ):
         super().__init__()
         self.model = model
-        # self.criterion = criterion
         self.scale = scale
         self.enable_pseudo_label = enable_pseudo_label
+        self.confidence_thresh = confidence_thresh
+
+        if self.enable_pseudo_label:
+            self.criterion = nn.CrossEntropyLoss(weight=ce_weight, ignore_index=-100)
+        else:
+            self.criterion = nn.MSELoss()
 
     @staticmethod
     def get_random_augmenters(
             ndim: int
     ) -> Tuple[Callable[[torch.Tensor], torch.Tensor], Callable[[torch.Tensor], torch.Tensor]]:
+        """Produce a pair of functions ``augment, reverse_augment``, where
+        the ``augment`` function applies a random augmentation to a torch
+        tensor and the ``reverse_augment`` function performs the reverse
+        aumentations if applicable (i.e. for geometrical transformations)
+        so pixel-level loss calculation is still correct).
+
+        Note that all augmentations are performed on the compute device that
+        holds the input, so generally on the GPU.
+        """
+
         # Random rotation angle (in 90 degree steps)
         k90 = torch.randint(0, 4, ()).item()
         # Get a random selection of spatial dims (ranging from [] to [2, 3, ..., example.ndim - 1]
@@ -276,10 +332,17 @@ class FMSegLoss(nn.Module):
         aug_out_reversed = reverse_augment(aug_out)
 
         if self.enable_pseudo_label:
-            pseudo_label = torch.argmax(out, 1)
-            loss = nn.functional.cross_entropy(aug_out_reversed, pseudo_label)
+            with torch.no_grad():
+                # We need softmax outputs for thresholding
+                out = torch.softmax(out, 1)
+                omax, pseudo_label = torch.max(out, dim=1)
+                # Ignore loss on outputs that are lower than the confidence threshold
+                mask = omax < self.confidence_thresh
+                # Assign special ignore value to all masked elements
+                pseudo_label[mask] = self.criterion.ignore_index
+            loss = self.criterion(aug_out_reversed, pseudo_label)
         else:
-            loss = nn.functional.mse_loss(aug_out_reversed, out)
+            loss = self.criterion(aug_out_reversed, out)
         scaled_loss = self.scale * loss
         return scaled_loss
 
