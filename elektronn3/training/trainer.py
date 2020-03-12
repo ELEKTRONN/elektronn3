@@ -110,12 +110,17 @@ class Trainer:
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
+        unlabeled_dataset: Unlabeled dataset (only inputs) for
+            semi-supervised training. If this is supplied, ``ss_criterion``
+            needs to be set to the loss that should be computed on unlabeled
+            inputs.
         valid_metrics: Validation metrics to be calculated on
             validation data after each training epoch. All metrics are logged
             to tensorboard.
-        ss_criterion: Loss criterion for self-supervised training. The
-            ``ss_criterion`` is used instead of the standard ``criterion``
-            on training batches that lack a ``target`` key.
+        ss_criterion: Loss criterion for the self-supervised part of
+            semi-supervised training. The ``ss_criterion`` loss is computed
+            on batches from the ``unlabeled_dataset`` and added to the
+            supervised loss in each training step.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -228,6 +233,7 @@ class Trainer:
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            unlabeled_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
             ss_criterion: Optional[torch.nn.Module] = None,
             preview_batch: Optional[torch.Tensor] = None,
@@ -270,6 +276,7 @@ class Trainer:
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.unlabeled_dataset = unlabeled_dataset
         self.valid_metrics = valid_metrics
         self.ss_criterion = ss_criterion
         self.preview_batch = preview_batch
@@ -297,6 +304,9 @@ class Trainer:
         self.inference_kwargs.setdefault('batch_size', 1)
         self.inference_kwargs.setdefault('verbose', True)
         self.inference_kwargs.setdefault('apply_softmax', True)
+
+        if self.unlabeled_dataset is not None and self.ss_criterion is None:
+            raise ValueError('If an unlabeled_dataset is supplied, you must also set ss_criterion.')
 
         if hparams is None:
             hparams = {}
@@ -367,17 +377,18 @@ class Trainer:
             timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
-        # num_workers is set to 0 for valid_loader because validation background processes sometimes
-        # fail silently and stop responding, bringing down the whole training process.
-        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355.
-        # The performance impact of disabling multiprocessing here is low in normal settings,
-        # because the validation loader doesn't perform expensive augmentations, but just reads
-        # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
                 self.valid_dataset, self.batch_size, shuffle=True, num_workers=self.num_workers,
                 pin_memory=True, worker_init_fn=_worker_init_fn
             )
+        if self.unlabeled_dataset is not None:
+            self.unlabeled_loader = DataLoader(
+                self.unlabeled_dataset, batch_size=self.batch_size, shuffle=True,
+                num_workers=self.num_workers, pin_memory=True,
+                timeout=60 if self.num_workers > 0 else 0, worker_init_fn=_worker_init_fn
+            )
+
         self.best_val_loss = np.inf  # Best recorded validation loss
         self.best_tr_loss = np.inf
 
@@ -451,10 +462,16 @@ class Trainer:
         dtarget = target.to(self.device, non_blocking=True) if target is not None else None
         # forward pass
         dout = self.model(dinp)
-        if dtarget is None:  # Assume self-supervised unary loss function
-            dloss = self.ss_criterion(dout)
-        else:
-            dloss = self.criterion(dout, dtarget)
+        dloss = self.criterion(dout, dtarget)
+
+        unlabeled = batch.get('unlabeled')
+        if unlabeled is not None:  # Add a simple consistency loss
+            u_inp = unlabeled['inp']
+            du_inp = u_inp.to(self.device, non_blocking=True)
+            du_loss = self.ss_criterion(du_inp)
+            dloss += du_loss
+            self.tb.add_scalar('stats/tr_uloss', float(du_loss), global_step=self.step)
+
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException
@@ -484,10 +501,13 @@ class Trainer:
         batch_iter = tqdm(
             self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
         )
+        unlabeled_iter = None if self.unlabeled_dataset is None else iter(self.unlabeled_loader)
         for i, batch in enumerate(batch_iter):
             if self.step in self.extra_save_steps:
                 self._save_model(f'_step{self.step}', verbose=True)
 
+            if unlabeled_iter is not None:
+                batch['unlabeled'] = next(unlabeled_iter)
             dloss, dout = self._train_step(batch)
 
             with torch.no_grad():
