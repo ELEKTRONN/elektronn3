@@ -180,6 +180,31 @@ class DropIfTooMuchBG:
         return inp, target  # Return inp, target unmodified
 
 
+class RemapTargetIDs:
+    """Remap class IDs of targets to a new dense class mapping.
+    E.g. if your targets contain the class IDs [1, 3, 7, 9] but you are only
+    interested in classes 1, 3 and 9 and you
+    don't want to train a sparse classifier with useless outputs, you can
+    use ``RemapTargetIDs([1, 3, 9])`` to translate each occurence of IDs
+    [1, 3, 9] to [0, 1, 2], respectively."""
+    def __init__(self, ids: Sequence[int], reverse: bool = False):
+        self.ids = ids
+        self.reverse = reverse
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # returned without modifications
+            target: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        remapped_target = np.zeros_like(target)
+        for changed_id, orig_id in enumerate(self.ids):
+            if not self.reverse:
+                remapped_target[target == orig_id] = changed_id
+            else:
+                remapped_target[target == changed_id] = orig_id
+        return inp, remapped_target
+
+
 class SmoothOneHotTarget:
     """Converts target tensors to one-hot encoding, with optional label smoothing.
 
