@@ -210,12 +210,12 @@ class DiceLoss(torch.nn.Module):
 # TODO: There is some low-hanging fruit for performance optimization
 class FixMatchSegLoss(nn.Module):
     """Self-supervised loss for semi-supervised semantic segmentation training,
-    very similar to the `l_u` loss proposed in
+    very similar to the :math:`l_u` loss proposed in
     FixMatch (https://arxiv.org/abs/2001.07685).
 
     The main difference to FixMatch is the kind of augmentations that are used
     for consistency regularization. In FixMatch, so-called
-    "strong augmentations" are applied to the (already "weakly augmented"
+    "strong augmentations" are applied to the (already "weakly augmented")
     inputs. Most of these strong augmentations only work for image-level
     classification.
     In ``FMSegLoss``, only simple, easily reversible geometric augmentations
@@ -308,11 +308,28 @@ class FixMatchSegLoss(nn.Module):
         flip_dims_binary = torch.randint(0, 2, (ndim - 2,))
         flip_dims = (torch.nonzero(flip_dims_binary).squeeze(1) + 2).tolist()
 
-        @torch.no_grad()  # TODO: Check if autograd could make a difference here
+        @torch.no_grad()
         def augment(x: torch.Tensor) -> torch.Tensor:
             x = torch.rot90(x, +k90, (-1, -2))
             if len(flip_dims) > 0:
                 x = torch.flip(x, flip_dims)
+
+            # # Uncomment to enable additional random brightness and contrast augmentations
+            # contrast_std = 0.1
+            # brightness_std = 0.1
+            # a = torch.randn(x.shape[:2], device=x.device, dtype=x.dtype) * contrast_std + 1.0
+            # b = torch.randn(x.shape[:2], device=x.device, dtype=x.dtype) * brightness_std
+            # for n in range(x.shape[0]):
+            #     for c in range(x.shape[1]):
+            #         # Formula based on tf.image.{adjust_contrast,adjust_brightness}
+            #         # See https://www.tensorflow.org/api_docs/python/tf/image
+            #         m = torch.mean(x[n, c])
+            #         x[n, c] = a[n, c] * (x[n, c] - m) + m + b[n, c]
+
+            # # Uncomment to enable additional additive gaussian noise augmentations
+            # agn_std = 0.1
+            # x.add_(torch.randn_like(x).mul_(agn_std))
+
             return x
 
         @torch.no_grad()
@@ -344,7 +361,7 @@ class FixMatchSegLoss(nn.Module):
         else:
             loss = self.criterion(aug_out_reversed, out)
         scaled_loss = self.scale * loss
-        return scaled_loss
+        return scaled_loss, aug
 
 
 # TODO: Rename and clean up
