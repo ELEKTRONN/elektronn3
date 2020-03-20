@@ -7,8 +7,7 @@
 import datetime
 from collections import deque
 
-import ipdb
-import math
+import time
 import gc
 import logging
 import os
@@ -29,6 +28,7 @@ import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
+import sklearn.metrics as sm
 
 from elektronn3.training import handlers
 from elektronn3.training.swa import SWA
@@ -40,9 +40,11 @@ from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
 from morphx.data.chunkhandler import ChunkHandler
+from morphx.data.torchhandler import TorchHandler
 from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
-from morphx.processing import clouds, objects
+from morphx.data import basics
+from elektronn3.training.metrics import iou
 
 logger = logging.getLogger('elektronn3log')
 
@@ -231,9 +233,11 @@ class Trainer3d:
             device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
-            valid_dataset: Optional[ChunkHandler] = None,
+            valid_dataset: Optional[TorchHandler] = None,
             pred_mapper: Optional[PredictionMapper] = None,
             val_freq: int = 1,
+            val_iter: int = 1,
+            channel_num: int = 1,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
             preview_tile_shape: Optional[Tuple[int, ...]] = None,
@@ -284,10 +288,12 @@ class Trainer3d:
         self.model = model
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
-        self.train_dataset = train_dataset
-        self.valid_dataset = valid_dataset
+        self.train_th = train_dataset
+        self.valid_th = valid_dataset
         self.pred_mapper = pred_mapper
         self.val_freq = val_freq
+        self.val_iter = val_iter
+        self.channel_num = channel_num
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
         self.preview_tile_shape = preview_tile_shape
@@ -361,11 +367,24 @@ class Trainer3d:
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
 
         self.train_loader = DataLoader(
-            self.train_dataset, batch_size=self.batchsize, shuffle=True,
+            self.train_th, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
+        # num_workers is set to 0 for valid_loader because validation background processes sometimes
+        # fail silently and stop responding, bringing down the whole training process.
+        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355.
+        # The performance impact of disabling multiprocessing here is low in normal settings,
+        # because the validation loader doesn't perform expensive augmentations, but just reads
+        # data from hdf5s.
+        if valid_dataset is not None:
+            self.valid_loader = DataLoader(
+                self.valid_th, batch_size=self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
+                worker_init_fn=_worker_init_fn
+            )
+        self.best_val_loss = np.inf  # Best recorded validation loss
+        self.best_tr_loss = np.inf
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
@@ -384,10 +403,15 @@ class Trainer3d:
                 stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
-                stats['val_loss'] = nan
-                if self.valid_dataset is not None:
+                if self.valid_th is None:
+                    stats['val_loss'] = nan
+                else:
                     if self.epoch == 1 or self.epoch % self.val_freq == 0:
-                        self._validate()
+                        valid_stats = self._validate()
+                        stats.update(valid_stats)
+                    else:
+                        stats['val_loss'] = nan
+                        stats['iou'] = nan
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -398,6 +422,9 @@ class Trainer3d:
 
                 # Save trained model state
                 self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
+                if stats['val_loss'] < self.best_val_loss:
+                    self.best_val_loss = stats['val_loss']
+                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -442,14 +469,14 @@ class Trainer3d:
             pts = batch['pts']
             features = batch['features']
             target = batch['target']
-            p_mask = batch['p_mask']
+            o_mask = batch['o_mask']
             l_mask = batch['l_mask']
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
             dfeats = features.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
-            dp_mask = p_mask.to(self.device, non_blocking=True)
+            do_mask = o_mask.to(self.device, non_blocking=True)
             dl_mask = l_mask.to(self.device, non_blocking=True)
 
             # dinp: (batch_size, sample_num, 3)
@@ -463,7 +490,7 @@ class Trainer3d:
             # for i in range(dout.size(0)):
             #     dloss += self.criterion(dout[i], dtarget[i])
 
-            dout_mask = dout[dp_mask].view(-1, 3)
+            dout_mask = dout[do_mask].view(-1, self.num_classes)
             dtarget_mask = dtarget[dl_mask]
             dloss = self.criterion(dout_mask, dtarget_mask)
 
@@ -483,7 +510,7 @@ class Trainer3d:
 
             with torch.no_grad():
                 # save samples of every 20th batch of every 20th epoch for visualization
-                if self.epoch % 10 == 0:
+                if self.epoch % 30 == 0:
                     if batch_num % 20 == 0:
                         results = []
                         for j in range(pts.size(0)):
@@ -491,7 +518,7 @@ class Trainer3d:
                             pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
                             results.append(orig)
                             results.append(pred)
-                        objects.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                        basics.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
                     batch_num += 1
 
                 loss = float(dloss)
@@ -588,48 +615,51 @@ class Trainer3d:
     def _validate(self):
         self.model.eval()
 
-        # Iterate trough validation dataset and predict all chunks with current model.
-        for hc in self.valid_dataset.hc_names:
-            merged = None
-            for batch in tqdm(range(math.ceil(self.valid_dataset.get_hybrid_length(hc) / self.batchsize)), 'Validate'):
-                pts = torch.zeros((self.batchsize, self.valid_dataset.sample_num, 3))
-                feats = torch.ones((self.batchsize, self.valid_dataset.sample_num, 1))
-                centroids = torch.ones((self.batchsize, 3))
+        val_loss = []
+        stats = {'iou': []}
+        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
 
-                for j in range(self.batchsize):
-                    chunk, centroid = self.valid_dataset[(hc, batch*self.batchsize+j)]
-                    centroids[j] = torch.from_numpy(centroid)
-                    pts[j] = torch.from_numpy(chunk.vertices)
+        for i, batch in batch_iter:
+            pts = batch['pts']
+            features = batch['features']
+            target = batch['target']
+            o_mask = batch['o_mask']
+            l_mask = batch['l_mask']
 
-                pts = pts.to(self.device, non_blocking=True)
-                feats = feats.to(self.device, non_blocking=True)
-                outputs = self.model(feats, pts)
-                pts = pts.cpu().detach().numpy()
-                output_np = outputs.cpu().detach().numpy()
-                output_np = np.argmax(output_np, axis=2)
+            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+            dinp = pts.to(self.device, non_blocking=True)
+            dfeats = features.to(self.device, non_blocking=True)
+            dtarget = target.to(self.device, non_blocking=True)
+            do_mask = o_mask.to(self.device, non_blocking=True)
+            dl_mask = l_mask.to(self.device, non_blocking=True)
+            dout = self.model(dfeats, dinp)
+            dout_mask = dout[do_mask].view(-1, self.num_classes)
+            dtarget_mask = dtarget[dl_mask]
+            val_loss.append(self.criterion(dout_mask, dtarget_mask).item())
+            out = dout.detach().cpu()
+            target_mask = target[l_mask]
+            out_mask = out[o_mask].view(-1, self.num_classes)
+            out_mask = np.argmax(out_mask, axis=1)
+            stats['iou'].append(iou(target_mask, out_mask, num_classes=self.num_classes))
 
-                for j in range(self.batchsize):
-                    if not np.all(pts[j] == 0):
-                        prediction = PointCloud(pts[j], output_np[j])
-
-                        # Inverse transformation
-                        prediction.move(centroids[j].numpy())
-                        prediction.scale(self.valid_dataset.chunk_size)
-
-                        if merged is None:
-                            merged = prediction
-                        else:
-                            merged = clouds.merge_clouds(merged, prediction)
-
-                        self.pred_mapper.map_predictions(prediction, hc, batch*self.batchsize+j)
-
-            # Save validation as original PointCloud with predictions and as PointCloud containing all merged chunks.
-            name = 'epoch_{}'.format(self.epoch)
-            self.pred_mapper.save_prediction(name=name)
-            save_path = self.pred_mapper.save_path
-            clouds.save_cloud(merged, save_path, name=name+'_merged')
+        stats['val_loss'] = np.mean(val_loss)
+        stats['val_loss_std'] = np.std(val_loss)
+        stats['iou'] = np.nanmean(stats['iou'])
 
         self.model.train()  # Reset model to training mode
+        return stats
+
+    # @torch.no_grad()
+    # def _validate(self):
+    #     self.model.eval()
+    #
+    #     # Iterate trough validation dataset and predict all chunks with current model.
+    #     for hc in self.valid_th.obj_names:
+    #         val.validate_single(self.valid_th, hc, self.batchsize, self.valid_th.sample_num, self.val_iter,
+    #                             self.device, self.model, self.pred_mapper, self.channel_num)
+    #     self.pred_mapper.save_prediction(hc)
+    #
+    #     self.model.train()  # Reset model to training mode
 
     def _save_model(
             self,
@@ -778,7 +808,7 @@ class Trainer3d:
     def _log_to_history_tracker(self, stats: Dict, misc: Dict) -> None:
         """Update history tracker and plot stats (kind of made obsolete by tensorboard)"""
         # TODO: Decide what to do with this, now that most things are already in tensorboard.
-        if self.step // len(self.train_dataset) > 1:
+        if self.step // len(self.train_th) > 1:
             tr_loss_gain = self._tracker.history[-1][2] - np.mean(stats['tr_loss'])
         else:
             tr_loss_gain = 0

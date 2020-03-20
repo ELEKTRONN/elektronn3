@@ -39,8 +39,8 @@ def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbo
     indices = torch.from_numpy(indices).long()
     queries = torch.from_numpy(queries).float()
     if input_pts.is_cuda:
-        indices = indices.cuda()
-        queries = queries.cuda()
+        indices = indices.to(input_pts.device)
+        queries = queries.to(input_pts.device)
     return indices, queries
 
 
@@ -50,7 +50,7 @@ def indices_conv(input_pts: torch.Tensor, neighbor_num: int) -> Tuple[torch.Tens
                                           input_pts.cpu().detach().numpy(), neighbor_num, omp=True)
     indices = torch.from_numpy(indices).long()
     if input_pts.is_cuda:
-        indices = indices.cuda()
+        indices = indices.to(input_pts.device)
     return indices, input_pts
 
 
@@ -61,7 +61,7 @@ def indices_deconv(input_pts: torch.Tensor, output_pts: torch.Tensor, neighbor_n
                                           output_pts.cpu().detach().numpy(), neighbor_num, omp=True)
     indices = torch.from_numpy(indices).long()
     if input_pts.is_cuda:
-        indices = indices.cuda()
+        indices = indices.to(input_pts.device)
     return indices, output_pts
 
 
@@ -157,7 +157,7 @@ class PtConv(LayerBase):
         n_pts = features.size(1)
 
         # Compute indices for indexing points (add batch offset to indices)
-        add_indices = torch.arange(batch_size).type(indices.type()) * n_pts
+        add_indices = torch.arange(batch_size).type(indices.type()).to(input_pts.device) * n_pts
         indices = indices + add_indices.view(-1, 1, 1)
 
         # Get the features and point cooridnates associated with the indices (flatten batches and use
