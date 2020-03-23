@@ -385,7 +385,7 @@ class Trainer3d:
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
         self.best_tr_loss = np.inf
-
+        self.curr_stats = None
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
     # TODO: Modularize, make some general parts reusable for other trainers.
@@ -409,9 +409,10 @@ class Trainer3d:
                     if self.epoch == 1 or self.epoch % self.val_freq == 0:
                         valid_stats = self._validate()
                         stats.update(valid_stats)
+                        self.curr_stats = valid_stats
                     else:
-                        stats['val_loss'] = nan
-                        stats['iou'] = nan
+                        valid_stats = self.curr_stats
+                        stats.update(valid_stats)
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -509,17 +510,15 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                # save samples of every 20th batch of every 20th epoch for visualization
-                if self.epoch % 30 == 0:
-                    if batch_num % 20 == 0:
-                        results = []
-                        for j in range(pts.size(0)):
-                            orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
-                            pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
-                            results.append(orig)
-                            results.append(pred)
-                        basics.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
-                    batch_num += 1
+                if self.epoch == 3:
+                    results = []
+                    for j in range(pts.size(0)):
+                        orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
+                        pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
+                        results.append(orig)
+                        results.append(pred)
+                    basics.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                batch_num += 1
 
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())

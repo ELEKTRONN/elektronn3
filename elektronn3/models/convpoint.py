@@ -16,7 +16,7 @@ import torch.nn.functional as F
 import numpy as np
 import math
 import time
-import ipdb
+import gpustat
 import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighbors
 from abc import ABC
 from typing import Tuple
@@ -344,7 +344,6 @@ class SegBig(nn.Module):
         self.bn0d = nn.BatchNorm1d(pl, track_running_stats=trs)
 
         self.drop = nn.Dropout(dropout)
-
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts, return_features=False):
@@ -354,7 +353,6 @@ class SegBig(nn.Module):
             input_pts: Batch of points
             return_features: Flag for returning calculated features.
         """
-
         x0, _ = self.cv0(x, input_pts, 16)
         x0 = self.relu(apply_bn(x0, self.bn0))
 
