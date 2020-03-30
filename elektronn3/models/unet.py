@@ -224,7 +224,7 @@ class DownConv(nn.Module):
             kernel_size = 2
             if planar:
                 kernel_size = planar_kernel(kernel_size)
-            self.pool = get_maxpool(dim)(kernel_size=kernel_size)
+            self.pool = get_maxpool(dim)(kernel_size=kernel_size, ceil_mode=True)
             self.pool_ks = kernel_size
         else:
             self.pool = nn.Identity()
@@ -239,36 +239,6 @@ class DownConv(nn.Module):
             self.norm0 = nn.Identity()
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
-    def check_poolable(self, y: torch.Tensor) -> None:
-        """Before pooling, we manually check if the tensor is divisible by the pooling kernel
-        size, because PyTorch doesn't throw an error if it's not divisible, but calculates
-        the output shape by floor division instead. While this may make sense for other
-        architectures, in U-Net this would lead to incorrect output shapes after upsampling.
-        """
-        # The code below looks stupidly repetitive, but currently it has to be this way to
-        #  ensure source-level TorchScript compatibility. This is due to the static type system of
-        #  TorchScript (ks can be None, int, Tuple[int, int] or Tuple[int, int, int]).
-        #  TorchScript Exceptions don't support messages, so print statements are used for errors.
-        ks = self.pool_ks
-        if ks is None:
-            return
-        if isinstance(ks, int):  # given as scalar -> extend to spatial shape
-            if self.dim == 3:
-                for i in range(self.dim):
-                    if y.shape[2 + i] % ks != 0:
-                        print(f'\nCan\'t pool {y.shape[2:]} input by {ks}.\n')
-                        raise Exception
-            else:
-                for i in range(self.dim):
-                    if y.shape[2 + i] % ks != 0:
-                        print(f'\nCan\'t pool {y.shape[2:]} input by {ks}.\n')
-                        raise Exception
-        else:
-            for i in range(self.dim):
-                if y.shape[2 + i] % ks[i] != 0:
-                    print(f'\nCan\'t pool {y.shape[2:]} input by {ks}.\n')
-                    raise Exception
-
     def forward(self, x):
         y = self.conv1(x)
         y = self.norm0(y)
@@ -277,37 +247,79 @@ class DownConv(nn.Module):
         y = self.norm1(y)
         y = self.act2(y)
         before_pool = y
-        if self.pooling:
-            self.check_poolable(y)
         y = self.pool(y)
         return y, before_pool
 
 
 @torch.jit.script
 def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    if from_down.shape[2:] != from_up.shape[2:]:
-        # If VALID convolutions are used (not SAME), we need to center-crop to
-        #  make features combinable.
-        ds = from_down.shape[2:]
-        us = from_up.shape[2:]
-        assert ds[0] >= us[0]
-        assert ds[1] >= us[1]
-        if from_down.dim() == 4:
-            from_down = from_down[
-                :,
-                :,
-                ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
-                ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2)
-            ]
-        elif from_down.dim() == 5:
-            assert ds[2] >= us[2]
-            from_down = from_down[
-                :,
-                :,
-                ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
-                ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2),
-                ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
-            ]
+    """
+    Crops feature tensors from the encoder and decoder pathways so that they
+    can be combined.
+
+    - If inputs from the encoder pathway have shapes that are not divisible
+      by 2, the use of ``nn.MaxPool(ceil_mode=True)`` leads to the 2x
+      upconvolution results being too large by one element in each odd
+      dimension, so they need to be cropped in these dimensions.
+
+    - If VALID convolutions are used, feature tensors get smaller with each
+      convolution, so we need to center-crop the larger feature tensors from
+      the encoder pathway to make features combinable with the smaller
+      decoder feautures.
+
+    Args:
+        from_down: Feature from encoder pathway (``DownConv``)
+        from_up: Feature from decoder pathway (2x upsampled)
+
+    Returns:
+
+    """
+    ndim = from_down.dim()  # .ndim is not supported by torch.jit
+
+    if from_down.shape[2:] == from_up.shape[2:]:  # No need to crop anything
+        return from_down, from_up
+
+    # Step 1: Handle odd shapes
+
+    # Handle potentially odd input shapes from encoder
+    #  by cropping from_up by 1 in each dim that is odd in from_down and not
+    #  odd in from_up (that is, where the difference between them is odd).
+    #  The reason for looking at the shape difference and not just the shape
+    #  of from_down is that although decoder outputs mostly have even shape
+    #  because of the 2x upsampling, but if anisotropic pooling is used, the
+    #  decoder outputs can also be be oddly shaped in the z (D) dimension.
+    #  In these cases no cropping should be performed.
+    ds = from_down.shape[2:]
+    us = from_up.shape[2:]
+    upcrop = [u - ((u - d) % 2) for d, u in zip(ds, us)]
+
+    if ndim == 4:
+        from_up = from_up[:, :, :upcrop[0], :upcrop[1]]
+    if ndim == 5:
+        from_up = from_up[:, :, :upcrop[0], :upcrop[1], :upcrop[2]]
+
+    # Step 2: Handle center-crop resulting from valid convolutions
+    ds = from_down.shape[2:]
+    us = from_up.shape[2:]
+
+    assert ds[0] >= us[0], f'{ds, us}'
+    assert ds[1] >= us[1]
+    if ndim == 4:
+        from_down = from_down[
+            :,
+            :,
+            (ds[0] - us[0]) // 2:(ds[0] + us[0]) // 2,
+            (ds[1] - us[1]) // 2:(ds[1] + us[1]) // 2
+        ]
+    elif ndim == 5:
+        assert ds[2] >= us[2]
+        from_down = from_down[
+            :,
+            :,
+            ((ds[0] - us[0]) // 2):((ds[0] + us[0]) // 2),
+            ((ds[1] - us[1]) // 2):((ds[1] + us[1]) // 2),
+            ((ds[2] - us[2]) // 2):((ds[2] + us[2]) // 2),
+        ]
     return from_down, from_up
 
 
