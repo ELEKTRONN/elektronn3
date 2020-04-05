@@ -266,13 +266,19 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
+
+        # Ensure that all nn.Modules are on the right device
         model.to(device)
+        if isinstance(criterion, torch.nn.Module):
+            criterion.to(device)
+        if isinstance(ss_criterion, torch.nn.Module):
+            ss_criterion.to(device)
 
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
         self.model = model
-        self.criterion = criterion.to(device)
+        self.criterion = criterion
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
