@@ -450,20 +450,19 @@ class Predictor:
         if not self.augmentations:
             return dout
 
-        # Else, apply test-time augmentations and take average
-        # Directly transferring to cpu after each augmented forward pass to save GPU memory
-        # TODO: Investigate if optionally keeping tensors on GPU makes sense for better speed.
-        inp = dinp.cpu()
-        out = dout.cpu()
-        outs = [out]
+        # Else, apply test-time augmentations and take the mean value.
+        # Augmentations are applied directly on the compute device and
+        #  intermediate results are stored on-device, so this can increase
+        #  GPU memory usage!
+        douts = [dout]
         for aug in self.augmentations:
-            inp_aug = aug.forward(inp)
-            out_aug = self.model(inp_aug.to(self.device)).cpu()
-            out = aug.backward(out_aug)
-            outs.append(out)
-        outs = torch.stack(outs)
-        out = torch.mean(outs, dim=0)
-        return out
+            dinp_aug = aug.forward(dinp)
+            dout_aug = self.model(dinp_aug.to(self.device))
+            dout = aug.backward(dout_aug)
+            douts.append(dout)
+        douts = torch.stack(douts)
+        dout = torch.mean(douts, dim=0)
+        return dout
 
     def _tiled_predict(
             self,
