@@ -229,6 +229,14 @@ def _tb_log_sample_images(
 
     inp_slice = batch2img_inp(images['inp'])[0]
 
+    uinp_batch = images.get('unlabeled')
+    if uinp_batch is not None:
+        trainer.tb.add_figure(
+            f'{group}/unlabeled_inp',
+            plot_image(batch2img_inp(uinp_batch['inp'].cpu().numpy())[0], cmap='gray'),
+            global_step=trainer.step
+        )
+
     # TODO: Support one-hot targets
     # TODO: Support multi-label targets
     # TODO: Output vis missing if target_batch is None

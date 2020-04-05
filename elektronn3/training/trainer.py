@@ -532,6 +532,8 @@ class Trainer:
                 images['inp'] = batch['inp'].numpy()
                 if 'target' in batch:
                     images['target'] = batch['target'].numpy()
+                if 'unlabeled' in batch:
+                    images['unlabeled'] = batch['unlabeled']
                 images['out'] = dout.detach().cpu().numpy()
                 self._put_current_attention_maps_into(images)
 
