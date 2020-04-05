@@ -361,7 +361,7 @@ class FixMatchSegLoss(nn.Module):
         else:
             loss = self.criterion(aug_out_reversed, out)
         scaled_loss = self.scale * loss
-        return scaled_loss, aug
+        return scaled_loss
 
 
 # TODO: Rename and clean up
