@@ -651,6 +651,8 @@ class Trainer:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = []
+        outs = []
+        targets = []
         stats = {name: [] for name in self.valid_metrics.keys()}
         batch_iter = tqdm(
             enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
@@ -668,8 +670,8 @@ class Trainer:
             else:
                 val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
-            for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(target, out))
+            outs.append(out)
+            targets.append(target)
 
         images = {
             'inp': inp.numpy(),
@@ -680,8 +682,25 @@ class Trainer:
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
-        for name in self.valid_metrics.keys():
-            stats[name] = np.nanmean(stats[name])
+
+        for name, evaluator in self.valid_metrics.items():
+            mvals = [evaluator(target, out) for target, out in zip(targets, outs)]
+            if np.all(np.isnan(mvals)):
+                stats[name] = np.nan
+            else:
+                stats[name] = np.nanmean(mvals)
+
+        # # This code is currently commented out because it's quite slow. TODO: Speed up by computing softmax on GPU above
+        # # Plot per-class PR curves if a supported classification scenario is detected.
+        # if out.ndim == target.ndim + 1 and self.inference_kwargs.get('apply_softmax'):
+        #     softmax_outs = torch.stack(outs).softmax(2)  # Apply softmax in dim=2 because of additional stack dim
+        #     for c in range(out.shape[1]):
+        #         self.tb.add_pr_curve(
+        #             f'pr_c{c}',
+        #             labels=torch.stack(targets),
+        #             predictions=torch.stack([so[:, c] for so in softmax_outs]),
+        #             global_step=self.step
+        #         )
 
         self.model.train()  # Reset model to training mode
 
