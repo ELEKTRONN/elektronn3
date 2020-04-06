@@ -586,7 +586,17 @@ class UNet(nn.Module):
       Note: If planar blocks are used, the input patch size should be
       adapted by reducing depth and increasing height and width of inputs.
     - Configurable activation function.
-    - Optional batch normalization
+    - Optional normalization
+
+    Gradient checkpointing can be used to reduce memory consumption while
+    training. To make use of gradient checkpointing, just run the
+    ``forward_gradcp()`` instead of the regular ``forward`` method.
+    This makes the backward pass a bit slower, but the memory savings can be
+    huge (usually around 20% - 50%, depending on hyperparameters). Checkpoints
+    are made after each network *block*.
+    See https://pytorch.org/docs/master/checkpoint.html and
+    https://arxiv.org/abs/1604.06174 for more details.
+    Gradient checkpointing is not supported in TorchScript mode.
 
     Args:
         in_channels: Number of input channels
@@ -738,13 +748,6 @@ class UNet(nn.Module):
                 the borders. Most notably this is the case if you do training
                 and inference not on small patches, but on complete images in
                 a single step.
-        checkpointing: If ``True``, use gradient checkpointing to reduce memory
-            consumption while training. This makes the backward pass a bit
-            slower, but the memory savings can be huge (usually around
-            20% - 50%, depending on hyperparameters).
-            Checkpoints are made after each network *block*.
-            See https://pytorch.org/docs/master/checkpoint.html and
-            https://arxiv.org/abs/1604.06174 for more details.
     """
 
     __constants__ = ['down_convs', 'up_convs']
@@ -765,7 +768,6 @@ class UNet(nn.Module):
             full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
-            checkpointing: bool = False
     ):
         super().__init__()
 
@@ -820,7 +822,6 @@ class UNet(nn.Module):
         self.conv_mode = conv_mode
         self.activation = activation
         self.dim = dim
-        self.checkpointing = checkpointing
 
         self.down_convs = nn.ModuleList()
         self.up_convs = nn.ModuleList()
@@ -896,10 +897,7 @@ class UNet(nn.Module):
         # Encoder pathway, save outputs for merging
         i = 0  # Can't enumerate because of https://github.com/pytorch/pytorch/issues/16123
         for module in self.down_convs:
-            if self.checkpointing:
-                x, before_pool = checkpoint(module, x)
-            else:
-                x, before_pool = module(x)
+            x, before_pool = module(x)
             encoder_outs.append(before_pool)
             i += 1
 
@@ -907,16 +905,32 @@ class UNet(nn.Module):
         i = 0
         for module in self.up_convs:
             before_pool = encoder_outs[-(i+2)]
-            if self.checkpointing:
-                x = checkpoint(module, before_pool, x)
-            else:
-                x = module(before_pool, x)
+            x = module(before_pool, x)
             i += 1
 
         # No softmax is used, so you need to apply it in the loss.
         x = self.conv_final(x)
         # Uncomment the following line to temporarily store output for
         #  receptive field estimation using fornoxai/receptivefield:
+        # self.feature_maps = [x]  # Currently disabled to save memory
+        return x
+
+    @torch.jit.unused
+    def forward_gradcp(self, x):
+        """``forward()`` implementation with gradient checkpointing enabled.
+        Apart from checkpointing, this behaves the same as ``forward()``."""
+        encoder_outs = []
+        i = 0
+        for module in self.down_convs:
+            x, before_pool = checkpoint(module, x)
+            encoder_outs.append(before_pool)
+            i += 1
+        i = 0
+        for module in self.up_convs:
+            before_pool = encoder_outs[-(i+2)]
+            x = checkpoint(module, before_pool, x)
+            i += 1
+        x = self.conv_final(x)
         # self.feature_maps = [x]  # Currently disabled to save memory
         return x
 
