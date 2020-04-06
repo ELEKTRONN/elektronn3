@@ -11,6 +11,7 @@ Welcome to elektronn3's documentation!
    source/elektronn3.data
    source/elektronn3.training
    source/elektronn3.models
+   source/elektronn3.modules
    source/elektronn3.inference
 
 
