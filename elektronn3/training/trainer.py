@@ -644,6 +644,8 @@ class Trainer:
                             'before deploying the model.'
                         )
                         self._save_model(suffix='_swa_todo_batchnorm_corr', verbose=False)
+                else:  # No batch norm -> save model directly
+                    self._save_model(suffix='_swa', verbose=False)
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     @torch.no_grad()
