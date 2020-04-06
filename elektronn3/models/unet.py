@@ -36,7 +36,7 @@ __all__ = ['UNet']
 import copy
 import itertools
 
-from typing import Sequence, Union, Tuple
+from typing import Sequence, Union, Tuple, Optional
 
 import torch
 from torch import nn
@@ -328,6 +328,9 @@ class UpConv(nn.Module):
     A helper Module that performs 2 convolutions and 1 UpConvolution.
     A ReLU activation follows each convolution.
     """
+
+    att: Optional[torch.Tensor]
+
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
                  activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
@@ -386,7 +389,8 @@ class UpConv(nn.Module):
         updec = self.upconv(dec)
         enc, updec = autocrop(enc, updec)
         genc, att = self.attention(enc, dec)
-        self.att = att
+        if not torch.jit.is_scripting():
+            self.att = att
         updec = self.norm0(updec)
         updec = self.act0(updec)
         if self.merge_mode == 'concat':
