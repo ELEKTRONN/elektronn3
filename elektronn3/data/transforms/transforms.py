@@ -295,8 +295,10 @@ class DistanceTransformTarget:
     def __call__(
             self,
             inp: np.ndarray,  # returned without modifications
-            target: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+            target: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        if target is None:
+            return inp, target
         # assert target.max() <= 1
         # Ensure np.bool dtype, invert if needed
         if self.inverted:
