@@ -566,6 +566,7 @@ class Segmentation2d(data.Dataset):
             inp_paths,
             target_paths,
             transform=transforms.Identity(),
+            offset=None,
             in_memory=True,
             inp_dtype=np.float32,
             target_dtype=np.int64,
@@ -575,6 +576,7 @@ class Segmentation2d(data.Dataset):
         self.inp_paths = inp_paths
         self.target_paths = target_paths
         self.transform = transform
+        self.offset = offset
         self.in_memory = in_memory
         self.inp_dtype = inp_dtype
         self.target_dtype = target_dtype
@@ -596,19 +598,22 @@ class Segmentation2d(data.Dataset):
             inp = self.inps[index]
             target = self.targets[index]
         else:
-            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
+            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=np.float32)
             if inp.ndim == 2:  # (H, W)
                 inp = inp[None]  # (C=1, H, W)
-            target = np.array(imageio.imread(self.target_paths[index]), dtype=self.target_dtype)
+            target = np.array(imageio.imread(self.target_paths[index]), dtype=np.int64)
         while True:  # Only makes sense if RandomCrop is used
             try:
                 inp, target = self.transform(inp, target)
                 break
             except transforms._DropSample:
                 pass
+        if self.offset is not None:
+            off = self.offset
+            target = target[:, off[0]:-off[0], off[1]:-off[1]]
         sample = {
-            'inp': torch.as_tensor(inp),
-            'target': torch.as_tensor(target),
+            'inp': torch.as_tensor(inp.astype(self.inp_dtype)),
+            'target': torch.as_tensor(target.astype(self.target_dtype)),
             'cube_meta': np.inf,
             'fname': str(index)
         }
