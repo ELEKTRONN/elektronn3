@@ -170,7 +170,7 @@ class PtConv(LayerBase):
 
         if normalize:
             # Normalize to unit ball
-            maxi = torch.sqrt((pts.detach()**2).sum(3).max(2)[0])  # detach is a modificaiton
+            maxi = torch.sqrt((pts.detach()**2).sum(3).max(2)[0])  # detach is a modification
             maxi[maxi == 0] = 1
             pts = pts / maxi.view(maxi.size()+(1, 1,))
 

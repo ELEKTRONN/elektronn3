@@ -335,7 +335,7 @@ class Trainer3d:
                 'different combination of save_root and exp_name.'
             )
         os.makedirs(self.save_path)
-
+        os.makedirs(self.save_path + '/models/')
         self.im_path = self.save_path + '/tr_examples/'
 
         _change_log_file_to(f'{self.save_path}/elektronn3.log')
@@ -414,6 +414,15 @@ class Trainer3d:
                         valid_stats = self.curr_stats
                         stats.update(valid_stats)
 
+                # save models manually
+                model_path = self.save_path + f'/models/state_dict_e{self.epoch}.pth'
+                torch.save({
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'global_step': self.step,
+                    'epoch': self.epoch,
+                }, model_path)
+
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
@@ -453,11 +462,6 @@ class Trainer3d:
 
     def _train(self, max_steps, max_runtime):
         self.model.train()
-
-        # save model manually
-        model_path = os.path.join(self.save_path, f'state_dict_self.pth')
-        torch.save(self.model.state_dict(), model_path)
-
         # Scalar training stats that should be logged and written to tensorboard later
         stats: Dict[str, Union[float, List[float]]] = {stat: [] for stat in ['tr_loss']}
         # Other scalars to be logged
@@ -648,18 +652,6 @@ class Trainer3d:
         self.model.train()  # Reset model to training mode
         return stats
 
-    # @torch.no_grad()
-    # def _validate(self):
-    #     self.model.eval()
-    #
-    #     # Iterate trough validation dataset and predict all chunks with current model.
-    #     for hc in self.valid_th.obj_names:
-    #         val.validate_single(self.valid_th, hc, self.batchsize, self.valid_th.sample_num, self.val_iter,
-    #                             self.device, self.model, self.pred_mapper, self.channel_num)
-    #     self.pred_mapper.save_prediction(hc)
-    #
-    #     self.model.train()  # Reset model to training mode
-
     def _save_model(
             self,
             suffix: str = '',
@@ -780,7 +772,7 @@ class Trainer3d:
         tr_speed = misc['tr_speed']
         t = pretty_string_time(self._timer.t_passed)
         text = f'step={self.step:06d}, tr_loss={tr_loss:.3f}, val_loss={val_loss:.3f}, '
-        text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {t}'
+        text += f'lr={lr:.2e}, {tr_speed:.2f} it/s, {t}, {self.exp_name}'
         logger.info(text)
 
     def _log_to_tensorboard(
