@@ -25,6 +25,11 @@ except ImportError as e:
 # STATIC HELPER FUNCTIONS #
 
 
+def swish(x):
+    """https://arxiv.org/pdf/1710.05941.pdf"""
+    return x * torch.sigmoid(x)
+
+
 def identity(x):
     return x
 
@@ -73,7 +78,18 @@ class LayerBase(nn.Module, ABC):
 
 
 class PtConv(LayerBase):
-    def __init__(self, input_features, output_features, n_centers, dim, use_bias=True):
+    def __init__(self, input_features, output_features, n_centers, dim,
+                 act=None, use_bias=True):
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
         super(PtConv, self).__init__()
 
         # Weight
@@ -150,9 +166,9 @@ class PtConv(LayerBase):
         # compute the distances
         dists = pts.view(pts.size()+(1,)) - self.centers
         dists = dists.view(dists.size(0), dists.size(1), dists.size(2), -1)
-        dists = F.relu(self.l1(dists))
-        dists = F.relu(self.l2(dists))
-        dists = F.relu(self.l3(dists))
+        dists = self.act(self.l1(dists))
+        dists = self.act(self.l2(dists))
+        dists = self.act(self.l3(dists))
 
         # compute features
         fs = features.size()
@@ -373,18 +389,28 @@ class SegBig(nn.Module):
 class ModelNet40(nn.Module):
 
     def __init__(self, input_channels, output_channels, dimension=3,
-                 dropout=0.1, use_bn=True):
+                 dropout=0.1, use_bn=True, track_running_stats=False,
+                 act=None):
         super(ModelNet40, self).__init__()
-
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
         n_centers = 16
         pl = 64
-
+        print(f'Using activation: {self.act}')
         # convolutions
-        self.cv1 = PtConv(input_channels, pl, n_centers, dimension)
-        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension)
-        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension)
-        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension)
-        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension)
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension, act=act)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension, act=act)
+        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension, act=act)
+        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension, act=act)
+        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension, act=act)
 
         # last layer
         self.lin1 = nn.Linear(8 * pl, 2 * pl)
@@ -392,11 +418,11 @@ class ModelNet40(nn.Module):
 
         # batchnorms
         if use_bn:
-            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=False)
-            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
-            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=False)
-            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=False)
+            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=track_running_stats)
         else:
             self.bn1 = identity
             self.bn2 = identity
@@ -405,23 +431,22 @@ class ModelNet40(nn.Module):
             self.bn5 = identity
 
         self.dropout = nn.Dropout(dropout)
-        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, pts):
         x, pts = self.cv1(x, pts, 32, 4096)
-        x = self.relu(apply_bn(x, self.bn1))
+        x = self.act(apply_bn(x, self.bn1))
 
         x, pts = self.cv2(x, pts, 32, 1024)
-        x = self.relu(apply_bn(x, self.bn2))
+        x = self.act(apply_bn(x, self.bn2))
 
         x, pts = self.cv3(x, pts, 16, 512)
-        x = self.relu(apply_bn(x, self.bn3))
+        x = self.act(apply_bn(x, self.bn3))
 
         x, pts = self.cv4(x, pts, 16, 256)
-        x = self.relu(apply_bn(x, self.bn4))
+        x = self.act(apply_bn(x, self.bn4))
 
         x, pts = self.cv5(x, pts, 16, 128)
-        x = self.relu(apply_bn(x, self.bn5))
+        x = self.act(apply_bn(x, self.bn5))
         x = x.mean(1)  # calculate mean across points -> aggregate evidence
 
         x = self.dropout(x)
