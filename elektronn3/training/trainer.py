@@ -131,8 +131,15 @@ class Trainer:
             name and a time stamp in the format ``'%y-%m-%d_%H-%M-%S'``.
         example_input: An example input tensor that can be fed to the
             ``model``. This is used for JIT tracing during model serialization.
-        enable_save_trace: If ``True``, the model is JIT-traced with
-            ``example_input`` every time it is serialized to disk.
+        save_jit: Chooses if/how a JIT version (.pts file) of the
+            ``model`` should always be saved in addition to regular model
+            snapshots. Choices:
+
+            - ``None`` (default): Disable saving JIT models.
+            - ``'script'`` (recommended if possible): The model is compiled
+              directly with ``torch.jit.script()`` and saved as a .pts file
+            - ``'trace'``: The model is JIT-traced with ``example_input``
+              and saved as a .pts file
         batch_size: Desired batch size of training samples.
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
@@ -244,6 +251,7 @@ class Trainer:
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
             enable_save_trace: bool = False,
+            save_jit: Optional[str] = None,
             batch_size: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
@@ -266,6 +274,10 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
+        if enable_save_trace:
+            logger.warning('enable_save_trace is deprecated. Please use the save_jit option instead.')
+            assert save_jit in [None, 'trace']
+            save_jit = 'trace'
 
         # Ensure that all nn.Modules are on the right device
         model.to(device)
@@ -292,7 +304,7 @@ class Trainer:
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.example_input = example_input
-        self.enable_save_trace = enable_save_trace
+        self.save_jit = save_jit
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.sample_plotting_handler = sample_plotting_handler
@@ -736,9 +748,8 @@ class Trainer:
           manually load them into a model.
         - ``model.pts`` contains the model in the ``torch.jit`` ScriptModule
           serialization format. If ``model`` is not already a ``ScriptModule``
-          and ``self.enable_save_trace`` is ``True``, a ScriptModule form of the
-          ``model`` will be created on demand by jit-tracing it with
-          ``self.example_input``.
+          and ``self.save_jit`` is not ``None``, a ScriptModule form of the
+          ``model`` will be created on demand.
 
         Args:
             suffix: If defined, this string will be added before the file
@@ -805,17 +816,18 @@ class Trainer:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
             log(f'Saved model as {model_path}')
-            if self.example_input is not None and self.enable_save_trace:
-                # Additionally trace and serialize the model in eval + train mode
+            if self.save_jit == 'script':  # Compile directly for serialization
+                jitmodel = torch.jit.script(model)
+            elif self.save_jit == 'trace':  # Trace and serialize the model in eval mode
+                if self.example_input is None:
+                    raise ValueError('If save_jit="trace", example_input needs to be specified.')
                 with warnings.catch_warnings():
                     # It's enough to be warned once during initial tracing
                     warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
-                    traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
-                traced.save(pts_model_path)
-                log(f'Saved jit-traced model as {pts_model_path}')
-                # Uncomment these lines if separate traces for train/eval are required:
-                # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
-                # traced_train.save('train_' + model_path)
+                    jitmodel = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+            if self.save_jit is not None:  # Save jit model, either from script or trace
+                jitmodel.save(pts_model_path)
+                log(f'Saved jitted model ({self.save_jit}) as {pts_model_path}')
         except (TypeError, PickleError) as exc:
             # If model is already a ScriptModule, it can't be saved with torch.save()
             # Use ScriptModule.save() instead in this case.
