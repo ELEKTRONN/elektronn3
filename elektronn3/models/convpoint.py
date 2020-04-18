@@ -216,17 +216,17 @@ class SegSmall(nn.Module):
         n_centers = 16
 
         pl = 48
-        self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
 
-        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
 
         self.fcout = nn.Linear(pl, output_channels)
 
@@ -262,38 +262,38 @@ class SegSmall(nn.Module):
         if output_pts is None:
             output_pts = input_pts
         x2, pts2 = self.cv2(x, input_pts, 16, 2048)
-        x2 = F.relu(apply_bn(x2, self.bn2))
+        x2 = self.act(apply_bn(x2, self.bn2))
 
         x3, pts3 = self.cv3(x2, pts2, 16, 512)
-        x3 = F.relu(apply_bn(x3, self.bn3))
+        x3 = self.act(apply_bn(x3, self.bn3))
 
         x4, pts4 = self.cv4(x3, pts3, 8, 128)
-        x4 = F.relu(apply_bn(x4, self.bn4))
+        x4 = self.act(apply_bn(x4, self.bn4))
 
         x5, pts5 = self.cv5(x4, pts4, 8, 32)
-        x5 = F.relu(apply_bn(x5, self.bn5))
+        x5 = self.act(apply_bn(x5, self.bn5))
 
         x6, pts6 = self.cv6(x5, pts5, 4, 16)
-        x6 = F.relu(apply_bn(x6, self.bn6))
+        x6 = self.act(apply_bn(x6, self.bn6))
 
         x5d, _ = self.cv5d(x6, pts6, 4, pts5)
-        x5d = F.relu(apply_bn(x5d, self.bn5d))
+        x5d = self.act(apply_bn(x5d, self.bn5d))
         x5d = torch.cat([x5d, x5], dim=2)
 
         x4d, _ = self.cv4d(x5d, pts5, 4, pts4)
-        x4d = F.relu(apply_bn(x4d, self.bn4d))
+        x4d = self.act(apply_bn(x4d, self.bn4d))
         x4d = torch.cat([x4d, x4], dim=2)
 
         x3d, _ = self.cv3d(x4d, pts4, 4, pts3)
-        x3d = F.relu(apply_bn(x3d, self.bn3d))
+        x3d = self.act(apply_bn(x3d, self.bn3d))
         x3d = torch.cat([x3d, x3], dim=2)
 
         x2d, _ = self.cv2d(x3d, pts3, 8, pts2)
-        x2d = F.relu(apply_bn(x2d, self.bn2d))
+        x2d = self.act(apply_bn(x2d, self.bn2d))
         x2d = torch.cat([x2d, x2], dim=2)
 
         x1d, _ = self.cv1d(x2d, pts2, 8, output_pts)
-        x1d = F.relu(apply_bn(x1d, self.bn1d))
+        x1d = self.act(apply_bn(x1d, self.bn1d))
 
         xout = x1d
         xout = xout.view(-1, xout.size(2))

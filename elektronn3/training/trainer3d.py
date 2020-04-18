@@ -210,6 +210,7 @@ class Trainer3d:
             powered by https://github.com/NVIDIA/apex to reduce memory usage
             and (if a GPU with Tensor Cores is used) make training much faster.
             This is currently experimental and might cause instabilities.
+        nbatch_avg: Number of batches to accumulate before backprop.
     """
 
     tb: tensorboardX.SummaryWriter
@@ -256,7 +257,8 @@ class Trainer3d:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
-            dataloader_kwargs: Optional[dict] = None
+            dataloader_kwargs: Optional[dict] = None,
+            nbatch_avg: int = 10,
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -283,6 +285,7 @@ class Trainer3d:
                     model.cuda()
             else:
                 raise exc
+        self.nbatch_avg = nbatch_avg
         self.model = model
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
@@ -482,9 +485,9 @@ class Trainer3d:
                     scaled_loss.backward()
             else:
                 dloss.backward()
-            # accumulate gradient over 5 batches -> single batch contains always the same cell ->
+            # accumulate gradient over X batches -> single batch contains always the same cell ->
             # mix targets
-            if (i+1) % 10 == 0:
+            if (i+1) % self.nbatch_avg == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
             # End of core training loop on self.device
@@ -625,7 +628,6 @@ class Trainer3d:
                     dout = self.model(dfeats, dinp)
                 else:
                     dout = self.model(dfeats, dinp, dtarget_pts)
-
                 dout = dout.view(-1, self.num_classes)
                 dtarget = dtarget.view(-1)
                 val_loss.append(self.criterion(dout, dtarget).item())
