@@ -453,6 +453,10 @@ class Trainer3d:
             pts = batch['pts']
             features = batch['features']
             target = batch['target']
+            if 'out_pts' in batch:
+                dtarget_pts = batch['out_pts'].to(self.device, non_blocking=True)
+            else:
+                dtarget_pts = None
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
@@ -460,8 +464,11 @@ class Trainer3d:
             dfeats = features.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
 
-            dout = self.model(dfeats, dinp)
-
+            # some point conv models do not have the third call argument
+            if dtarget_pts is None:
+                dout = self.model(dfeats, dinp)
+            else:
+                dout = self.model(dfeats, dinp, dtarget_pts)
             dout_flat = dout.view(-1, self.num_classes)
             dtarget_flat = dtarget.view(-1)
             dloss = self.criterion(dout_flat, dtarget_flat)
@@ -606,10 +613,18 @@ class Trainer3d:
                 pts = batch['pts']
                 features = batch['features']
                 target = batch['target']
+                if 'out_pts' in batch:
+                    dtarget_pts = batch['out_pts'].to(self.device, non_blocking=True)
+                else:
+                    dtarget_pts = None
                 dinp = pts.to(self.device, non_blocking=True)
                 dfeats = features.to(self.device, non_blocking=True)
                 dtarget = target.to(self.device, non_blocking=True)
-                dout = self.model(dfeats, dinp)
+                # some point conv models do not have the third call argument
+                if dtarget_pts is None:
+                    dout = self.model(dfeats, dinp)
+                else:
+                    dout = self.model(dfeats, dinp, dtarget_pts)
 
                 dout = dout.view(-1, self.num_classes)
                 dtarget = dtarget.view(-1)

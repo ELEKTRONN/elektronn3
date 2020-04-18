@@ -199,55 +199,81 @@ class PtConv(LayerBase):
 
 
 class SegSmall(nn.Module):
-    def __init__(self, input_channels, output_channels, dimension=3, dropout=0):
+    def __init__(self, input_channels, output_channels, dimension=3, dropout=0,
+                 act=None, use_bias=True, track_running_stats=False, use_bn=False):
         super(SegSmall, self).__init__()
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
 
         n_centers = 16
 
         pl = 48
-        self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=False)
-        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=False)
-        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=False)
+        self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
 
-        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=False)
-        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=False)
-        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=False)
+        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
 
         self.fcout = nn.Linear(pl, output_channels)
 
-        self.bn2 = nn.BatchNorm1d(pl, track_running_stats=False)
-        self.bn3 = nn.BatchNorm1d(pl, track_running_stats=False)
-        self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-        self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-        self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=False)
+        if use_bn:
+            self.bn2 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
 
-        self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-        self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=False)
-        self.bn3d = nn.BatchNorm1d(pl, track_running_stats=False)
-        self.bn2d = nn.BatchNorm1d(pl, track_running_stats=False)
-        self.bn1d = nn.BatchNorm1d(pl, track_running_stats=False)
+            self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn1d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+        else:
+            self.bn = identity
+            self.bn2 = identity
+            self.bn3 = identity
+            self.bn4 = identity
+            self.bn5 = identity
+            self.bn6 = identity
+
+            self.bn5d = identity
+            self.bn4d = identity
+            self.bn3d = identity
+            self.bn2d = identity
+            self.bn1d = identity
 
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, x, input_pts):
-
-        x2, pts2 = self.cv2(x, input_pts, 16, 1024)
+    def forward(self, x, input_pts, output_pts=None):
+        if output_pts is None:
+            output_pts = input_pts
+        x2, pts2 = self.cv2(x, input_pts, 16, 2048)
         x2 = F.relu(apply_bn(x2, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, 16, 256)
+        x3, pts3 = self.cv3(x2, pts2, 16, 512)
         x3 = F.relu(apply_bn(x3, self.bn3))
 
-        x4, pts4 = self.cv4(x3, pts3, 8, 64)
+        x4, pts4 = self.cv4(x3, pts3, 8, 128)
         x4 = F.relu(apply_bn(x4, self.bn4))
 
-        x5, pts5 = self.cv5(x4, pts4, 8, 16)
+        x5, pts5 = self.cv5(x4, pts4, 8, 32)
         x5 = F.relu(apply_bn(x5, self.bn5))
 
-        x6, pts6 = self.cv6(x5, pts5, 4, 8)
+        x6, pts6 = self.cv6(x5, pts5, 4, 16)
         x6 = F.relu(apply_bn(x6, self.bn6))
 
         x5d, _ = self.cv5d(x6, pts6, 4, pts5)
@@ -266,7 +292,7 @@ class SegSmall(nn.Module):
         x2d = F.relu(apply_bn(x2d, self.bn2d))
         x2d = torch.cat([x2d, x2], dim=2)
 
-        x1d, _ = self.cv1d(x2d, pts2, 8, input_pts)
+        x1d, _ = self.cv1d(x2d, pts2, 8, output_pts)
         x1d = F.relu(apply_bn(x1d, self.bn1d))
 
         xout = x1d
