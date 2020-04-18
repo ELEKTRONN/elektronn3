@@ -365,10 +365,11 @@ class Predictor:
             strict_shapes: bool = False,
             argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
-            report_inp_stats = False
+            report_inp_stats: bool = False
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            logger.info(f'Running on device {device}')
         elif isinstance(device, str):
             device = torch.device(device)
         self.device = device
