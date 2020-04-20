@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Callable, Dict, Optional, Sequence
 
 import knossos_utils
@@ -12,7 +13,7 @@ from elektronn3.data import transforms
 class KnossosRawData(torch.utils.data.Dataset):
     """Delivers raw patches that are randomly sampled from a KNOSSOS dataset.
     Supports 2D and 3D (choice is determined from the length of the
-    ``patch_shape`` param.
+    ``patch_shape`` param).
 
     Args:
         conf_path: Path to KNOSSOS .conf file
@@ -39,7 +40,11 @@ class KnossosRawData(torch.utils.data.Dataset):
             allocation that exceeds 90% of free memory is detected, an error
             is raised. If ``True``, this check is disabled.
         verbose: If ``True``, be verbose about disk I/O.
+        caching: If ``True`` and not in_memory, cache data from disk and reuse it.
+        cache_size: How many samples to hold in cache.
+        cache_reusages: How often to reuse a sample in cache before loading a new one from disk.
     """
+
     def __init__(
             self,
             conf_path: str,
@@ -50,7 +55,10 @@ class KnossosRawData(torch.utils.data.Dataset):
             in_memory: bool = True,
             epoch_size: int = 100,
             disable_memory_check: bool = False,
-            verbose: bool = False
+            verbose: bool = False,
+            caching: bool = False,
+            cache_size: int = 50,
+            cache_reusages: int = 10
     ):
         self.conf_path = conf_path
         self.patch_shape = np.array(patch_shape)
@@ -60,6 +68,9 @@ class KnossosRawData(torch.utils.data.Dataset):
         self.epoch_size = epoch_size
         self.disable_memory_check = disable_memory_check
         self.verbose = verbose
+        self.caching = caching
+        self.cache_size = cache_size
+        self.cache_reusages = cache_reusages
 
         self.kd = knossos_utils.KnossosDataset(self.conf_path, show_progress=self.verbose)
         self.dim = len(self.patch_shape)
@@ -74,9 +85,12 @@ class KnossosRawData(torch.utils.data.Dataset):
         self.raw = None  # Will be filled with raw data if in_memory is True
         if self.in_memory:
             self._load_into_memory()
+        elif self.caching:
+            self._fill_cache()
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        inp = self._load_from_memory() if self.in_memory else self._load_from_disk()
+        inp = self._load_from_memory() if self.in_memory else \
+            (self._get_from_cache() if self.caching else self._load_from_disk())
         if self.dim == 2:
             inp = inp[0]  # squeeze z=1 dim -> yx
         inp = inp.astype(np.float32)[None]  # Prepend C dim -> (C, [D,] H, W)
@@ -103,7 +117,7 @@ class KnossosRawData(torch.utils.data.Dataset):
               offset[2]:offset[2] + self.patch_shape_xyz[2],
               offset[1]:offset[1] + self.patch_shape_xyz[1],
               offset[0]:offset[0] + self.patch_shape_xyz[0],
-        ]  # zyx (D, H, W)
+              ]  # zyx (D, H, W)
         return inp
 
     def __len__(self) -> int:
@@ -131,3 +145,16 @@ class KnossosRawData(torch.utils.data.Dataset):
                 'Please specifiy smaller bounds, or if you are sure about what you are '
                 'doing, you can disable this check with the disable_memory_check flag.'
             )
+
+    def _fill_cache(self):
+        self.cache = [self._load_from_disk()] * self.cache_size
+        self.remaining_cache_reusages = [self.cache_size] * self.cache_size
+
+    def _get_from_cache(self):
+        idx = random.randrange(self.cache_size)
+        inp = self.cache[idx]
+        self.remaining_cache_reusages[idx] -= 1
+        if self.remaining_cache_reusages[idx] < 1:
+            self.cache[idx] = self._load_from_disk()
+            self.remaining_cache_reusages[idx] = self.cache_reusages
+        return inp
