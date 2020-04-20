@@ -147,7 +147,7 @@ class KnossosRawData(torch.utils.data.Dataset):
             )
 
     def _fill_cache(self):
-        self.cache = [self._load_from_disk()] * self.cache_size
+        self.cache = [self._load_from_disk() for _ in range(self.cache_size)] 
         self.remaining_cache_reusages = [self.cache_size] * self.cache_size
 
     def _get_from_cache(self):
