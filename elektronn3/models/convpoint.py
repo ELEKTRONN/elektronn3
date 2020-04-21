@@ -200,7 +200,7 @@ class PtConv(LayerBase):
 
 class SegSmall(nn.Module):
     def __init__(self, input_channels, output_channels, dimension=3, dropout=0,
-                 act=None, use_bias=True, track_running_stats=False, use_bn=False):
+                 act=None, use_bias=True, track_running_stats=False, use_norm=False):
         super(SegSmall, self).__init__()
         if act in [None, 'relu']:
             self.act = F.relu_
@@ -215,7 +215,7 @@ class SegSmall(nn.Module):
 
         n_centers = 16
 
-        pl = 48
+        pl = 64
         self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
         self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
         self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
@@ -228,21 +228,10 @@ class SegSmall(nn.Module):
         self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
         self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
 
+        self.cvout = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
         self.fcout = nn.Linear(pl, output_channels)
 
-        if use_bn:
-            self.bn2 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-            self.bn3 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-            self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
-            self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
-            self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
-
-            self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
-            self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
-            self.bn3d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-            self.bn2d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-            self.bn1d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-        else:
+        if use_norm is False:
             self.bn = identity
             self.bn2 = identity
             self.bn3 = identity
@@ -255,6 +244,39 @@ class SegSmall(nn.Module):
             self.bn3d = identity
             self.bn2d = identity
             self.bn1d = identity
+
+            self.bnout = identity
+        elif use_norm == 'bn':
+            self.bn2 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+
+            self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+
+            self.bn1d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+
+            self.bnout = nn.BatchNorm1d(pl)
+        elif use_norm == 'gn':
+            self.bn2 = nn.GroupNorm(pl // 2, pl)
+            self.bn3 = nn.GroupNorm(pl // 2, pl)
+            self.bn4 = nn.GroupNorm(pl, 2 * pl)
+            self.bn5 = nn.GroupNorm(pl, 2 * pl)
+            self.bn6 = nn.GroupNorm(pl, 2 * pl)
+
+            self.bn5d = nn.GroupNorm(pl, 2 * pl)
+            self.bn4d = nn.GroupNorm(pl, 2 * pl)
+            self.bn3d = nn.GroupNorm(pl // 2, pl)
+            self.bn2d = nn.GroupNorm(pl // 2, pl)
+            self.bn1d = nn.GroupNorm(pl // 2, pl)
+
+            self.bnout = nn.GroupNorm(pl // 2, pl)
+        else:
+            raise ValueError
 
         self.drop = nn.Dropout(dropout)
 
@@ -273,7 +295,7 @@ class SegSmall(nn.Module):
         x5, pts5 = self.cv5(x4, pts4, 8, 32)
         x5 = self.act(apply_bn(x5, self.bn5))
 
-        x6, pts6 = self.cv6(x5, pts5, 4, 16)
+        x6, pts6 = self.cv6(x5, pts5, 4, 8)
         x6 = self.act(apply_bn(x6, self.bn6))
 
         x5d, _ = self.cv5d(x6, pts6, 4, pts5)
@@ -292,12 +314,13 @@ class SegSmall(nn.Module):
         x2d = self.act(apply_bn(x2d, self.bn2d))
         x2d = torch.cat([x2d, x2], dim=2)
 
-        x1d, _ = self.cv1d(x2d, pts2, 8, output_pts)
+        x2d = self.drop(x2d)
+        x1d, _ = self.cv1d(x2d, pts2, 32, output_pts)
         x1d = self.act(apply_bn(x1d, self.bn1d))
 
-        xout = x1d
+        xout, _ = self.cvout(x1d, output_pts, 8)
+        xout = self.act(apply_bn(xout, self.bnout))
         xout = xout.view(-1, xout.size(2))
-        xout = self.drop(xout)
         xout = self.fcout(xout)
         xout = xout.view(x.size(0), -1, xout.size(1))
 
@@ -415,7 +438,7 @@ class SegBig(nn.Module):
 class ModelNet40(nn.Module):
 
     def __init__(self, input_channels, output_channels, dimension=3,
-                 dropout=0.1, use_bn=True, track_running_stats=False,
+                 dropout=0.1, use_norm='gn', track_running_stats=False,
                  act=None):
         super(ModelNet40, self).__init__()
         if act in [None, 'relu']:
@@ -442,19 +465,26 @@ class ModelNet40(nn.Module):
         self.lin1 = nn.Linear(8 * pl, 2 * pl)
         self.lin2 = nn.Linear(2 * pl, output_channels)
 
-        # batchnorms
-        if use_bn:
-            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
-            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
-            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
-            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=track_running_stats)
-        else:
+        # normalization
+        if not use_norm:
             self.bn1 = identity
             self.bn2 = identity
             self.bn3 = identity
             self.bn4 = identity
             self.bn5 = identity
+        elif use_norm == 'bn':
+            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=track_running_stats)
+        elif use_norm == 'gn':
+            self.bn2 = nn.GroupNorm(pl // 2, pl)
+            self.bn3 = nn.GroupNorm(pl, 2 * pl)
+            self.bn4 = nn.GroupNorm(2 * pl, 4 * pl)
+            self.bn5 = nn.GroupNorm(4 * pl, 8 * pl)
+        else:
+            raise ValueError
 
         self.dropout = nn.Dropout(dropout)
 
