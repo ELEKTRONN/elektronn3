@@ -367,7 +367,6 @@ def warp_slice(
 
     # Spatial shapes of input and target data sources
     inp_src_shape = np.array(inp_src.shape[-3:])
-    target_src_shape = np.array(target_src.shape[-3:])
 
     M_inv = np.linalg.inv(M.astype(np.float64)).astype(floatX) # stability...
     dest_corners = make_dest_corners(patch_shape)
@@ -413,25 +412,18 @@ def warp_slice(
             np.clip(src_coords[..., i], lo[i], hi[i] - 1, out=src_coords[..., i])
 
     if target_src is not None:
+        target_src_shape = np.array(target_src.shape[-3:])
         target_patch_shape = tuple(target_patch_shape)
         n_f_t = target_src.shape[0] if target_src.ndim == 4 else 1
 
         target_src_offset = np.subtract(inp_src_shape, target_src.shape[-3:])
         if np.any(np.mod(target_src_offset, 2)):
-            msg = f"targets must be centered w.r.t. images. data shape: " \
-                f"{inp_src_shape}; target shape: {target_patch_shape}"
-            print(msg)
-            raise WarpingOOBError(msg)
-            # raise ValueError("targets must be centered w.r.t. images")
+            raise ValueError("targets must be centered w.r.t. images")
         target_src_offset //= 2
 
         target_offset = np.subtract(patch_shape, target_patch_shape)
         if np.any(np.mod(target_offset, 2)):
-            msg = f"targets must be centered w.r.t. images. Target shape: " \
-                f"{target_patch_shape}; data shape: {inp_src_shape}"
-            print(msg)
-            raise WarpingOOBError(msg)
-            # raise ValueError("targets must be centered w.r.t. images")
+            raise ValueError("targets must be centered w.r.t. images")
         target_offset //= 2
 
         src_coords_target = src_coords[
@@ -576,7 +568,6 @@ def get_warped_coord_transform(
     # The last three dimensions of the data source shapes are interpreted as
     #  spatial dimensions (D, H, W). All preciding dimensions are ignored.
     spatial_inp_src_shape = np.array(inp_src_shape[-3:])
-    spatial_target_src_shape = np.array(target_src_shape[-3:])
 
     # Determine a random coordinate region where data should be read from the
     #  source. The size of the region is statically defined by the patch_shape.
@@ -586,6 +577,7 @@ def get_warped_coord_transform(
     dest_center = patch_shape / 2
     src_remainder = (patch_shape % 2) / 2
     if target_patch_shape is not None:
+        spatial_target_src_shape = np.array(target_src_shape[-3:])
         target_center = target_patch_shape / 2
         offset = (spatial_inp_src_shape - spatial_target_src_shape) // 2
         lo_pos = np.maximum(dest_center, target_center + offset)

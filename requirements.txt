@@ -1,6 +1,6 @@
 # python>=3.6
 
-torch==1.1.0
+torch
 numpy
 scipy
 h5py
@@ -19,4 +19,4 @@ torchvision
 
 # Only required for running a tensorboard server:
 tensorboard>=1.13
-tensorflow
+tensorflow>=1.13

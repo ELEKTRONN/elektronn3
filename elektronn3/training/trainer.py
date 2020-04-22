@@ -349,7 +349,7 @@ class Trainer:
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60 if self.num_workers > 0 else 0,
+            timeout=120 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
@@ -362,7 +362,7 @@ class Trainer:
             self.valid_loader = DataLoader(
                 self.valid_dataset, self.batch_size, shuffle=True,
                 num_workers=self.num_workers,
-                pin_memory=True, timeout=60 if self.num_workers > 0 else 0,
+                pin_memory=True, timeout=120 if self.num_workers > 0 else 0,
                 worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss

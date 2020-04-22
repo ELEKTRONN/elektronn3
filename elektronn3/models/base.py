@@ -30,7 +30,7 @@ class InferenceModel(object):
         >>> assert np.all(np.array(out.shape) == np.array([2, 2, 10, 10]))
     """
     def __init__(self, src: Union[str, nn.Module], disable_cuda: bool = False,
-                 multi_gpu: bool = True, normalize_func: Optional[Callable] = None,
+                 multi_gpu: bool = False, normalize_func: Optional[Callable] = None,
                  bs: int = 10):
         self.normalize_func = normalize_func
         self.bs = bs
@@ -108,8 +108,7 @@ class InferenceModel(object):
             del inp_stride
             del res
             torch.cuda.empty_cache()
-        assert high >= n_samples, "Prediction less samples then given" \
-                                 " in input."
+        assert high >= n_samples, "Prediction less samples then given in input."
         if verbose:
             dtime = time.time() - start
             if type(inp) is tuple:
