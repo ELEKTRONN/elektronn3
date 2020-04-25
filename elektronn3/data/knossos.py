@@ -121,7 +121,7 @@ class KnossosRawData(torch.utils.data.Dataset):
               offset[2]:offset[2] + self.patch_shape_xyz[2],
               offset[1]:offset[1] + self.patch_shape_xyz[1],
               offset[0]:offset[0] + self.patch_shape_xyz[0],
-              ]  # zyx (D, H, W)
+        ]  # zyx (D, H, W)
         return inp
 
     def __len__(self) -> int:
