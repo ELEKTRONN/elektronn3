@@ -40,7 +40,7 @@ class KnossosRawData(torch.utils.data.Dataset):
             allocation that exceeds 90% of free memory is detected, an error
             is raised. If ``True``, this check is disabled.
         verbose: If ``True``, be verbose about disk I/O.
-        caching: If ``True`` and not in_memory, cache data from disk and reuse it.
+        caching: If ``True`` and ``in_memory=False``, cache data from disk and reuse it.
         cache_size: How many samples to hold in cache.
         cache_reusages: How often to reuse a sample in cache before loading a new one from disk.
     """
