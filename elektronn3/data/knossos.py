@@ -89,8 +89,12 @@ class KnossosRawData(torch.utils.data.Dataset):
             self._fill_cache()
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        inp = self._load_from_memory() if self.in_memory else \
-            (self._get_from_cache() if self.caching else self._load_from_disk())
+        if self.in_memory:
+            inp = self._load_from_memory()
+        elif self.caching:
+            inp = self._get_from_cache()
+        else:
+            inp = self._load_from_disk()
         if self.dim == 2:
             inp = inp[0]  # squeeze z=1 dim -> yx
         inp = inp.astype(np.float32)[None]  # Prepend C dim -> (C, [D,] H, W)
