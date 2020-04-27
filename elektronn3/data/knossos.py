@@ -28,9 +28,9 @@ class KnossosRawData(torch.utils.data.Dataset):
             high corner (x=512, y=512, z=512) of the dataset is considered. If
             ``None``, the whole dataset is used.
         mag: KNOSSOS magnification number
-        in_memory: If ``True`` (default), the dataset (or the subregion that
-            is constrained by ``bounds``) is pre-loaded into memory on
-            initialization.
+        mode: One of ``in_memory``, ``caching`` or ``disk``. If ``in_memory`` (default), the dataset (or the subregion
+            that is constrained by ``bounds``) is pre-loaded into memory on initialization. If ``caching``, cache data
+            from the disk and reuse it. If ``disk``, load data from disk on demand.
         epoch_size: Determines the length (``__len__``) of the ``Dataset``
             iterator. ``epoch_size`` can be set to an arbitrary value and
             doesn't have any effect on the content of produced training
@@ -40,9 +40,8 @@ class KnossosRawData(torch.utils.data.Dataset):
             allocation that exceeds 90% of free memory is detected, an error
             is raised. If ``True``, this check is disabled.
         verbose: If ``True``, be verbose about disk I/O.
-        caching: If ``True`` and ``in_memory=False``, cache data from disk and reuse it.
-        cache_size: How many samples to hold in cache.
-        cache_reusages: How often to reuse a sample in cache before loading a new one from disk.
+        cache_size: If mode=``cache``: How many samples to hold in cache.
+        cache_reuses: If mode=``cache``: How often to reuse a sample in cache before loading a new one from disk.
     """
 
     def __init__(
@@ -52,25 +51,25 @@ class KnossosRawData(torch.utils.data.Dataset):
             transform: Callable = transforms.Identity(),
             bounds: Optional[Sequence[Sequence[int]]] = None,  # xyz
             mag: int = 1,
-            in_memory: bool = True,
+            mode: str = 'in_memory',
             epoch_size: int = 100,
             disable_memory_check: bool = False,
             verbose: bool = False,
-            caching: bool = False,
             cache_size: int = 50,
-            cache_reusages: int = 10
+            cache_reuses: int = 10
     ):
         self.conf_path = conf_path
         self.patch_shape = np.array(patch_shape)
         self.transform = transform
         self.mag = mag
-        self.in_memory = in_memory
         self.epoch_size = epoch_size
         self.disable_memory_check = disable_memory_check
         self.verbose = verbose
-        self.caching = caching
         self.cache_size = cache_size
-        self.cache_reusages = cache_reusages
+        self.cache_reusages = cache_reuses
+        if mode not in ['in_memory', 'caching', 'disk']:
+            raise ValueError(f'mode has to be one of ``in_memory``, ``caching`` or ``disk``, but is {mode}')
+        self.mode = mode
 
         self.kd = knossos_utils.KnossosDataset(self.conf_path, show_progress=self.verbose)
         self.dim = len(self.patch_shape)
@@ -83,15 +82,16 @@ class KnossosRawData(torch.utils.data.Dataset):
         self.bounds = np.array(bounds)
         self.shape = self.bounds[1] - self.bounds[0]
         self.raw = None  # Will be filled with raw data if in_memory is True
-        if self.in_memory:
+
+        if self.mode == 'in_memory':
             self._load_into_memory()
-        elif self.caching:
+        elif self.mode == 'caching':
             self._fill_cache()
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        if self.in_memory:
+        if self.mode == 'in_memory':
             inp = self._load_from_memory()
-        elif self.caching:
+        elif self.mode == 'caching':
             inp = self._get_from_cache()
         else:
             inp = self._load_from_disk()
@@ -150,11 +150,11 @@ class KnossosRawData(torch.utils.data.Dataset):
                 'doing, you can disable this check with the disable_memory_check flag.'
             )
 
-    def _fill_cache(self):
-        self.cache = [self._load_from_disk() for _ in range(self.cache_size)] 
+    def _fill_cache(self) -> None:
+        self.cache = [self._load_from_disk() for _ in range(self.cache_size)]
         self.remaining_cache_reusages = [self.cache_reusages] * self.cache_size
 
-    def _get_from_cache(self):
+    def _get_from_cache(self) -> np.ndarray:
         idx = random.randrange(self.cache_size)
         inp = self.cache[idx]
         self.remaining_cache_reusages[idx] -= 1
