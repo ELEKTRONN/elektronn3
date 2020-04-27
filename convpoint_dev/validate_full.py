@@ -22,10 +22,13 @@ from tqdm import tqdm
 # PARSE PARAMETERS #
 
 parser = argparse.ArgumentParser(description='Validate a network.')
-parser.add_argument('--na', type=str, required=True, help='Experiment name')
-parser.add_argument('--vp', type=str, required=True, help='Validation path')
-parser.add_argument('--sr', type=str, required=True, help='Save root')
-parser.add_argument('--sd', type=str, required=True, help='State dict name')
+parser.add_argument('--na', type=str, required=True,
+                    default="Inference_Feb03", help='Experiment name')
+parser.add_argument('--vp', type=str, required=True,
+                    default="/wholebrain/scratch/yliu/merger_gt_semseg_pointcloud/gt_convpoint", help='Validation path')
+parser.add_argument('--sr', type=str, required=True,
+                    default="/wholebrain/scratch/yliu/pointcloud_inference_results",  help='Save root')
+parser.add_argument('--sd', type=str, required=True, default="", help='State dict name')
 parser.add_argument('--sp', type=int, default=1000, help='Number of sample points')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=2, help='Number of classes')

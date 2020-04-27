@@ -14,7 +14,7 @@ elektronn3.select_mpl_backend('Agg')
 import morphx.processing.clouds as clouds
 from morphx.data.torchset import TorchSet
 from elektronn3.models.convpoint import SegSmall, SegBig
-from elektronn3.training import Trainer3d, Backup
+from elektronn3.training.trainer3d import Trainer3d, Backup
 from elektronn3.training import metrics
 
 
@@ -78,11 +78,11 @@ val_transform = clouds.Center()
 
 train_ds = TorchSet(train_path, radius, npoints, train_transform,
                     class_num=num_classes,
-                    elektronn3=True)
+                    elektronn3=True, data_type='merger')
 
 valid_ds = TorchSet(val_path, radius, npoints, val_transform,
                     class_num=num_classes,
-                    elektronn3=True)
+                    elektronn3=True, data_type='merger')
 
 # PREPARE AND START TRAINING #
 

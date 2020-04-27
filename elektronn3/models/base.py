@@ -129,7 +129,7 @@ def load_model(src: str, network_str='') -> nn.Module:
     Args:
         src: Source path to model directory. Directory must contain training
         script and model-checkpoint.pth.
-        network_str: Specifically for choosing different architecture of U-Net. 
+        network_str: Specifically for choosing different architecture of U-Net.
                      Choose from ['unet', 'unet++', 'attention-unet']
 
     Returns:

@@ -14,7 +14,7 @@ elektronn3.select_mpl_backend('Agg')
 import morphx.processing.clouds as clouds
 from torch import nn
 from morphx.data.torchset import TorchSet, TorchSetSkeleton
-from elektronn3.models.convpoint import SegSmall, SegBig, SegSkeleton
+from elektronn3.models.convpoint import SegSmall, SegBig, SegSkeleton, SegSkeleton_v2
 from elektronn3.training.trainer3d import Trainer3d, Backup
 from elektronn3.training import metrics
 from syconn.proc.meshes import write_mesh2kzip, triangulation
@@ -23,19 +23,20 @@ from plyfile import PlyData, PlyElement
 # PARSE PARAMETERS #
 
 parser = argparse.ArgumentParser(description='Train a network.')
-parser.add_argument('--na', type=str, default="merger_convpoint_Mar04_1e-5_r10_sam20k", help='Experiment name')
+parser.add_argument('--na', type=str, default="merger_Mar18_continue01", help='Experiment name')
 # parser.add_argument('--na', type=str, default="test_multi_worker", help='Experiment name')
 parser.add_argument('--tp', type=str, default="/wholebrain/scratch/yliu/merger_gt_semseg_pointcloud/gt_convpoint/", help='Train path')
 # parser.add_argument('--tp', type=str, default="/wholebrain/scratch/yliu/merger_gt_semseg_pointcloud/gt_results/", help='Train path')
 parser.add_argument('--sr', type=str, default="/wholebrain/scratch/yliu/pointcloud_train_result/", help='Save root')
-parser.add_argument('--bs', type=int, default=16, help='Batch size')
+parser.add_argument('--bs', type=int, default=32, help='Batch size')
 parser.add_argument('--sp', type=int, default=20000, help='Number of sample points, default is 10e3')
 parser.add_argument('--ra', type=int, default=10000, help='Radius')
 parser.add_argument('--cl', type=int, default=2, help='Number of classes')
 parser.add_argument('--co', action='store_true', help='Disable CUDA')
 parser.add_argument('--big', action='store_true', help='Use big SegBig Convpoint network')
 
-NUM_WORKER = 0
+NUM_WORKER = 10
+# TODO: detele this line by April.14
 
 args = parser.parse_args()
 
@@ -204,12 +205,14 @@ input_channels = 1
 #     model = SegBig(input_channels, num_classes, dropout=0.1)
 # else:
 #     model = SegSmall(input_channels, num_classes)
-model = SegSkeleton(input_channels, num_classes)
+# model = SegSkeleton(input_channels, num_classes)
+model = SegSkeleton_v2(input_channels, num_classes)
+print("Using {} model".format(model.model_name))
 
 # Load model weights
-# folder = "/wholebrain/scratch/yliu/pointcloud_train_result/merger_convpoint_Feb25_1e-5_r10_sam10k/"
-# checkpoint = torch.load(os.path.join(folder, "state_dict.pth"))
-# model.load_state_dict(checkpoint['model_state_dict'])
+folder = "/wholebrain/scratch/yliu/pointcloud_train_result/merger_Mar18_1e-5_r10_sam20k_adamStep/"
+checkpoint = torch.load(os.path.join(folder, "state_dict.pth"))
+model.load_state_dict(checkpoint['model_state_dict'])
 
 if use_cuda:
     # if torch.cuda.device_count() > 1:
@@ -250,15 +253,32 @@ dataset_valid = TorchSetSkeleton(train_path, radius, npoints, valid_transform, c
 
 # set up optimization
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+print("learning rate at the beginning:")
+for param_group in optimizer.param_groups:
+    print(param_group['lr'])
 # Step
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 ###############################
 # Cyclic Learning Rate
 ###############################
-# base_lr = 1e-8
-# max_lr = lr
-# scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=lr, max_lr=lr)
-# TODO: CosineAnnealingWarmRestarts
+# try:
+#     from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+# except ModuleNotFoundError as e:
+#     print(e)
+#     from elektronn3.training.schedulers import CosineAnnealingWarmRestarts
+# # base_lr = 1e-8
+# # max_lr = lr
+# # scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=lr, max_lr=lr)
+# optimizer = torch.optim.SGD(
+#     model.parameters(),
+#     lr=lr,  # Learning rate is set by the lr_sched below
+#     momentum=0.9,
+#     weight_decay=0.5e-5,
+# )
+# scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=5000, T_mult=2)
+
 
 criterion = torch.nn.CrossEntropyLoss()
 if use_cuda:
