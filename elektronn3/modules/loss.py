@@ -306,7 +306,7 @@ class FixMatchSegLoss(nn.Module):
         k90 = torch.randint(0, 4, ()).item()
         # Get a random selection of spatial dims (ranging from [] to [2, 3, ..., example.ndim - 1]
         flip_dims_binary = torch.randint(0, 2, (ndim - 2,))
-        flip_dims = (torch.nonzero(flip_dims_binary).squeeze(1) + 2).tolist()
+        flip_dims = (torch.nonzero(flip_dims_binary, as_tuple=False).squeeze(1) + 2).tolist()
 
         @torch.no_grad()
         def augment(x: torch.Tensor) -> torch.Tensor:
