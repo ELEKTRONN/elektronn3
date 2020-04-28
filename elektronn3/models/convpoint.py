@@ -314,12 +314,13 @@ class SegSmall(nn.Module):
         x2d = self.act(apply_bn(x2d, self.bn2d))
         x2d = torch.cat([x2d, x2], dim=2)
 
-        x2d = self.drop(x2d)
-        x1d, _ = self.cv1d(x2d, pts2, 32, output_pts)
+        x1d, _ = self.cv1d(x2d, pts2, 8, output_pts)
         x1d = self.act(apply_bn(x1d, self.bn1d))
 
         xout, _ = self.cvout(x1d, output_pts, 8)
         xout = self.act(apply_bn(xout, self.bnout))
+        xout = self.drop(xout)
+
         xout = xout.view(-1, xout.size(2))
         xout = self.fcout(xout)
         xout = xout.view(x.size(0), -1, xout.size(1))
@@ -479,8 +480,9 @@ class ModelNet40(nn.Module):
             self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
             self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=track_running_stats)
         elif use_norm == 'gn':
-            self.bn2 = nn.GroupNorm(pl // 2, pl)
-            self.bn3 = nn.GroupNorm(pl, 2 * pl)
+            self.bn1 = nn.GroupNorm(pl // 2, pl)
+            self.bn2 = nn.GroupNorm(pl, 2 * pl)
+            self.bn3 = nn.GroupNorm(2 * pl, 4 * pl)
             self.bn4 = nn.GroupNorm(2 * pl, 4 * pl)
             self.bn5 = nn.GroupNorm(4 * pl, 8 * pl)
         else:

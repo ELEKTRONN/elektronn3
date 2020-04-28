@@ -52,7 +52,7 @@ class InferenceModel(object):
         self.model.to(self.device)
 
     def predict_proba(self, inp: np.ndarray, bs: Optional[int] = None,
-                        verbose: bool = False):
+                      verbose: bool = False):
         """
 
         Args:

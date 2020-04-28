@@ -377,7 +377,7 @@ class Trainer3d:
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
                 self.valid_dataset, batch_size=self.batchsize, shuffle=True,
-                timeout=960 if self.num_workers > 0 else 0, num_workers=0,
+                timeout=960 if self.num_workers > 0 else 0, num_workers=self.num_workers,
                 pin_memory=True, worker_init_fn=_worker_init_fn, **dataloader_kwargs)
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
