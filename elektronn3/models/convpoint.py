@@ -21,6 +21,7 @@ try:
     from torch_geometric.nn import XConv, fps, global_mean_pool
 except ImportError as e:
     print('XConv layer not available.', e)
+from pytorch3d.ops import knn
 
 # STATIC HELPER FUNCTIONS #
 
@@ -75,6 +76,126 @@ class LayerBase(nn.Module, ABC):
 
     def __init__(self):
         super(LayerBase, self).__init__()
+
+
+class PtConv_PT3d(LayerBase):
+    def __init__(self, input_features, output_features, n_centers, dim,
+                 act=None, use_bias=True):
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
+        super(PtConv_PT3d, self).__init__()
+
+        # Weight
+        self.weight = \
+            nn.Parameter(torch.Tensor(input_features, n_centers, output_features), requires_grad=True)
+        bound = math.sqrt(3.0) * math.sqrt(2.0 / (input_features + output_features))
+        self.weight.data.uniform_(-bound, bound)
+
+        # bias
+        self.use_bias = use_bias
+        if use_bias:
+            self.bias = nn.Parameter(torch.Tensor(output_features), requires_grad=True)
+            self.bias.data.uniform_(0, 0)
+
+        # centers
+        center_data = np.zeros((dim, n_centers))
+        for i in range(n_centers):
+            coord = np.random.rand(dim)*2 - 1
+            while (coord**2).sum() > 1:
+                coord = np.random.rand(dim)*2 - 1
+            center_data[:, i] = coord
+        self.centers = nn.Parameter(torch.from_numpy(center_data).float(), requires_grad=True)
+
+        # MLP
+        self.l1 = nn.Linear(dim*n_centers, 2*n_centers)
+        self.l2 = nn.Linear(2*n_centers, n_centers)
+        self.l3 = nn.Linear(n_centers, n_centers)
+
+    def forward(self, inp, points, K, next_pts=None, normalize=False, indices_=None,
+                return_indices=False, dilation=1):
+        if indices_ is None:
+            if isinstance(next_pts, int) and points.size(1) != next_pts:
+                # TODO: use a better heuristic
+                rand_ixs = torch.randint(points.size(1), (points.size(0), next_pts, 1)).to('cuda').to(torch.long)
+                next_pts_ = torch.gather(points, 1, rand_ixs.expand(-1, -1, 3)).to('cuda')
+                del rand_ixs
+                _, indices, _ = knn.knn_points(next_pts_, points, K=K * dilation)
+            elif (next_pts is None) or (isinstance(next_pts, int) and points.size(1) == next_pts):
+                # convolution without reduction
+                _, indices, _ = knn.knn_points(points, points, K=K * dilation)
+                next_pts_ = points
+            else:
+                # convolution with up sampling or projection on given points
+                _, indices, _ = knn.knn_points(next_pts, points, K=K * dilation)
+
+            if next_pts is None or isinstance(next_pts, int):
+                next_pts = next_pts_
+
+            if return_indices:
+                indices_ = indices
+        else:
+            indices = indices_
+
+        batch_size = inp.size(0)
+        n_pts = inp.size(1)
+
+        if dilation > 1:
+            indices = indices[:, :, torch.randperm(indices.size(2))]
+            indices = indices[:, :, :K]
+
+        # compute indices for indexing points
+        add_indices = torch.arange(batch_size).type(indices.type()).to(indices.device) * n_pts
+        indices = indices + add_indices.view(-1, 1, 1)
+
+        # get the features and point cooridnates associated with the indices
+        features = inp.view(-1, inp.size(2))[indices]
+        pts = points.view(-1, points.size(2))[indices]
+
+        # center the neighborhoods
+        pts = pts - next_pts.unsqueeze(2)
+
+        # normalize to unit ball, or not
+        if normalize:
+            maxi = torch.sqrt((pts.detach()**2).sum(3).max(2)[0])  # detach is a modificaiton
+            maxi[maxi == 0] = 1
+            pts = pts / maxi.view(maxi.size()+(1, 1,))
+
+        # compute the distances
+        dists = pts.view(pts.size()+(1,)) - self.centers
+        dists = dists.view(dists.size(0), dists.size(1), dists.size(2), -1)
+        dists = self.act(self.l1(dists))
+        dists = self.act(self.l2(dists))
+        dists = self.act(self.l3(dists))
+
+        # compute features
+        fs = features.size()
+        features = features.transpose(2, 3)
+        features = features.view(-1, features.size(2), features.size(3))
+        dists = dists.view(-1, dists.size(2), dists.size(3))
+
+        features = torch.bmm(features, dists)
+
+        features = features.view(fs[0], fs[1], -1)
+
+        features = torch.matmul(features, self.weight.view(-1, self.weight.size(2)))
+        features = features / fs[2]
+
+        # add a bias
+        if self.use_bias:
+            features = features + self.bias
+
+        if return_indices:
+            return features, next_pts, indices_
+        else:
+            return features, next_pts
 
 
 class PtConv(LayerBase):
@@ -461,6 +582,84 @@ class ModelNet40(nn.Module):
         self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension, act=act)
         self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension, act=act)
         self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension, act=act)
+
+        # last layer
+        self.lin1 = nn.Linear(8 * pl, 2 * pl)
+        self.lin2 = nn.Linear(2 * pl, output_channels)
+
+        # normalization
+        if not use_norm:
+            self.bn1 = identity
+            self.bn2 = identity
+            self.bn3 = identity
+            self.bn4 = identity
+            self.bn5 = identity
+        elif use_norm == 'bn':
+            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=track_running_stats)
+        elif use_norm == 'gn':
+            self.bn1 = nn.GroupNorm(pl // 2, pl)
+            self.bn2 = nn.GroupNorm(pl, 2 * pl)
+            self.bn3 = nn.GroupNorm(2 * pl, 4 * pl)
+            self.bn4 = nn.GroupNorm(2 * pl, 4 * pl)
+            self.bn5 = nn.GroupNorm(4 * pl, 8 * pl)
+        else:
+            raise ValueError
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, pts):
+        x, pts = self.cv1(x, pts, 32, 4096)
+        x = self.act(apply_bn(x, self.bn1))
+
+        x, pts = self.cv2(x, pts, 32, 1024)
+        x = self.act(apply_bn(x, self.bn2))
+
+        x, pts = self.cv3(x, pts, 16, 512)
+        x = self.act(apply_bn(x, self.bn3))
+
+        x, pts = self.cv4(x, pts, 16, 256)
+        x = self.act(apply_bn(x, self.bn4))
+
+        x, pts = self.cv5(x, pts, 16, 128)
+        x = self.act(apply_bn(x, self.bn5))
+        x = x.mean(1)  # calculate mean across points -> aggregate evidence
+
+        x = self.dropout(x)
+        x = self.lin1(x)
+        x = self.lin2(x)
+
+        return x
+
+
+class ModelNet40_PT3d(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3,
+                 dropout=0.1, use_norm='gn', track_running_stats=False,
+                 act=None):
+        super(ModelNet40_PT3d, self).__init__()
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
+        n_centers = 16
+        pl = 64
+        print(f'Using activation: {self.act}')
+        # convolutions
+        self.cv1 = PtConv_PT3d(input_channels, pl, n_centers, dimension, act=act)
+        self.cv2 = PtConv_PT3d(pl, 2 * pl, n_centers, dimension, act=act)
+        self.cv3 = PtConv_PT3d(2 * pl, 4 * pl, n_centers, dimension, act=act)
+        self.cv4 = PtConv_PT3d(4 * pl, 4 * pl, n_centers, dimension, act=act)
+        self.cv5 = PtConv_PT3d(4 * pl, 8 * pl, n_centers, dimension, act=act)
 
         # last layer
         self.lin1 = nn.Linear(8 * pl, 2 * pl)
