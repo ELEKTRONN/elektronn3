@@ -7,8 +7,8 @@
 # - If you encounter problems with CUDA versions (unwanted up-/downgrades,
 #   incompatible versions), make sure to pin the cudatoolkit package to
 #   a version that is known to work with your GPU driver, for example if
-#   you want to stay on CUDA 8.*, run the following commands:
-#       conda config --add pinned_packages 'cudatoolkit=8.*'
+#   you want to stay on CUDA 10.1, run the following commands:
+#       conda config --add pinned_packages 'cudatoolkit=10.1'
 #       conda update --all
 
 name: elektronn3
@@ -24,18 +24,16 @@ dependencies:
   - matplotlib >=3.1
   - numba >=0.45
   - tbb
-  - seaborn >=0.9
   - tqdm >=4.23
   - numpy >=1.17
   - scikit-learn >=0.21
   - scikit-image >=0.15
   - scipy >=1.3
-  - tensorboardx >=1.8
-  - pytorch >=1.2  # pytorch-cpu also works, but it's not recommended.
+  - tensorboardx >=2.0
+  - pytorch >=1.5  # pytorch-cpu also works, but it's not recommended.
 
   # Only required for running a tensorboard server:
-  - tensorflow >=1.13
-  - tensorboard >=1.13
+  - tensorboard >=2.1.1
 
   # For docs:
   - sphinx >=2.2

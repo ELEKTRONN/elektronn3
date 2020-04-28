@@ -8,13 +8,11 @@ numpy
 scipy
 #h5py
 matplotlib
-#seaborn
 #numba
 #scikit-learn
 #scikit-image
 #ipython
 tqdm
-pillow
 colorlog
 #tensorboardX
 

@@ -17,7 +17,6 @@ else:
         'numba',
         'ipython',
         'imageio',
-        'pillow',
         'colorlog',
         'tqdm',
         'scikit-learn',
