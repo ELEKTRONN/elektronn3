@@ -749,9 +749,6 @@ class UNet(nn.Module):
                 and inference not on small patches, but on complete images in
                 a single step.
     """
-
-    __constants__ = ['down_convs', 'up_convs']
-
     def __init__(
             self,
             in_channels: int = 1,
