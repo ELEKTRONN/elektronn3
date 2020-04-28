@@ -99,6 +99,8 @@ def confusion_matrix(
             ign_target = target == ignore
         else:
             ign_target = False  # Makes `& ~ign_target` a no-op
+        # Manual conversion to Tensor because of a type promotion regression in PyTorch 1.5
+        ign_target = torch.tensor(ign_target, dtype=torch.bool, device=device)
         neg_target = ~pos_target
 
         true_pos = (pos_pred & pos_target & ~ign_target).sum(dtype=dtype)
