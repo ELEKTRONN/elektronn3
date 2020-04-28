@@ -194,8 +194,10 @@ class RemapTargetIDs:
     def __call__(
             self,
             inp: np.ndarray,  # returned without modifications
-            target: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
+            target: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        if target is None:
+            return inp, target
         remapped_target = np.zeros_like(target)
         for changed_id, orig_id in enumerate(self.ids):
             if not self.reverse:
@@ -1078,7 +1080,8 @@ class AlbuSeg2d:
     def __call__(self, inp, target):
         assert inp.ndim == 3 and inp.shape[0] == 1
         if target is not None:
-            assert target.ndim == 2 and target.shape == inp.shape[1:]
+            if not (target.ndim == 2 and target.shape == inp.shape[1:]):
+                raise ValueError(f'Shapes not supported. inp: {inp.shape}, target: {target.shape}')
             augmented = self.albu(image=inp[0], mask=target)  # Strip C dimension
             atarget = np.array(augmented['mask'], dtype=target.dtype)
         else:
