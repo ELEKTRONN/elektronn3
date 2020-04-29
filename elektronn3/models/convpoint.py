@@ -21,7 +21,10 @@ try:
     from torch_geometric.nn import XConv, fps, global_mean_pool
 except ImportError as e:
     print('XConv layer not available.', e)
-from pytorch3d.ops import knn
+try:
+    from pytorch3d.ops import knn
+except ImportError as e:
+    print('pytorch3d.ops not available.', e)
 
 # STATIC HELPER FUNCTIONS #
 
@@ -78,6 +81,28 @@ class LayerBase(nn.Module, ABC):
         super(LayerBase, self).__init__()
 
 
+@torch.jit.script
+def indices_conv_reduction_pt(input_pts: torch.Tensor, K: int, npts: int):
+    device = input_pts.device
+    # TODO: use a better heuristic
+    rand_ixs = torch.randint(input_pts.size(1), (input_pts.size(0), npts, 1), dtype=torch.long, device=device)
+    next_pts_ = torch.gather(input_pts, 1, rand_ixs.expand(-1, -1, 3)).to(device)
+    _, indices, _ = knn.knn_points(next_pts_, input_pts, K=K)
+    return indices, next_pts_
+
+
+@torch.jit.script
+def indices_conv_pt(input_pts, K):
+    _, indices, _ = knn.knn_points(input_pts, input_pts, K=K)
+    return indices, input_pts
+
+
+@torch.jit.script
+def indices_deconv_pt(input_pts, next_pts, K):
+    _, indices, _ = knn.knn_points(next_pts, input_pts, K=K)
+    return indices, next_pts
+
+
 class PtConv_PT3d(LayerBase):
     def __init__(self, input_features, output_features, n_centers, dim,
                  act=None, use_bias=True):
@@ -119,30 +144,21 @@ class PtConv_PT3d(LayerBase):
         self.l2 = nn.Linear(2*n_centers, n_centers)
         self.l3 = nn.Linear(n_centers, n_centers)
 
-    def forward(self, inp, points, K, next_pts=None, normalize=False, indices_=None,
-                return_indices=False, dilation=1):
-        if indices_ is None:
-            if isinstance(next_pts, int) and points.size(1) != next_pts:
-                # TODO: use a better heuristic
-                rand_ixs = torch.randint(points.size(1), (points.size(0), next_pts, 1)).to('cuda').to(torch.long)
-                next_pts_ = torch.gather(points, 1, rand_ixs.expand(-1, -1, 3)).to('cuda')
-                del rand_ixs
-                _, indices, _ = knn.knn_points(next_pts_, points, K=K * dilation)
-            elif (next_pts is None) or (isinstance(next_pts, int) and points.size(1) == next_pts):
-                # convolution without reduction
-                _, indices, _ = knn.knn_points(points, points, K=K * dilation)
-                next_pts_ = points
-            else:
-                # convolution with up sampling or projection on given points
-                _, indices, _ = knn.knn_points(next_pts, points, K=K * dilation)
-
-            if next_pts is None or isinstance(next_pts, int):
-                next_pts = next_pts_
-
-            if return_indices:
-                indices_ = indices
+    def forward(self, inp, points, K, next_pts=None, normalize=False, dilation=1):
+        if normalize:
+            raise NotImplementedError
+        device = inp.device
+        if isinstance(next_pts, int) and points.size(1) != next_pts:
+            indices, next_pts_ = indices_conv_reduction(points, K * dilation, next_pts)
+        elif (next_pts is None) or (isinstance(next_pts, int) and points.size(1) == next_pts):
+            # convolution without reduction
+            indices, next_pts_ = indices_conv(points, K * dilation)
         else:
-            indices = indices_
+            # convolution with up sampling or projection on given points
+            indices, next_pts_ = indices_deconv(points, next_pts, K*dilation)
+
+        if next_pts is None or isinstance(next_pts, int):
+            next_pts = next_pts_
 
         batch_size = inp.size(0)
         n_pts = inp.size(1)
@@ -152,7 +168,7 @@ class PtConv_PT3d(LayerBase):
             indices = indices[:, :, :K]
 
         # compute indices for indexing points
-        add_indices = torch.arange(batch_size).type(indices.type()).to(indices.device) * n_pts
+        add_indices = torch.arange(batch_size, dtype=torch.long).to(device) * n_pts
         indices = indices + add_indices.view(-1, 1, 1)
 
         # get the features and point cooridnates associated with the indices
@@ -162,11 +178,11 @@ class PtConv_PT3d(LayerBase):
         # center the neighborhoods
         pts = pts - next_pts.unsqueeze(2)
 
-        # normalize to unit ball, or not
-        if normalize:
-            maxi = torch.sqrt((pts.detach()**2).sum(3).max(2)[0])  # detach is a modificaiton
-            maxi[maxi == 0] = 1
-            pts = pts / maxi.view(maxi.size()+(1, 1,))
+        # # normalize to unit ball, or not
+        # if normalize:
+        #     maxi = torch.sqrt((pts.detach()**2).sum(3).max(2)[0])  # detach is a modificaiton
+        #     maxi[maxi == 0] = 1
+        #     pts = pts / maxi.view(maxi.size()+(1, 1,))
 
         # compute the distances
         dists = pts.view(pts.size()+(1,)) - self.centers
@@ -192,10 +208,7 @@ class PtConv_PT3d(LayerBase):
         if self.use_bias:
             features = features + self.bias
 
-        if return_indices:
-            return features, next_pts, indices_
-        else:
-            return features, next_pts
+        return features, next_pts
 
 
 class PtConv(LayerBase):
@@ -244,13 +257,13 @@ class PtConv(LayerBase):
         if indices_ is None:
             if isinstance(next_pts, int) and points.size(1) != next_pts:
                 # convolution with reduction
-                indices, next_pts_ = indices_conv_reduction(points, K * dilation, next_pts)
+                indices, next_pts_ = indices_conv_reduction_pt(points, K * dilation, next_pts)
             elif (next_pts is None) or (isinstance(next_pts, int) and points.size(1) == next_pts):
                 # convolution without reduction
-                indices, next_pts_ = indices_conv(points, K * dilation)
+                indices, next_pts_ = indices_conv_pt(points, K * dilation)
             else:
                 # convolution with up sampling or projection on given points
-                indices, next_pts_ = indices_deconv(points, next_pts, K * dilation)
+                indices, next_pts_ = indices_deconv_pt(points, next_pts, K * dilation)
 
             if next_pts is None or isinstance(next_pts, int):
                 next_pts = next_pts_
