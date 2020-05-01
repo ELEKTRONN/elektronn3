@@ -490,6 +490,16 @@ class Trainer3d:
             if (i+1) % self.nbatch_avg == 0:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+                # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
+                misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
+                # update schedules
+                for sched in self.schedulers.values():
+                    # support ReduceLROnPlateau; doc. uses validation loss instead
+                    # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
+                    if "metrics" in inspect.signature(sched.step).parameters:
+                        sched.step(metrics=loss)
+                    else:
+                        sched.step()
             # End of core training loop on self.device
 
             with torch.no_grad():
@@ -515,16 +525,6 @@ class Trainer3d:
                 batch_iter.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
-            # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
-            misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
-            # update schedules
-            for sched in self.schedulers.values():
-                # support ReduceLROnPlateau; doc. uses validation loss instead
-                # http://pytorch.org/docs/master/optim.html#torch.optim.lr_scheduler.ReduceLROnPlateau
-                if "metrics" in inspect.signature(sched.step).parameters:
-                    sched.step(metrics=loss)
-                else:
-                    sched.step()
             # Append LR of the next iteration (after sched.step()) for local LR minima detection
             self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])
             self._handle_lr()
