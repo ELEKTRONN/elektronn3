@@ -72,42 +72,33 @@ class InferenceModel(object):
         # get output shape shape
         if type(inp) is tuple:
             with torch.no_grad():
-                out = self.model(*(torch.Tensor(ii[:2]).to(torch.float32).to(self.device) for ii in inp))
+                out = self.model(*(torch.tensor(ii[:2], dtype=torch.float32, device=self.device) for ii in inp))
             n_samples = len(inp[0])
         else:
             with torch.no_grad():
-                out = self.model(torch.Tensor(inp[:2]).to(torch.float32).to(self.device))
+                out = self.model(torch.tensor(inp[:2], dtype=torch.float32, device=self.device))
             n_samples = len(inp)
         # change sample number according to input
         if type(out) is tuple:
-            out = tuple(np.zeros([n_samples] + list(out[ii].shape)[1:],
+            out = tuple(np.empty([n_samples] + list(out[ii].shape)[1:],
                            dtype=np.float32) for ii in range(len(out)))
         else:
-            out = np.zeros([n_samples] + list(out.shape)[1:], dtype=np.float32)
+            out = np.empty([n_samples] + list(out.shape)[1:], dtype=np.float32)
         for ii in range(0, int(np.ceil(n_samples / bs))):
             low = bs * ii
             high = bs * (ii + 1)
-            if type(inp) is tuple:
-                inp_stride = tuple(torch.Tensor(ii[low:high]).to(torch.float32).to(self.device) for ii in inp)
-                with torch.no_grad():
+            with torch.no_grad():
+                if type(inp) is tuple:
+                    inp_stride = tuple(torch.tensor(ii[low:high], dtype=torch.float32, device=self.device) for ii in inp)
                     res = self.model(*inp_stride)
-            else:
-                inp_stride = torch.Tensor(inp[low:high]).to(torch.float32).to(self.device)
-                with torch.no_grad():
+                else:
+                    inp_stride = torch.tensor(inp[low:high], dtype=torch.float32, device=self.device)
                     res = self.model(inp_stride)
-            if type(res) is tuple:
-                for ii in range(len(res)):
-                    out[ii][low:high] = res[ii].detach().cpu()
-            else:
-                out[low:high] = res.detach().cpu()
-            if type(inp_stride) is tuple:
-                for el in inp_stride:
-                    el.detach_()
-            else:
-                inp_stride.detach_()
-            del inp_stride
-            del res
-            torch.cuda.empty_cache()
+                if type(res) is tuple:
+                    for ii in range(len(res)):
+                        out[ii][low:high] = res[ii].cpu().numpy()
+                else:
+                    out[low:high] = res.cpu().numpy()
         assert high >= n_samples, "Prediction less samples then given in input."
         if verbose:
             dtime = time.time() - start
@@ -137,7 +128,10 @@ def load_model(src: str) -> nn.Module:
                                    "Ill-defined trainer script."
     exec(open(train_script[0]).read(), globals())
     assert "get_model" in globals(), "'get_model' not defiend in trainer script."
-    model = get_model()
+    try:
+        model = get_model(requires_grad=False)
+    except TypeError as e:
+        model = get_model()
     state_dict_p = glob.glob(f'{src}/*.pth')
     if len(state_dict_p) > 1:
         last_p = ["state_dict.pth" in sp for sp in state_dict_p]
