@@ -44,10 +44,6 @@ parser.add_argument(
     '-r', '--resume', metavar='PATH',
     help='Path to pretrained model state dict from which to resume training.'
 )
-parser.add_argument(
-    '-d', '--disable-trace', action='store_true',
-    help='Disable tracing JIT compilation of the model.'
-)
 parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
 parser.add_argument(
     '--deterministic', action='store_true',
@@ -79,13 +75,9 @@ model = UNet(
     n_blocks=4,
     start_filts=32,
     activation='relu',
-    batch_norm=True,
+    normalization='batch',
     dim=2
 ).to(device)
-if not args.disable_trace:
-    x = torch.randn(1, 1, 64, 64, device=device)
-    model = torch.jit.trace(model, x)
-
 
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
@@ -153,6 +145,7 @@ trainer = Trainer(
     num_workers=1,
     save_root=save_root,
     exp_name=args.exp_name,
+    save_jit='script',
     schedulers={"lr": lr_sched},
     valid_metrics=valid_metrics,
     out_channels=out_channels,
