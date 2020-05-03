@@ -42,7 +42,7 @@ def plot_image(
         cmap=None,
         out_channels=None,
         colorbar=True,
-        filename='',
+        filename=None,
         vmin=None,
         vmax=None
 ) -> matplotlib.figure.Figure:
@@ -82,7 +82,7 @@ def plot_image(
         ax.imshow(image, cmap='gray')
         masked_overlay = np.ma.masked_where(overlay == 0, overlay)
         aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha)
-    ax.set_title(filename)
+    ax.set_title(filename if filename is not None else None)
     if colorbar:
         bar = fig.colorbar(aximg, ticks=ticks)
         if ticklabels is not None:
@@ -220,7 +220,8 @@ def _tb_log_sample_images(
     if target_batch is not None:
         target_batch = target_batch[:1]
     out_batch = images['out'][:1]
-    name = images.get('fname', '')
+    name = images.get('fname', [None])[0]
+
 
     if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()

@@ -548,6 +548,7 @@ class Trainer:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
                 images['inp'] = batch['inp'].numpy()
+                images['fname'] = batch.get('fname')
                 if 'target' in batch:
                     images['target'] = batch['target'].numpy()
                 if 'unlabeled' in batch:
@@ -690,7 +691,8 @@ class Trainer:
         images = {
             'inp': inp.numpy(),
             'out': out.numpy(),
-            'target': None if target is None else target.numpy()
+            'target': None if target is None else target.numpy(),
+            'fname': batch.get('fname'),
         }
         self._put_current_attention_maps_into(images)
 
