@@ -146,7 +146,7 @@ def _channelwise_sum(x: torch.Tensor):
 
 
 # TODO: Dense weight support
-def dice_loss(probs, target, weight=1., eps=0.0001):
+def dice_loss(probs, target, weight=1., eps=0.0001, smooth=0.):
     # Probs need to be softmax probabilities, not raw network outputs
     tsh, psh = target.shape, probs.shape
 
@@ -165,9 +165,9 @@ def dice_loss(probs, target, weight=1., eps=0.0001):
     #     weight[:, ignore_index] = 0.
 
     intersection = probs * onehot_target  # (N, C, ...)
-    numerator = 2 * _channelwise_sum(intersection)  # (C,)
+    numerator = 2 * _channelwise_sum(intersection) + smooth  # (C,)
     denominator = probs + onehot_target  # (N, C, ...)
-    denominator = _channelwise_sum(denominator) + eps  # (C,)
+    denominator = _channelwise_sum(denominator) + smooth + eps  # (C,)
     loss_per_channel = 1 - (numerator / denominator)  # (C,)
     weighted_loss_per_channel = weight * loss_per_channel  # (C,)
     return weighted_loss_per_channel.mean()  # ()
@@ -192,8 +192,15 @@ class DiceLoss(torch.nn.Module):
             probabilities.
         weight: Weight tensor for class-wise loss rescaling.
             Has to be of shape (C,). If ``None``, classes are weighted equally.
+        smooth: Smoothing term that is added to both the numerator and the
+            denominator of the dice loss formula.
     """
-    def __init__(self, apply_softmax=True, weight=torch.tensor(1.)):
+    def __init__(
+            self,
+            apply_softmax: bool = True,
+            weight: torch.Tensor = torch.tensor(1.),
+            smooth: float = 0.
+    ):
         super().__init__()
         if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
@@ -201,10 +208,11 @@ class DiceLoss(torch.nn.Module):
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
         self.register_buffer('weight', weight)
+        self.smooth = smooth
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.dice(probs, target, weight=self.weight)
+        return self.dice(probs, target, weight=self.weight, smooth=self.smooth)
 
 
 # TODO: There is some low-hanging fruit for performance optimization
