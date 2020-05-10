@@ -1002,12 +1002,13 @@ class RandomRotate2d:
         angle = np.random.uniform(*self.angle_range)
         rot_opts = {'angle': angle, 'preserve_range': True, 'mode': 'reflect'}
 
-        if target.ndim == inp.ndim - 1:  # Implicit (no) channel dimension
-            target_c = False
-        elif target.ndim == inp.ndim:  # Explicit channel dimension
-            target_c = True
-        else:
-            raise ValueError('Target dimension not understood.')
+        if target is not None:
+            if target.ndim == inp.ndim - 1:  # Implicit (no) channel dimension
+                target_c = False
+            elif target.ndim == inp.ndim:  # Explicit channel dimension
+                target_c = True
+            else:
+                raise ValueError('Target dimension not understood.')
 
         def rot(inp, target):
             """Rotate in 2D space"""
@@ -1022,18 +1023,22 @@ class RandomRotate2d:
             else:
                 target = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)
             return inp, target
-        
+
         if inp.ndim == 3:  # 2D case
             rinp, rtarget = rot(inp, target)
         else:  # 3D case: Rotate each z slice separately by the same angle
             rinp = np.empty_like(inp)
-            rtarget = np.empty_like(target)
-            for z in range(rinp.shape[1]):
-                if target_c:
-                    rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
-                else:
-                    rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
-
+            if target is not None:
+                rtarget = np.empty_like(target)
+                for z in range(rinp.shape[1]):
+                    if target_c:
+                        rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
+                    else:
+                        rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
+            else:
+                for z in range(rinp.shape[1]):
+                    rinp[:, z], _ = rot(inp[:, z], None)
+                rtarget = None
         return rinp, rtarget
 
 
