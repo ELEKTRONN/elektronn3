@@ -23,6 +23,27 @@ except ImportError as e:
     print('XConv layer not available.', e)
 try:
     from pytorch3d.ops import knn
+
+    @torch.jit.script
+    def indices_conv_reduction_pt(input_pts: torch.Tensor, K: int, npts: int):
+        device = input_pts.device
+        # TODO: use a better heuristic
+        rand_ixs = torch.randint(input_pts.size(1), (input_pts.size(0), npts, 1), dtype=torch.long, device=device)
+        next_pts_ = torch.gather(input_pts, 1, rand_ixs.expand(-1, -1, 3)).to(device)
+        _, indices, _ = knn.knn_points(next_pts_, input_pts, K=K)
+        return indices, next_pts_
+
+
+    @torch.jit.script
+    def indices_conv_pt(input_pts, K):
+        _, indices, _ = knn.knn_points(input_pts, input_pts, K=K)
+        return indices, input_pts
+
+
+    @torch.jit.script
+    def indices_deconv_pt(input_pts, next_pts, K):
+        _, indices, _ = knn.knn_points(next_pts, input_pts, K=K)
+        return indices, next_pts
 except ImportError as e:
     print('pytorch3d.ops not available.', e)
 
@@ -79,28 +100,6 @@ class LayerBase(nn.Module, ABC):
 
     def __init__(self):
         super(LayerBase, self).__init__()
-
-
-@torch.jit.script
-def indices_conv_reduction_pt(input_pts: torch.Tensor, K: int, npts: int):
-    device = input_pts.device
-    # TODO: use a better heuristic
-    rand_ixs = torch.randint(input_pts.size(1), (input_pts.size(0), npts, 1), dtype=torch.long, device=device)
-    next_pts_ = torch.gather(input_pts, 1, rand_ixs.expand(-1, -1, 3)).to(device)
-    _, indices, _ = knn.knn_points(next_pts_, input_pts, K=K)
-    return indices, next_pts_
-
-
-@torch.jit.script
-def indices_conv_pt(input_pts, K):
-    _, indices, _ = knn.knn_points(input_pts, input_pts, K=K)
-    return indices, input_pts
-
-
-@torch.jit.script
-def indices_deconv_pt(input_pts, next_pts, K):
-    _, indices, _ = knn.knn_points(next_pts, input_pts, K=K)
-    return indices, next_pts
 
 
 class PtConv_PT3d(LayerBase):
@@ -257,13 +256,13 @@ class PtConv(LayerBase):
         if indices_ is None:
             if isinstance(next_pts, int) and points.size(1) != next_pts:
                 # convolution with reduction
-                indices, next_pts_ = indices_conv_reduction_pt(points, K * dilation, next_pts)
+                indices, next_pts_ = indices_conv_reduction(points, K * dilation, next_pts)
             elif (next_pts is None) or (isinstance(next_pts, int) and points.size(1) == next_pts):
                 # convolution without reduction
-                indices, next_pts_ = indices_conv_pt(points, K * dilation)
+                indices, next_pts_ = indices_conv(points, K * dilation)
             else:
                 # convolution with up sampling or projection on given points
-                indices, next_pts_ = indices_deconv_pt(points, next_pts, K * dilation)
+                indices, next_pts_ = indices_deconv(points, next_pts, K * dilation)
 
             if next_pts is None or isinstance(next_pts, int):
                 next_pts = next_pts_
@@ -275,6 +274,7 @@ class PtConv(LayerBase):
 
         batch_size = inp.size(0)
         n_pts = inp.size(1)
+
 
         if dilation > 1:
             indices = indices[:, :, torch.randperm(indices.size(2))]
@@ -330,6 +330,134 @@ class PtConv(LayerBase):
 ################################
 # SMALL SEGMENTATION NETWORK
 ################################
+class SegSmall2(nn.Module):
+    def __init__(self, input_channels, output_channels, dimension=3, dropout=0,
+                 act=None, use_bias=True, track_running_stats=False, use_norm=False):
+        super(SegSmall2, self).__init__()
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
+
+        n_centers = 16
+
+        pl = 64
+        self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+
+        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+
+        self.cvout = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
+        self.fcout = nn.Linear(pl, output_channels)
+
+        if use_norm is False:
+            self.bn = identity
+            self.bn2 = identity
+            self.bn3 = identity
+            self.bn4 = identity
+            self.bn5 = identity
+            self.bn6 = identity
+
+            self.bn5d = identity
+            self.bn4d = identity
+            self.bn3d = identity
+            self.bn2d = identity
+            self.bn1d = identity
+
+            self.bnout = identity
+        elif use_norm == 'bn':
+            self.bn2 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn6 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+
+            self.bn5d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+
+            self.bn1d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+
+            self.bnout = nn.BatchNorm1d(pl)
+        elif use_norm == 'gn':
+            self.bn2 = nn.GroupNorm(pl // 2, pl)
+            self.bn3 = nn.GroupNorm(pl // 2, pl)
+            self.bn4 = nn.GroupNorm(pl, 2 * pl)
+            self.bn5 = nn.GroupNorm(pl, 2 * pl)
+            self.bn6 = nn.GroupNorm(pl, 2 * pl)
+
+            self.bn5d = nn.GroupNorm(pl, 2 * pl)
+            self.bn4d = nn.GroupNorm(pl, 2 * pl)
+            self.bn3d = nn.GroupNorm(pl // 2, pl)
+            self.bn2d = nn.GroupNorm(pl // 2, pl)
+            self.bn1d = nn.GroupNorm(pl // 2, pl)
+
+            self.bnout = nn.GroupNorm(pl // 2, pl)
+        else:
+            raise ValueError
+
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, input_pts, output_pts=None):
+        if output_pts is None:
+            output_pts = input_pts
+        x2, pts2 = self.cv2(x, input_pts, 24, 2048)
+        x2 = self.act(apply_bn(x2, self.bn2))
+
+        x3, pts3 = self.cv3(x2, pts2, 32, 512)
+        x3 = self.act(apply_bn(x3, self.bn3))
+
+        x4, pts4 = self.cv4(x3, pts3, 16, 128)
+        x4 = self.act(apply_bn(x4, self.bn4))
+
+        x5, pts5 = self.cv5(x4, pts4, 8, 32)
+        x5 = self.act(apply_bn(x5, self.bn5))
+
+        x6, pts6 = self.cv6(x5, pts5, 4, 8)
+        x6 = self.act(apply_bn(x6, self.bn6))
+
+        x5d, _ = self.cv5d(x6, pts6, 4, pts5)
+        x5d = self.act(apply_bn(x5d, self.bn5d))
+        x5d = torch.cat([x5d, x5], dim=2)
+
+        x4d, _ = self.cv4d(x5d, pts5, 4, pts4)
+        x4d = self.act(apply_bn(x4d, self.bn4d))
+        x4d = torch.cat([x4d, x4], dim=2)
+
+        x3d, _ = self.cv3d(x4d, pts4, 4, pts3)
+        x3d = self.act(apply_bn(x3d, self.bn3d))
+        x3d = torch.cat([x3d, x3], dim=2)
+
+        x2d, _ = self.cv2d(x3d, pts3, 8, pts2)
+        x2d = self.act(apply_bn(x2d, self.bn2d))
+        x2d = torch.cat([x2d, x2], dim=2)
+
+        x1d, _ = self.cv1d(x2d, pts2, 16, output_pts)
+        x1d = self.act(apply_bn(x1d, self.bn1d))
+
+        xout, _ = self.cvout(x1d, output_pts, 16)
+        xout = self.act(apply_bn(xout, self.bnout))
+        xout = self.drop(xout)
+
+        xout = xout.view(-1, xout.size(2))
+        xout = self.fcout(xout)
+        xout = xout.view(x.size(0), -1, xout.size(1))
+
+        return xout
 
 
 class SegSmall(nn.Module):

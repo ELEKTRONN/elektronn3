@@ -5,6 +5,7 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
 from collections import deque
+import seaborn as sns
 
 import math
 import gc
@@ -543,9 +544,13 @@ class Trainer3d:
             if self.terminate:
                 break
 
+        n_classes = out.size(-1)
+        current_palette = sns.color_palette('bright', n_classes)
+        target_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_classes)}
+        n_feats = features.size(-1)
+        current_palette = sns.color_palette('bright', n_feats)
+        feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
         if pts is not None:
-            n_feats = features.size(-1)
-            feat_cols = {ii: torch.randint(255, (3, )) for ii in range(n_feats)}
 
             cols = torch.zeros(pts.size(), dtype=torch.long)
             for ii in range(n_feats):
@@ -553,8 +558,6 @@ class Trainer3d:
             self.tb.add_mesh('tr_inp', pts, cols, global_step=self.step)
 
         if dtarget_pts is not None:
-            n_classes = out.size(-1)
-            target_cols = {ii: torch.randint(255, (3, )) for ii in range(n_classes)}
             cols = torch.zeros(target_pts.size(), dtype=torch.long)
             for ii in range(n_classes):
                 cols[target.squeeze(-1) == ii] = target_cols[ii]
@@ -663,18 +666,20 @@ class Trainer3d:
             targets = torch.cat(targets)
             for name, evaluator in self.valid_metrics.items():
                 stats[name].append(evaluator(targets, torch.cat(outs)))
-            if pts is not None:
-                n_feats = features.size(-1)
-                feat_cols = {ii: torch.randint(255, (3,)) for ii in range(n_feats)}
 
+            n_classes = out.size(-1)
+            current_palette = sns.color_palette('bright', n_classes)
+            target_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_classes)}
+            n_feats = features.size(-1)
+            current_palette = sns.color_palette('bright', n_feats)
+            feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
+            if pts is not None:
                 cols = torch.zeros(pts.size(), dtype=torch.long)
                 for ii in range(n_feats):
                     cols[features[..., ii] == 1] = feat_cols[ii]
                 self.tb.add_mesh('val_inp', pts, cols, global_step=self.step)
 
             if dtarget_pts is not None:
-                n_classes = out.size(-1)
-                target_cols = {ii: torch.randint(255, (3,)) for ii in range(n_classes)}
                 cols = torch.zeros(target_pts.size(), dtype=torch.long)
                 for ii in range(n_classes):
                     cols[target.squeeze(-1) == ii] = target_cols[ii]
