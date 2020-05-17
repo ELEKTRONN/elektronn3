@@ -197,55 +197,112 @@ def get_activation(activation):
         return copy.deepcopy(activation)
 
 
-class DownConv(nn.Module):
-    """
-    A helper Module that performs 2 convolutions and 1 MaxPool.
-    A ReLU activation follows each convolution.
-    """
-    def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
+def get_padding(conv_mode, kernel_size):
+    if conv_mode == 'valid' or kernel_size == 1:
+        return 0
+    elif conv_mode == 'same' and kernel_size == 3:
+        return 1
+    else:
+        raise NotImplementedError(f'conv_mode {conv_mode} with kernel_size {kernel_size} unsupported.')
+
+
+class ConvBlock(nn.Module):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            planar=False,
+            activation='relu',
+            normalization=None,
+            dim=3,
+            conv_mode='same',
+            residual=False
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.normalization = normalization
+        self.conv_mode = conv_mode
+        self.activation = activation
+        self.residual = residual
+        self.dim = dim
+
+        padding = get_padding(conv_mode, kernel_size)
+        if planar:
+            padding = planar_pad(padding)
+            kernel_size = planar_kernel(kernel_size)
+        conv_class = get_conv(dim)
+
+        self.conv1 = conv_class(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.act1 = get_activation(activation)
+        self.conv2 = conv_class(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.act2 = get_activation(activation)
+        if self.residual and self.in_channels != self.out_channels:
+            # "Projection" to match number of channels for residual addition
+            self.proj = conv_class(in_channels, out_channels, kernel_size=1)
+        else:
+            self.proj = nn.Identity()
+
+    def forward(self, inp):
+        y = self.conv1(inp)
+        y = self.norm1(y)
+        y = self.act1(y)
+        y = self.conv2(y)
+        if self.residual:
+            y += self.proj(inp)
+        y = self.norm2(y)
+        y = self.act2(y)
+        return y
+
+
+class DownBlock(nn.Module):
+    def __init__(
+            self,
+            in_channels,
+            out_channels,
+            pooling=True,
+            planar=False,
+            activation='relu',
+            normalization=None,
+            dim=3,
+            conv_mode='same',
+            res_blocks=0,
+            skip_first_residual=False
+    ):
         super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.pooling = pooling
         self.normalization = normalization
+        self.res_blocks = res_blocks
         self.dim = dim
-        padding = 1 if 'same' in conv_mode else 0
 
-        self.conv1 = conv3(
-            self.in_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-        )
-        self.conv2 = conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-        )
+        enable_residual = res_blocks >= 1
 
-        if self.pooling:
-            kernel_size = 2
-            if planar:
-                kernel_size = planar_kernel(kernel_size)
-            self.pool = get_maxpool(dim)(kernel_size=kernel_size, ceil_mode=True)
-            self.pool_ks = kernel_size
+        convs = [ConvBlock(
+            self.in_channels, self.out_channels, planar=planar, activation=activation,
+            normalization=normalization, conv_mode=conv_mode,
+            residual=(enable_residual and not skip_first_residual)
+        )]
+        for _ in range(res_blocks - 1):  # -1 because we have already added one above
+            convs.append(ConvBlock(
+                self.out_channels, self.out_channels, planar=planar, activation=activation,
+                normalization=normalization, conv_mode=conv_mode, residual=enable_residual
+            ))
+        self.convs = nn.Sequential(*convs)
+
+        if pooling:
+            pool_ks = planar_kernel(2) if planar else 2
+            self.pool = get_maxpool(dim)(kernel_size=pool_ks, ceil_mode=True)
         else:
             self.pool = nn.Identity()
-            self.pool_ks = -123  # Bogus value, will never be read. Only to satisfy TorchScript's static type system
-
-        self.act1 = get_activation(activation)
-        self.act2 = get_activation(activation)
-
-        if full_norm:
-            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
-        else:
-            self.norm0 = nn.Identity()
-        self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
     def forward(self, x):
-        y = self.conv1(x)
-        y = self.norm0(y)
-        y = self.act1(y)
-        y = self.conv2(y)
-        y = self.norm1(y)
-        y = self.act2(y)
+        y = self.convs(x)
         before_pool = y
         y = self.pool(y)
         return y, before_pool
@@ -323,7 +380,7 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tens
     return from_down, from_up
 
 
-class UpConv(nn.Module):
+class UpBlock(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 UpConvolution.
     A ReLU activation follows each convolution.
@@ -334,7 +391,7 @@ class UpConv(nn.Module):
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
                  activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
-                 attention=False):
+                 attention=False, res_blocks=0):
         super().__init__()
 
         self.in_channels = in_channels
@@ -342,42 +399,37 @@ class UpConv(nn.Module):
         self.merge_mode = merge_mode
         self.up_mode = up_mode
         self.normalization = normalization
-        padding = 1 if 'same' in conv_mode else 0
+        self.res_blocks = res_blocks
+        self.dim = dim
+        enable_residual = res_blocks >= 1
 
-        self.upconv = upconv2(self.in_channels, self.out_channels,
-                              mode=self.up_mode, planar=planar, dim=dim)
-
-        if self.merge_mode == 'concat':
-            self.conv1 = conv3(
-                2*self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-            )
-        else:
-            # num of input channels to conv2 is same
-            self.conv1 = conv3(
-                self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-            )
-        self.conv2 = conv3(
-            self.out_channels, self.out_channels, planar=planar, dim=dim, padding=padding
-        )
-
+        self.upconv = upconv2(self.in_channels, self.out_channels, mode=self.up_mode, planar=planar, dim=dim)
         self.act0 = get_activation(activation)
-        self.act1 = get_activation(activation)
-        self.act2 = get_activation(activation)
+        self.norm0 = get_normalization(normalization, out_channels, dim=dim)
 
-        if full_norm:
-            self.norm0 = get_normalization(normalization, self.out_channels, dim=dim)
-            self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
-        else:
-            self.norm0 = nn.Identity()
-            self.norm1 = nn.Identity()
-        self.norm2 = get_normalization(normalization, self.out_channels, dim=dim)
         if attention:
-            self.attention = GridAttention(
-                in_channels=in_channels // 2, gating_channels=in_channels, dim=dim
-            )
+            self.attention = GridAttention(in_channels=in_channels // 2, gating_channels=in_channels, dim=dim)
         else:
             self.attention = DummyAttention()
         self.att = None  # Field to store attention mask for later analysis
+
+        if self.merge_mode == 'concat':
+            convs = [ConvBlock(
+                2 * self.out_channels, self.out_channels, planar=planar, activation=activation,
+                normalization=normalization, conv_mode=conv_mode, residual=enable_residual
+            )]
+        else:
+            # num of input channels to conv2 is same
+            convs = [ConvBlock(
+                self.out_channels, self.out_channels, planar=planar, activation=activation,
+                normalization=normalization, conv_mode=conv_mode, residual=enable_residual
+            )]
+        for _ in range(res_blocks - 1):  # -1 because we have already added one above
+            convs.append(ConvBlock(
+                self.out_channels, self.out_channels, planar=planar, activation=activation,
+                normalization=normalization, conv_mode=conv_mode, residual=enable_residual
+            ))
+        self.convs = nn.Sequential(*convs)
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -397,12 +449,7 @@ class UpConv(nn.Module):
             mrg = torch.cat((updec, genc), 1)
         else:
             mrg = updec + genc
-        y = self.conv1(mrg)
-        y = self.norm1(y)
-        y = self.act1(y)
-        y = self.conv2(y)
-        y = self.norm2(y)
-        y = self.act2(y)
+        y = self.convs(mrg)
         return y
 
 
@@ -652,6 +699,8 @@ class UNet(nn.Module):
             concatenation ('concat') generally leads to better model
             accuracy than 'add' in typical medical image segmentation
             tasks.
+        enc_res_blocks
+        dec_res_blocks
         planar_blocks: Each number i in this sequence leads to the i-th
             block being a "planar" block. This means that all image
             operations performed in the i-th block in the encoder pathway
@@ -694,12 +743,6 @@ class UNet(nn.Module):
         attention: If ``True``, use grid attention in the decoding pathway,
             as proposed in https://arxiv.org/abs/1804.03999.
             Default: ``False``.
-        full_norm: If ``True`` (default), perform normalization after each
-            (transposed) convolution in the network (which is what almost
-            all published neural network architectures do).
-            If ``False``, only normalize after the last convolution
-            layer of each block, in order to save resources. This was also
-            the default behavior before this option was introduced.
         dim: Spatial dimensionality of the network. Choices:
 
             - 3 (default): 3D mode. Every block fully works in 3D unless
@@ -757,6 +800,8 @@ class UNet(nn.Module):
             start_filts: int = 32,
             up_mode: str = 'transpose',
             merge_mode: str = 'concat',
+            enc_res_blocks: int = 0,
+            dec_res_blocks: int = 0,
             planar_blocks: Sequence = (),
             batch_norm: str = 'unset',
             attention: bool = False,
@@ -818,6 +863,8 @@ class UNet(nn.Module):
         self.attention = attention
         self.conv_mode = conv_mode
         self.activation = activation
+        self.enc_res_blocks = enc_res_blocks
+        self.dec_res_blocks = dec_res_blocks
         self.dim = dim
 
         self.down_convs = nn.ModuleList()
@@ -840,16 +887,17 @@ class UNet(nn.Module):
             pooling = True if i < n_blocks - 1 else False
             planar = i in self.planar_blocks
 
-            down_conv = DownConv(
+            down_conv = DownBlock(
                 ins,
                 outs,
                 pooling=pooling,
                 planar=planar,
                 activation=activation,
                 normalization=normalization,
-                full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                res_blocks=enc_res_blocks,
+                skip_first_residual=(i == 0)  # Don't make res shortcut from original image
             )
             self.down_convs.append(down_conv)
 
@@ -860,7 +908,7 @@ class UNet(nn.Module):
             outs = ins // 2
             planar = n_blocks - 2 - i in self.planar_blocks
 
-            up_conv = UpConv(
+            up_conv = UpBlock(
                 ins,
                 outs,
                 up_mode=up_mode,
@@ -872,6 +920,7 @@ class UNet(nn.Module):
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                res_blocks=dec_res_blocks
             )
             self.up_convs.append(up_conv)
 
