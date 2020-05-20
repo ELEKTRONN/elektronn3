@@ -99,7 +99,7 @@ class InferenceModel(object):
                         out[ii][low:high] = res[ii].cpu().numpy()
                 else:
                     out[low:high] = res.cpu().numpy()
-        assert high >= n_samples, "Prediction less samples then given in input."
+        assert high >= n_samples, "Predicted less samples then given in input."
         if verbose:
             dtime = time.time() - start
             if type(inp) is tuple:

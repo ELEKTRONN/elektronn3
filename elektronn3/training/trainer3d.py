@@ -507,21 +507,6 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                # save samples of every 20th batch of every 20th epoch for visualization
-                if self.epoch % 10 == 0 and target.size(1) == pts.size(1):
-                    if batch_num % 20 == 0:
-                        results = []
-                        for j in range(pts.size(0)):
-                            labels = target[j].cpu().numpy()
-                            pred = np.argmax(dout[j].cpu().numpy(), axis=1)
-                            orig = PointCloud(pts[j].cpu().numpy(), labels=labels)
-                            pred = PointCloud(pts[j].cpu().numpy(), labels=pred)
-                            results.append(orig)
-                            results.append(pred)
-                        # 'save_cloudlist' does not exist
-                        clouds.save_cloudlist(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
-                    batch_num += 1
-
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
