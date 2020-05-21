@@ -90,17 +90,19 @@ class KnossosRawData(torch.utils.data.Dataset):
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         if self.mode == 'in_memory':
-            inp = self._load_from_memory()
+            inp, offset = self._load_from_memory()
         elif self.mode == 'caching':
-            inp = self._get_from_cache()
+            inp, offset = self._get_from_cache()
         else:
-            inp = self._load_from_disk()
+            inp, offset = self._load_from_disk()
         if self.dim == 2:
             inp = inp[0]  # squeeze z=1 dim -> yx
         inp = inp.astype(np.float32)[None]  # Prepend C dim -> (C, [D,] H, W)
-        inp, _ = self.transform(inp, None)
+        if self.transform:
+            inp, _ = self.transform(inp, None)
         sample = {
-            'inp': torch.as_tensor(inp)
+            'inp': torch.as_tensor(inp),
+            'offset': offset
         }
         return sample
 
@@ -111,7 +113,7 @@ class KnossosRawData(torch.utils.data.Dataset):
         inp = self.kd.load_raw(
             offset=offset, size=self.patch_shape_xyz, mag=self.mag
         )  # zyx (D, H, W)
-        return inp
+        return inp, offset
 
     def _load_from_memory(self) -> np.ndarray:
         min_offset = (0, 0, 0)  # 0 because self.raw already accounts for min offset
@@ -122,7 +124,7 @@ class KnossosRawData(torch.utils.data.Dataset):
               offset[1]:offset[1] + self.patch_shape_xyz[1],
               offset[0]:offset[0] + self.patch_shape_xyz[0],
         ]  # zyx (D, H, W)
-        return inp
+        return inp, offset
 
     def __len__(self) -> int:
         return self.epoch_size
@@ -156,9 +158,10 @@ class KnossosRawData(torch.utils.data.Dataset):
 
     def _get_from_cache(self) -> np.ndarray:
         idx = random.randrange(self.cache_size)
-        inp = self.cache[idx]
+        inp = self.cache[idx][0]
+        offset = self.cache[idx][1]
         self.remaining_cache_reusages[idx] -= 1
         if self.remaining_cache_reusages[idx] < 1:
             self.cache[idx] = self._load_from_disk()
             self.remaining_cache_reusages[idx] = self.cache_reusages
-        return inp
+        return inp, offset
