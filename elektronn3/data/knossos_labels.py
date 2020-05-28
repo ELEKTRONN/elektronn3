@@ -40,9 +40,7 @@ class KnossosLabels(torch.utils.data.Dataset):
             E.g. ``knossos_bounds=[((256, 256, 128), (512, 512, 512))]`` means that only
             the region between the low corner (x=256, y=256, z=128) and the high corner
             (x=512, y=512, z=512) of the dataset is considered. The bounds should be one of the
-            bounds of different patches in the knossos dataset (check get_label_info function to
-            obtain information on different bounds and the data associated with them in the label
-            dataset). If ``None``, then whole dataset is returned.
+            bounds of different patches in the knossos dataset. If ``None``, then whole dataset is returned.
            """
 
     def __init__(
@@ -108,7 +106,7 @@ class KnossosLabels(torch.utils.data.Dataset):
                 location_per_label = []
                 for zip_path in paths:
                     data = self.kd._load_kzip_seg(zip_path, bounds[0], size,
-                                                  self.mag, datatype=np.int32,
+                                                  self.mag,
                                                   padding=0,
                                                   apply_mergelist=False,
                                                   return_dataset_cube_if_nonexistent=False,
@@ -161,15 +159,12 @@ class KnossosLabels(torch.utils.data.Dataset):
             label = label[0]
 
         inp, label = self.transform(inp.data.numpy(), label)
-        label = label.astype('int32')
+
         sample = {
             'inp': torch.as_tensor(inp),
-            'target': torch.as_tensor(label)
+            'target': torch.as_tensor(label).long()
         }
         return sample
 
     def __len__(self) -> int:
         return self.epoch_size
-
-    def get_label_info(self):
-        return self.targets
