@@ -121,7 +121,7 @@ class KnossosLabels(torch.utils.data.Dataset):
                     labels_patch[i] = 0  # setting voxels with overlapping labels to background
 
                 self.targets.append({'data': labels_patch, 'min_bound': bounds[0],
-                                     'max_bound': bounds[1]})  # zyx form
+                                     'max_bound': bounds[1], 'fname': paths})  # zyx form
 
                 self.inp_raw_data.append(KnossosRawData(conf_path=self.conf_path_raw_data,
                                                         patch_shape=self.patch_shape,
@@ -162,7 +162,8 @@ class KnossosLabels(torch.utils.data.Dataset):
 
         sample = {
             'inp': torch.as_tensor(inp),
-            'target': torch.as_tensor(label).long()
+            'target': torch.as_tensor(label).long(),
+            'fname':self.targets[random_idx]['fname']
         }
         return sample
 
