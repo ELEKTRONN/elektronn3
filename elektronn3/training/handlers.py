@@ -82,7 +82,11 @@ def plot_image(
         ax.imshow(image, cmap='gray')
         masked_overlay = np.ma.masked_where(overlay == 0, overlay)
         aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha)
-    ax.set_title(filename if filename is not None else None)
+    if filename is not None:
+        max_filename_length = 50  # Truncate long file names from the left
+        if len(filename) > max_filename_length:
+            filename = f'...{filename[-max_filename_length:]}'
+        ax.set_title(filename)
     if colorbar:
         bar = fig.colorbar(aximg, ticks=ticks)
         if ticklabels is not None:
