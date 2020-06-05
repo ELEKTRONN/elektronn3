@@ -75,7 +75,7 @@ def plot_image(
         vmin = 0
         vmax = out_channels
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(constrained_layout=True)
     if overlay is None:
         aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
     else:
