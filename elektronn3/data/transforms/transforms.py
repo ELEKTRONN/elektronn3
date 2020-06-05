@@ -1075,8 +1075,10 @@ class AlbuSeg2d:
 
         >>> import albumentations
         >>> transform = AlbuSeg2d(albumentations.ShiftScaleRotate(
-        ...     p=0.98, rotate_limit=180, scale_limit=0.1, interpolation=3
+        ...     p=0.98, rotate_limit=180, scale_limit=0.1, interpolation=2
         ... ))
+        ... # Note that interpolation=2 means cubic interpolation (-> cv2.CUBIC constant).
+        ... # Don't confuse this with scipy's interpolation options.
     """
 
     def __init__(self, albu: 'albumentations.core.transforms_interface.DualTransform'):
