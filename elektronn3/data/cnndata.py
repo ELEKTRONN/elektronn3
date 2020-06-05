@@ -537,12 +537,11 @@ class SimpleNeuroData2d(data.Dataset):
         inp, target = self.transform(inp, target)
         inp = torch.as_tensor(inp)
         target = torch.as_tensor(target)
-        fname = str(index)
         sample = {
             'inp': inp,
             'target': target,
             'cube_meta': np.inf,
-            'fname': fname
+            'fname': str(index)
         }
         return sample
 
@@ -615,7 +614,7 @@ class Segmentation2d(data.Dataset):
             'inp': torch.as_tensor(inp.astype(self.inp_dtype)),
             'target': torch.as_tensor(target.astype(self.target_dtype)),
             'cube_meta': np.inf,
-            'fname': str(index)
+            'fname': str(self.inp_paths[index])
         }
         return sample
 
@@ -667,7 +666,7 @@ class Reconstruction2d(data.Dataset):
             'inp': inp,
             'target': inp,
             'cube_meta': np.inf,
-            'fname': str(index)
+            'fname': str(self.inp_paths[index])
         }
         return sample
 
