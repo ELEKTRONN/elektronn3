@@ -1,0 +1,343 @@
+#!/usr/bin/env python3
+
+# ELEKTRONN3 - Neural Network Toolkit
+#
+# Copyright (c) 2017 - now
+# Max Planck Institute of Neurobiology, Munich, Germany
+# Authors: Martin Drawitsch, Philipp Schubert
+
+import argparse
+import logging
+import os
+import random
+import zipfile
+
+import torch
+from torch import nn
+from torch import optim
+import numpy as np
+
+parser = argparse.ArgumentParser(description='Train a network.')
+parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
+parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
+parser.add_argument(
+    '-s', '--epoch-size', type=int, default=100,
+    help='How many training samples to process between '
+         'validation/preview/extended-stat calculation phases.'
+)
+parser.add_argument(
+    '-m', '--max-steps', type=int, default=500000,
+    help='Maximum number of training steps to perform.'
+)
+parser.add_argument(
+    '-t', '--max-runtime', type=int, default=3600 * 24 * 4,  # 4 days
+    help='Maximum training time (in seconds).'
+)
+parser.add_argument(
+    '-r', '--resume', metavar='PATH',
+    help='Path to pretrained model state dict or a compiled and saved '
+         'ScriptModule from which to resume training.'
+)
+parser.add_argument(
+    '-j', '--jit', metavar='MODE', default='onsave',
+    choices=['disabled', 'train', 'onsave'],
+    help="""Options:
+"disabled": Completely disable JIT tracing;
+"onsave": Use regular Python model for training, but trace it on-demand for saving training state;
+"train": Use traced model for training and serialize it on disk"""
+)
+parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
+parser.add_argument(
+    '--deterministic', action='store_true',
+    help='Run in fully deterministic mode (at the cost of execution speed).'
+)
+parser.add_argument('-i', '--ipython', action='store_true',
+    help='Drop into IPython shell on errors or keyboard interrupts.'
+)
+args = parser.parse_args()
+
+# Set up all RNG seeds, set level of determinism
+random_seed = args.seed
+torch.manual_seed(random_seed)
+np.random.seed(random_seed)
+random.seed(random_seed)
+deterministic = args.deterministic
+if deterministic:
+    torch.backends.cudnn.deterministic = True
+else:
+    torch.backends.cudnn.benchmark = True  # Improves overall performance in *most* cases
+
+# Don't move this stuff, it needs to be run this early to work
+import elektronn3
+elektronn3.select_mpl_backend('Agg')
+logger = logging.getLogger('elektronn3log')
+
+from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
+from elektronn3.training import Trainer, Backup, metrics
+from elektronn3.training import SWA
+from elektronn3.modules import DiceLoss, CombinedLoss
+from elektronn3.models.unet import UNet
+
+
+if not args.disable_cuda and torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+logger.info(f'Running on device: {device}')
+
+# dt = False
+dt = True
+
+# You can store selected hyperparams in a dict for logging to tensorboard, e.g.
+# hparams = {'n_blocks': 4, 'start_filts': 32, 'planar_blocks': (0,)}
+hparams = {}
+
+if dt:
+    out_channels = 1
+else:
+    out_channels = 3
+
+model = UNet(
+    out_channels=out_channels,
+    n_blocks=4,
+    start_filts=32,
+    planar_blocks=(0,),
+    activation='relu',
+    normalization='batch',
+    # conv_mode='valid',
+    # full_norm=False,  # Uncomment to restore old sparse normalization scheme
+    # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
+    enc_res_blocks=1,
+    dec_res_blocks=1,
+).to(device)
+# Example for a model-compatible input.
+example_input = torch.ones(1, 1, 32, 64, 64)
+
+
+# USER PATHS
+save_root = os.path.expanduser('~/e3training/')
+os.makedirs(save_root, exist_ok=True)
+
+data_root = '/wholebrain/songbird/j0126/GT/synapsetype_gt/Segmentierung_von_Synapsentypen_v4/'
+fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
+input_h5data = [(os.path.join(data_root, f), 'raw') for f in fnames]
+target_h5data = [(os.path.join(data_root, f), 'label') for f in fnames]
+valid_indices = [1, 2]
+
+# These statistics are computed from the training dataset.
+# Remember to re-compute and change them when switching the dataset.
+dataset_mean = (0.63952196,)
+dataset_std = (0.17744485,)
+# Class weights for imbalanced dataset
+class_weights = torch.tensor([0.1, 1., 1.]).to(device)
+
+# TODO: Recalculate above class_weights with mode='inverse'
+
+max_steps = args.max_steps
+max_runtime = args.max_runtime
+
+optimizer_state_dict = None
+lr_sched_state_dict = None
+if args.resume is not None:  # Load pretrained network
+    pretrained = os.path.expanduser(args.resume)
+    _warning_str = 'Loading model without optimizer state. Prefer state dicts'
+    if zipfile.is_zipfile(pretrained):  # Zip file indicates saved ScriptModule
+        logger.warning(_warning_str)
+        model = torch.jit.load(pretrained, map_location=device)
+    else:  # Either state dict or pickled model
+        state = torch.load(pretrained)
+        if isinstance(state, dict):
+            model.load_state_dict(state['model_state_dict'])
+            optimizer_state_dict = state.get('optimizer_state_dict')
+            lr_sched_state_dict = state.get('lr_sched_state_dict')
+            if optimizer_state_dict is None:
+                logger.warning('optimizer_state_dict not found.')
+            if lr_sched_state_dict is None:
+                logger.warning('lr_sched_state_dict not found.')
+        elif isinstance(state, nn.Module):
+            logger.warning(_warning_str)
+            model = state
+        else:
+            raise ValueError(f'Can\'t load {pretrained}.')
+
+# Transformations to be applied to samples before feeding them to the network
+common_transforms = [
+    transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
+    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+]
+if dt:
+    common_transforms.extend([
+        lambda x, y: (x, y > 0),  # treat both foreground labels as 1 class, binarize target
+        transforms.DistanceTransformTarget()
+    ])
+train_transform = transforms.Compose(common_transforms + [
+    # transforms.RandomRotate2d(prob=0.9),
+    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
+    # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
+    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
+])
+valid_transform = transforms.Compose(common_transforms + [])
+
+# Specify data set
+aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z dimension.
+common_data_kwargs = {  # Common options for training and valid sets.
+    'aniso_factor': aniso_factor,
+    'patch_shape': (40, 144, 144),
+    # 'offset': (8, 20, 20),
+    'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
+}
+train_dataset = PatchCreator(
+    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+    train=True,
+    epoch_size=args.epoch_size,
+    warp_prob=0.2,
+    warp_kwargs={
+        'sample_aniso': aniso_factor != 1,
+        'perspective': True,
+        'warp_amount': 0.5,
+        'lock_z': True
+    },
+    transform=train_transform,
+    **common_data_kwargs
+)
+valid_dataset = None if not valid_indices else PatchCreator(
+    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+    train=False,
+    epoch_size=10,  # How many samples to use for each validation run
+    warp_prob=0,
+    warp_kwargs={'sample_aniso': aniso_factor != 1},
+    transform=valid_transform,
+    **common_data_kwargs
+)
+
+# Use first validation cube for previews. Can be set to any other data source.
+preview_batch = get_preview_batch(
+    h5data=input_h5data[valid_indices[0]],
+    preview_shape=(32, 320, 320),
+)
+# Options for the preview inference (see elektronn3.inference.Predictor).
+# Attention: These values are highly dependent on model and data shapes!
+inference_kwargs = {
+    'tile_shape': (32, 64, 64),
+    'overlap_shape': (32, 64, 64),
+    'offset': None,
+    'apply_softmax': not dt,
+    'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std),
+}
+
+# optimizer = optim.SGD(
+#     model.parameters(),
+#     lr=0,  # Learning rate is set by the lr_sched below
+#     momentum=0.9,
+#     weight_decay=0.5e-4,
+# )
+optimizer = optim.AdamW(
+    model.parameters(),
+    lr=0,  # Learning rate is set by the lr_sched below
+    weight_decay=5e-5,
+)
+optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
+
+# Set to True to perform Cyclical LR range test instead of normal training
+#  (see https://arxiv.org/abs/1506.01186, sec. 3.3).
+do_lr_range_test = False
+if do_lr_range_test:
+    # Begin with a very small lr and double it every 1000 steps.
+    for grp in optimizer.param_groups:
+        grp['lr'] = 1e-7  # Note: lr will be > 1.0 after 24k steps.
+    lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
+else:
+    # lr_sched = torch.optim.lr_scheduler.CyclicLR(
+    #     optimizer,
+    #     base_lr=1e-5,
+    #     max_lr=0.01,
+    #     step_size_up=2000,
+    #     step_size_down=4000,
+    #     cycle_momentum=True if 'momentum' in optimizer.defaults else False
+    # )
+    lr_sched = torch.optim.lr_scheduler.CyclicLR(
+        optimizer,
+        base_lr=1e-5,
+        max_lr=1e-3,
+        step_size_up=2000,
+        step_size_down=4000,
+        cycle_momentum=False
+    )
+    if optimizer_state_dict is not None:
+        optimizer.load_state_dict(optimizer_state_dict)
+    if lr_sched_state_dict is not None:
+        lr_sched.load_state_dict(lr_sched_state_dict)
+
+# Validation metrics
+if dt:
+    valid_metrics = {}
+else:
+    valid_metrics = {  # mean metrics
+        'val_accuracy_mean': metrics.Accuracy(),
+        'val_precision_mean': metrics.Precision(),
+        'val_recall_mean': metrics.Recall(),
+        'val_DSC_mean': metrics.DSC(),
+        'val_IoU_mean': metrics.IoU(),
+    }
+    if out_channels > 2:
+        # Add separate per-class accuracy metrics only if there are more than 2 classes
+        valid_metrics.update({
+            f'val_IoU_c{i}': metrics.Accuracy(i)
+            for i in range(out_channels)
+        })
+
+if dt:
+    criterion = nn.MSELoss()
+    # from elektronn3.modules.loss import DistanceRegClassificationLoss
+    # criterion = DistanceRegClassificationLoss()
+else:
+    crossentropy = nn.CrossEntropyLoss(weight=class_weights)
+    dice = DiceLoss(apply_softmax=True, weight=class_weights)
+    criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
+
+# Create trainer
+trainer = Trainer(
+    model=model,
+    criterion=criterion,
+    optimizer=optimizer,
+    device=device,
+    train_dataset=train_dataset,
+    valid_dataset=valid_dataset,
+    batch_size=4,
+    num_workers=2,
+    save_root=save_root,
+    exp_name=args.exp_name,
+    example_input=example_input,
+    save_jit='script',
+    schedulers={'lr': lr_sched},
+    valid_metrics=valid_metrics,
+    preview_batch=preview_batch,
+    preview_interval=5,
+    inference_kwargs=inference_kwargs,
+    hparams=hparams,
+    # enable_videos=True,  # Uncomment to enable videos in tensorboard
+    out_channels=out_channels,
+    ipython_shell=args.ipython,
+    # extra_save_steps=range(0, max_steps, 10_000),
+    # mixed_precision=True,  # Enable to use Apex for mixed precision training
+)
+
+if args.deterministic:
+    assert trainer.num_workers <= 1, 'num_workers > 1 introduces indeterministic behavior'
+
+# Archiving training script, src folder, env info
+Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
+
+# Start training
+trainer.run(max_steps=max_steps, max_runtime=max_runtime)
+
+
+# How to re-calculate mean, std and class_weights for other datasets:
+# dataset_mean = utils.calculate_means(train_dataset.inputs)
+# dataset_std = utils.calculate_stds(train_dataset.inputs)
+# class_weights = torch.tensor(utils.calculate_class_weights(train_dataset.targets))
+# print(dataset_mean)
+# print(dataset_std)
+# print(class_weights)

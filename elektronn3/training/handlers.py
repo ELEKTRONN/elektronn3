@@ -145,10 +145,7 @@ def _tb_log_preview(
         inference_kwargs=trainer.inference_kwargs,
     )
     inp_batch = inp_batch.numpy()
-    if trainer.inference_kwargs['apply_softmax']:
-        out_batch = F.softmax(out_batch, 1).numpy()
-    else:
-        out_batch = out_batch.numpy()
+    out_batch = out_batch.numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
 
@@ -172,7 +169,13 @@ def _tb_log_preview(
             )
 
     out_slice = batch2img(out_batch)
-    pred_slice = out_slice.argmax(0)
+
+    apply_softmax = trainer.inference_kwargs.get('apply_softmax')
+    if isinstance(apply_softmax, (tuple, list)):  # Tuple of channels over which to apply softmax
+        # Exclude non-softmax (-> non-classification) channels from argmax
+        pred_slice = out_slice[apply_softmax, ...].argmax(0)
+    else:
+        pred_slice = out_slice.argmax(0)
 
     for c in range(out_slice.shape[0]):
         trainer.tb.add_figure(
@@ -226,9 +229,15 @@ def _tb_log_sample_images(
     out_batch = images['out'][:1]
     name = images.get('fname', [None])[0]
 
-
-    if trainer.inference_kwargs['apply_softmax']:
-        out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
+    apply_softmax = trainer.inference_kwargs['apply_softmax']
+    if apply_softmax:
+        out_batch = torch.as_tensor(out_batch)
+        if isinstance(apply_softmax, bool):  # Apply softmax over all output channels
+            out_batch = F.softmax(out_batch, 1).numpy()
+        elif isinstance(apply_softmax, (tuple, list)):  # Tuple of channels over which to apply softmax
+            out_batch[:, apply_softmax] = F.softmax(out_batch[:, apply_softmax], 1)
+        else:
+            raise ValueError(f'apply_softmax should be bool or tuple, but it has the value {apply_softmax} of unsupported type {type(apply_softmax)}')
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
 
@@ -382,8 +391,11 @@ def _tb_log_sample_images(
     # Only make pred and overlay plots in classification scenarios
     if target_batch is not None:
         if is_classification:
-
-            pred_slice = out_slice.argmax(0)
+            if isinstance(apply_softmax, (tuple, list)):  # Tuple of channels over which to apply softmax
+                # Exclude non-softmax (-> non-classification) channels from argmax
+                pred_slice = out_slice[apply_softmax, ...].argmax(0)
+            else:
+                pred_slice = out_slice.argmax(0)
             trainer.tb.add_figure(
                 f'{group}/pred_slice',
                 plot_image(pred_slice, out_channels=trainer.out_channels, filename=name),

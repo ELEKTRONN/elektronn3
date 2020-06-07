@@ -7,6 +7,7 @@
 """Loss functions"""
 from typing import Sequence, Optional, Tuple, Callable, Union
 
+import numpy as np
 import torch
 
 from torch import nn
@@ -585,6 +586,48 @@ class ACLoss(torch.nn.Module):
         region_term = self.get_region(output, target) if self.region_weight > 0. else 0.
         loss = (1 - self.region_weight) * length_term + self.region_weight * region_term
         return loss
+
+
+class DistanceRegClassificationLoss(nn.Module):
+    def __init__(
+            self,
+            class_criterion: nn.Module = nn.CrossEntropyLoss(ignore_index=0),
+            dist_criterion: nn.Module = nn.MSELoss(),
+            class_channels: Tuple[int] = (0, 1, 2),
+            dist_channels: Tuple[int] = (3,),
+            dist_weight: float = 1.0,
+    ):
+        super().__init__()
+        self.class_channels = class_channels
+        self.dist_channels = dist_channels
+        self.class_criterion = class_criterion
+        self.dist_criterion = dist_criterion
+        self.dist_weight = dist_weight
+
+        from elektronn3.data.transforms import DistanceTransformTarget
+        self._distance_transform = DistanceTransformTarget()
+
+    # TODO: memory moves are slow. Rewrite this later as a preprocessing transform
+    @torch.no_grad()
+    def _batch_distance_transform(self, target: torch.Tensor) -> torch.Tensor:
+        nptarget = target.cpu().numpy()  # (N, C, [D,] H, W)
+        npdist_target = []  # (N, 1, [D,] H, W)
+        for n in range(nptarget.shape[0]):  # Iterate over batch dimension N
+            _, dtt = self._distance_transform(None, nptarget[n])
+            npdist_target.append(dtt)
+        npdist_target = np.stack(npdist_target)
+        dist_target = torch.as_tensor(npdist_target, device=target.device)
+        return dist_target  # (N, 1, [D,] H, W)
+
+    def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        class_output = output[:, self.class_channels]
+        class_target = target  # Use original targets without modification
+        class_loss = self.class_criterion(class_output, class_target)
+        dist_output = output[:, self.dist_channels]
+        dist_target = self._batch_distance_transform(target).to(output.dtype)
+        dist_loss = self.dist_criterion(dist_output, dist_target)
+        total_loss = class_loss + self.dist_weight * dist_loss
+        return total_loss
 
 
 ##### ALTERNATIVE VERSIONS OF DICE LOSS #####

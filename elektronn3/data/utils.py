@@ -39,24 +39,24 @@ def _to_full_numpy(seq) -> np.ndarray:
 
 def calculate_means(inputs: Sequence) -> Tuple[float]:
     inputs = [
-        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
+        _to_full_numpy(inp).reshape(-1)  # Flatten every dim except C
         for inp in inputs
     ]  # Necessary if shapes don't match
     # Preserve C, but concatenate everything else into one flat dimension
-    inputs = np.concatenate(inputs, axis=1)
-    means = np.mean(inputs, axis=1)
-    return tuple(means)
+    inputs = np.concatenate(inputs, axis=0)
+    means = np.mean(inputs, axis=0)
+    return means
 
 
 def calculate_stds(inputs: Sequence) -> Tuple[float]:
     inputs = [
-        _to_full_numpy(inp).reshape(inp.shape[0], -1)  # Flatten every dim except C
+        _to_full_numpy(inp).reshape(-1)  # Flatten every dim except C
         for inp in inputs
     ]  # Necessary if shapes don't match
     # Preserve C, but concatenate everything else into one flat dimension
-    inputs = np.concatenate(inputs, axis=1)
-    stds = np.std(inputs, axis=1)
-    return tuple(stds)
+    inputs = np.concatenate(inputs, axis=0)
+    stds = np.std(inputs, axis=0)
+    return stds
 
 
 def calculate_class_weights(

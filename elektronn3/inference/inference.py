@@ -402,6 +402,7 @@ class Predictor:
                 'that are passed as file paths (strings).'
             )
         self.dtype = torch.float16 if float16 else torch.float32
+        self.apply_softmax = apply_softmax
         self.transform = transform
         if isinstance(augmentations, int):
             augmentations = DEFAULT_AUGMENTATIONS_3D[:augmentations]
@@ -434,8 +435,8 @@ class Predictor:
                 ' a state_dict object (dict) or None.')
         if state_dict is not None:
             set_state_dict(model, state_dict)
-        if apply_softmax:
-            self.model = nn.Sequential(self.model, nn.Softmax(1))
+        # if apply_softmax:
+        #     self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
         if self.tile_shape is None and self.overlap_shape is None:
@@ -445,9 +446,21 @@ class Predictor:
             self.enable_tiling = True
         self.model.eval()
 
+    # TODO: Arbitrary postprocessing transform
     @torch.no_grad()
-    def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
+    def _predict_single(self, dinp: torch.Tensor) -> torch.Tensor:
         dout = self.model(dinp)
+        if self.apply_softmax:
+            assert self.augmentations is None
+            if isinstance(self.apply_softmax, bool):  # Apply softmax over all output channels
+                dout = nn.functional.softmax(dout, 1).numpy()
+            elif isinstance(self.apply_softmax, (tuple, list)):  # Tuple of channels over which to apply softmax
+                dout[:, self.apply_softmax] = nn.functional.softmax(dout[:, self.apply_softmax], 1)
+        return dout
+
+    def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
+        dout = self._predict_single(dinp)
+
         if not self.augmentations:
             return dout
 
@@ -458,7 +471,7 @@ class Predictor:
         douts = [dout]
         for aug in self.augmentations:
             dinp_aug = aug.forward(dinp)
-            dout_aug = self.model(dinp_aug.to(self.device))
+            dout_aug = self._predict_single(dinp_aug.to(self.device))
             dout = aug.backward(dout_aug)
             douts.append(dout)
         douts = torch.stack(douts)

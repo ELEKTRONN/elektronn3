@@ -296,7 +296,7 @@ class DistanceTransformTarget:
 
     def __call__(
             self,
-            inp: np.ndarray,  # returned without modifications
+            inp: Optional[np.ndarray],  # returned without modifications
             target: Optional[np.ndarray]
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         if target is None:
