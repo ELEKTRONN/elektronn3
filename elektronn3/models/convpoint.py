@@ -20,7 +20,8 @@ from abc import ABC
 try:
     from torch_geometric.nn import XConv, fps, global_mean_pool
 except ImportError as e:
-    print('XConv layer not available.', e)
+    # print('XConv layer not available.', e)
+    pass
 try:
     from pytorch3d.ops import knn
 
@@ -45,11 +46,11 @@ try:
         _, indices, _ = knn.knn_points(next_pts, input_pts, K=K)
         return indices, next_pts
 except ImportError as e:
-    print('pytorch3d.ops not available.', e)
+    # print('pytorch3d.ops not available.', e)
+    pass
+
 
 # STATIC HELPER FUNCTIONS #
-
-
 def swish(x):
     """https://arxiv.org/pdf/1710.05941.pdf"""
     return x * torch.sigmoid(x)
@@ -835,7 +836,7 @@ class ModelNet40(nn.Module):
 
     def __init__(self, input_channels, output_channels, dimension=3,
                  dropout=0.1, use_norm='gn', track_running_stats=False,
-                 act=None):
+                 act=None, use_bias=True):
         super(ModelNet40, self).__init__()
         if act in [None, 'relu']:
             self.act = F.relu_
@@ -849,13 +850,12 @@ class ModelNet40(nn.Module):
             raise ValueError
         n_centers = 16
         pl = 64
-        print(f'Using activation: {self.act}')
         # convolutions
-        self.cv1 = PtConv(input_channels, pl, n_centers, dimension, act=act)
-        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension, act=act)
-        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension, act=act)
-        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension, act=act)
-        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension, act=act)
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension, act=act, use_bias=use_bias)
 
         # last layer
         self.lin1 = nn.Linear(8 * pl, 2 * pl)
@@ -909,6 +909,80 @@ class ModelNet40(nn.Module):
         return x
 
 
+class ModelNet40_orig(nn.Module):
+
+    def __init__(self, input_channels, output_channels, dimension=3,
+                 dropout=0.1, use_norm='gn', track_running_stats=False,
+                 act=None, use_bias=False):
+        super(ModelNet40, self).__init__()
+        if act in [None, 'relu']:
+            self.act = F.relu_
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
+        n_centers = 16
+        pl = 64
+        # convolutions
+        self.cv1 = PtConv(input_channels, pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv2 = PtConv(pl, 2 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv3 = PtConv(2 * pl, 4 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv4 = PtConv(4 * pl, 4 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+        self.cv5 = PtConv(4 * pl, 8 * pl, n_centers, dimension, act=act, use_bias=use_bias)
+
+        # last layer
+        self.fcout = nn.Linear(8 * pl, output_channels)
+
+        # normalization
+        if not use_norm:
+            self.bn1 = identity
+            self.bn2 = identity
+            self.bn3 = identity
+            self.bn4 = identity
+            self.bn5 = identity
+        elif use_norm == 'bn':
+            self.bn1 = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
+            self.bn2 = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
+            self.bn3 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn4 = nn.BatchNorm1d(4 * pl, track_running_stats=track_running_stats)
+            self.bn5 = nn.BatchNorm1d(8 * pl, track_running_stats=track_running_stats)
+        elif use_norm == 'gn':
+            self.bn1 = nn.GroupNorm(pl // 2, pl)
+            self.bn2 = nn.GroupNorm(pl, 2 * pl)
+            self.bn3 = nn.GroupNorm(2 * pl, 4 * pl)
+            self.bn4 = nn.GroupNorm(2 * pl, 4 * pl)
+            self.bn5 = nn.GroupNorm(4 * pl, 8 * pl)
+        else:
+            raise ValueError
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, pts):
+        x, pts = self.cv1(x, pts, 32, 4096)
+        x = self.act(apply_bn(x, self.bn1))
+
+        x, pts = self.cv2(x, pts, 32, 1024)
+        x = self.act(apply_bn(x, self.bn2))
+
+        x, pts = self.cv3(x, pts, 16, 512)
+        x = self.act(apply_bn(x, self.bn3))
+
+        x, pts = self.cv4(x, pts, 16, 256)
+        x = self.act(apply_bn(x, self.bn4))
+
+        x, pts = self.cv5(x, pts, 16, 128)
+        x = self.act(apply_bn(x, self.bn5))
+        x = x.view(x.size(0), -1)
+        x = self.dropout(x)
+        x = self.fcout(x)
+
+        return x
+
+
 class ModelNet40_PT3d(nn.Module):
 
     def __init__(self, input_channels, output_channels, dimension=3,
@@ -927,7 +1001,6 @@ class ModelNet40_PT3d(nn.Module):
             raise ValueError
         n_centers = 16
         pl = 64
-        print(f'Using activation: {self.act}')
         # convolutions
         self.cv1 = PtConv_PT3d(input_channels, pl, n_centers, dimension, act=act)
         self.cv2 = PtConv_PT3d(pl, 2 * pl, n_centers, dimension, act=act)
