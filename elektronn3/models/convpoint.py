@@ -1470,3 +1470,24 @@ class ModelNet40xConv(nn.Module):
         x = self.lin2(x)
 
         return x
+
+
+class TripletNet(nn.Module):
+    """
+    adapted from https://github.com/andreasveit/triplet-network-pytorch/blob/master/tripletnet.py
+    """
+    def __init__(self, rep_net):
+        super().__init__()
+        self.rep_net = rep_net
+
+    def forward(self, x0, x1, x2):
+        if not self.training:
+            assert x1 is None and x2 is None
+            return self.rep_net(x0[0], x0[1])
+        assert x1 is not None, x2 is not None
+        z_0 = self.rep_net(x0[0], x0[1])
+        z_1 = self.rep_net(x1[0], x1[1])
+        z_2 = self.rep_net(x2[0], x2[1])
+        dist_a = F.pairwise_distance(z_0, z_1, 2)
+        dist_b = F.pairwise_distance(z_0, z_2, 2)
+        return dist_a, dist_b, z_0, z_1, z_2
