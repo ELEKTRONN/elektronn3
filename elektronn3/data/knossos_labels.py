@@ -1,3 +1,4 @@
+import collections
 import os
 import random
 from typing import Callable, Dict, Optional, Sequence
@@ -41,6 +42,7 @@ class KnossosLabels(torch.utils.data.Dataset):
             the region between the low corner (x=256, y=256, z=128) and the high corner
             (x=512, y=512, z=512) of the dataset is considered. The bounds should be one of the
             bounds of different patches in the knossos dataset. If ``None``, then whole dataset is returned.
+            label_offset: offset of the indices in the knossos labels, default is 0.
            """
 
     def __init__(
@@ -53,8 +55,8 @@ class KnossosLabels(torch.utils.data.Dataset):
             mag: int = 1,
             epoch_size: int = 100,
             label_names: Optional[Sequence[str]] = None,
-            knossos_bounds: Optional[Sequence[Sequence[Sequence[int]]]] = None  # xyz
-
+            knossos_bounds: Optional[Sequence[Sequence[Sequence[int]]]] = None,  # xyz
+            label_offset: int = 0
     ):
         self.conf_path_label = conf_path_label
         self.conf_path_raw_data = conf_path_raw_data
@@ -68,12 +70,12 @@ class KnossosLabels(torch.utils.data.Dataset):
         self.mag = mag
         self.epoch_size = epoch_size
         self.kd = knossos_utils.KnossosDataset(self.conf_path_label, show_progress=False)
-        self.targets = []
-        self.inp_raw_data = []
+        self.inp_targets = []
         self.file_bounds = {}
         self.kzip_files_path = []
         self.dir_path = dir_path_label
         self.knossos_bounds = knossos_bounds
+        self.label_offset = label_offset  # todo: verify correct handling of this offset
 
         self._get_file_bounds(label_names)
         self._get_data()
@@ -95,15 +97,20 @@ class KnossosLabels(torch.utils.data.Dataset):
                     self.file_bounds[(offset, max_values)] = [zip_path]
                 else:
                     self.file_bounds[(offset, max_values)].append(zip_path)
+
+            for offset, max_values in self.file_bounds.keys():
+                if len(self.file_bounds[offset, max_values]) != len(label_names):
+                    print(f"Warning: Found {len(self.file_bounds[offset, max_values])} label files for "
+                          f"offset {offset} and max_values {max_values}, but expected {len(label_names)}")
         else:
-            raise OSError(f"Path to conf directory is empty")
+            raise OSError(f"Path to conf directory is None!")
 
     def _get_data(self):
         for bounds, paths in self.file_bounds.items():
             if self.knossos_bounds is None or bounds in self.knossos_bounds:
-                size = (bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1], bounds[1][2] - bounds[0][2])
-                labels_patch = np.zeros(size[::-1])
-                location_per_label = []
+                size = tuple(np.array(bounds[1]) - np.array(bounds[0]))
+                labels_patch = np.zeros(size[::-1])  # the labels of the current patch
+                non_background_label_locations = []
                 for zip_path in paths:
                     data = self.kd._load_kzip_seg(zip_path, bounds[0], size,
                                                   self.mag,
@@ -113,48 +120,42 @@ class KnossosLabels(torch.utils.data.Dataset):
                                                   expand_area_to_mag=False)
 
                     labels_patch += data
-                    location_per_label.append(np.transpose(np.nonzero(data)))
+                    non_background_label_locations.extend(
+                        [tuple(index) for index in np.transpose(np.nonzero(data)).tolist()])
 
-                overlapping_indices = self._get_overlapping_indices(location_per_label)
+                overlapping_indices = [item for item, count in
+                                       collections.Counter(non_background_label_locations).items() if count > 1]
 
-                for i in overlapping_indices:
-                    labels_patch[i] = 0  # setting voxels with overlapping labels to background
+                if len(overlapping_indices) > 0:
+                    print(
+                        f"Detected {len(overlapping_indices)} overlapping/contradicting labels for labels with"
+                        f" bounds {bounds}. Setting the follwoing voxels to background: {overlapping_indices}")
+                    # todo: better one of the labels instead of background?
+                    idx = np.stack(overlapping_indices, axis=1)
+                    labels_patch[idx[0], idx[1], idx[2]] = 0  # todo: neater way?
 
-                self.targets.append({'data': labels_patch, 'min_bound': bounds[0],
-                                     'max_bound': bounds[1], 'fname': paths})  # zyx form
-
-                self.inp_raw_data.append(KnossosRawData(conf_path=self.conf_path_raw_data,
-                                                        patch_shape=self.patch_shape,
-                                                        transform=None,
-                                                        bounds=bounds,
-                                                        mag=self.mag, mode='disk', epoch_size=self.epoch_size,
-                                                        disable_memory_check=False, verbose=False))  # xyz form
-
-    @staticmethod
-    def _get_overlapping_indices(location_per_label):
-
-        indices_per_label = [{tuple(elem) for elem in location_per_label[i]} for i in range(len(location_per_label))]
-
-        overlapping_indices = []
-        for i in range(len(indices_per_label) - 1):
-            for j in range(i + 1, len(indices_per_label)):
-                overlapping_indices += (indices_per_label[i].intersection(indices_per_label[j]))
-
-        return overlapping_indices
+                # todo: maybe just create one KnossosRawData instance with no bounds, then sample directly?
+                inp_raw_data = KnossosRawData(conf_path=self.conf_path_raw_data,
+                                              patch_shape=self.patch_shape,
+                                              bounds=np.array(bounds) + self.label_offset,
+                                              mag=self.mag, mode='disk', epoch_size=self.epoch_size,
+                                              disable_memory_check=False, verbose=False)  # xyz form
+                target = {'data': labels_patch, 'min_bound': bounds[0],
+                          'max_bound': bounds[1], 'fname': paths}  # zyx form
+                self.inp_targets.append((inp_raw_data, target))
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
 
-        random_idx = random.randrange(len(self.inp_raw_data))
-
-        raw_dict = self.inp_raw_data[random_idx].__getitem__(0)
+        inp_raw_data, target = self.inp_targets[
+            random.randrange(len(self.inp_targets))]  # todo: sample wrt. volumes of gt, not uniformly
+        raw_dict = inp_raw_data.__getitem__(0)
         inp = raw_dict['inp']  # zyx
-        offset = raw_dict["offset"]  # xyz
+        random_offset = raw_dict["offset"] - self.label_offset  # xyz
 
-        min_indices = offset[::-1] - self.targets[random_idx]['min_bound'][::-1]
+        min_indices = random_offset[::-1] - target['min_bound'][::-1]  # computes indices in labeled region
         max_indices = min_indices + self.patch_shape_xyz[::-1]
-        label = self.targets[random_idx]['data'][
-            tuple(slice(*i) for i in zip(min_indices, max_indices))]
-
+        label = target['data'][tuple(slice(*i) for i in zip(min_indices,
+                                                            max_indices))]
         if self.dim == 2:
             label = label[0]
 
@@ -163,7 +164,7 @@ class KnossosLabels(torch.utils.data.Dataset):
         sample = {
             'inp': torch.as_tensor(inp),
             'target': torch.as_tensor(label).long(),
-            'fname':self.targets[random_idx]['fname']
+            'fname': target['fname']
         }
         return sample
 
