@@ -110,7 +110,7 @@ class KnossosLabels(torch.utils.data.Dataset):
             if self.knossos_bounds is None or bounds in self.knossos_bounds:
                 size = tuple(np.array(bounds[1]) - np.array(bounds[0]))
                 labels_patch = np.zeros(size[::-1])  # the labels of the current patch
-                non_background_label_locations = []
+                non_background_label_locations = np.zeros_like(labels_patch)
                 for zip_path in paths:
                     data = self.kd._load_kzip_seg(zip_path, bounds[0], size,
                                                   self.mag,
@@ -118,21 +118,17 @@ class KnossosLabels(torch.utils.data.Dataset):
                                                   apply_mergelist=False,
                                                   return_dataset_cube_if_nonexistent=False,
                                                   expand_area_to_mag=False)
-
                     labels_patch += data
-                    non_background_label_locations.extend(
-                        [tuple(index) for index in np.transpose(np.nonzero(data)).tolist()])
+                    non_background_label_locations += data != 0
 
-                overlapping_indices = [item for item, count in
-                                       collections.Counter(non_background_label_locations).items() if count > 1]
+                overlapping_locations = non_background_label_locations > 1
 
-                if len(overlapping_indices) > 0:
+                if overlapping_locations.sum() != 0:
                     print(
-                        f"Detected {len(overlapping_indices)} overlapping/contradicting labels for labels with"
-                        f" bounds {bounds}. Setting the follwoing voxels to background: {overlapping_indices}")
-                    # todo: better one of the labels instead of background?
-                    idx = np.stack(overlapping_indices, axis=1)
-                    labels_patch[idx[0], idx[1], idx[2]] = 0  # todo: neater way?
+                        f"Detected {overlapping_locations.sum()} overlapping/contradicting labels for "
+                        f"labels with bounds {bounds}")
+                    # todo: better assign one of the labels instead of background?
+                    labels_patch[overlapping_locations] = 0
 
                 # todo: maybe just create one KnossosRawData instance with no bounds, then sample directly?
                 inp_raw_data = KnossosRawData(conf_path=self.conf_path_raw_data,
