@@ -106,7 +106,7 @@ class KnossosRawData(torch.utils.data.Dataset):
         }
         return sample
 
-    def _load_from_disk(self) -> np.ndarray:
+    def _load_from_disk(self) -> (np.ndarray, np.ndarray):
         min_offset = self.bounds[0]  # xyz
         max_offset = self.bounds[1] - self.patch_shape_xyz  # xyz
         offset = np.random.randint(min_offset, max_offset + 1)  # xyz
@@ -115,7 +115,7 @@ class KnossosRawData(torch.utils.data.Dataset):
         )  # zyx (D, H, W)
         return inp, offset
 
-    def _load_from_memory(self) -> np.ndarray:
+    def _load_from_memory(self) -> (np.ndarray, np.ndarray):
         min_offset = (0, 0, 0)  # 0 because self.raw already accounts for min offset
         max_offset = self.shape - self.patch_shape_xyz
         offset = np.random.randint(min_offset, max_offset + 1)  # xyz
@@ -156,7 +156,7 @@ class KnossosRawData(torch.utils.data.Dataset):
         self.cache = [self._load_from_disk() for _ in range(self.cache_size)]
         self.remaining_cache_reusages = [self.cache_reusages] * self.cache_size
 
-    def _get_from_cache(self) -> np.ndarray:
+    def _get_from_cache(self) -> (np.ndarray, np.ndarray):
         idx = random.randrange(self.cache_size)
         inp = self.cache[idx][0]
         offset = self.cache[idx][1]

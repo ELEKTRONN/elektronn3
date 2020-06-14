@@ -106,6 +106,7 @@ class KnossosLabels(torch.utils.data.Dataset):
             raise OSError(f"Path to conf directory is None!")
 
     def _get_data(self):
+        voxels_per_patch = []
         for bounds, paths in self.file_bounds.items():
             if self.knossos_bounds is None or bounds in self.knossos_bounds:
                 size = tuple(np.array(bounds[1]) - np.array(bounds[0]))
@@ -139,11 +140,14 @@ class KnossosLabels(torch.utils.data.Dataset):
                 target = {'data': labels_patch, 'min_bound': bounds[0],
                           'max_bound': bounds[1], 'fname': paths}  # zyx form
                 self.inp_targets.append((inp_raw_data, target))
+                voxels_per_patch.append(labels_patch.size)
+
+        self.patch_weights = np.array(voxels_per_patch) / sum(voxels_per_patch)
+        print("patch weights:", self.patch_weights)
 
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-
-        inp_raw_data, target = self.inp_targets[
-            random.randrange(len(self.inp_targets))]  # todo: sample wrt. volumes of gt, not uniformly
+        idx = np.random.choice(np.arange(start=0, stop=len(self.patch_weights)), p=self.patch_weights)
+        inp_raw_data, target = self.inp_targets[idx]
         raw_dict = inp_raw_data.__getitem__(0)
         inp = raw_dict['inp']  # zyx
         random_offset = raw_dict["offset"] - self.label_offset  # xyz
