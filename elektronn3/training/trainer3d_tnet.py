@@ -26,6 +26,7 @@ import tensorboardX
 import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import _MultiProcessingDataLoaderIter
 from torch.optim.lr_scheduler import StepLR
 from torch.autograd import Variable
 from tqdm import tqdm
@@ -50,6 +51,29 @@ logger = logging.getLogger('elektronn3log')
 class NaNException(RuntimeError):
     """When a NaN value is detected"""
     pass
+
+
+class _DataLoaderIterCatch(_MultiProcessingDataLoaderIter):
+    def __next__(self):
+        max_fail = 10
+        cnt = 0
+        while True:
+            try:
+                res = super().__next__()
+                break
+            except RuntimeError as e:
+                msg = str(e)
+                cnt += 1
+                if 'DataLoader timed out after' not in msg or cnt == max_fail:
+                    raise RuntimeError(e)
+                logger.debug(f'Caught {cnt} RuntimeError {msg}. Starting with next attempt.')
+        return res
+
+
+class _DataLoaderCatch(DataLoader):
+
+    def __iter__(self):
+        return _DataLoaderIterCatch(self)
 
 
 def _worker_init_fn(worker_id: int) -> None:
@@ -151,7 +175,7 @@ class Trainer3dTriplet:
             ``preview_batch = None``).
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.
-            See :py:class:`torch.utils.data.DataLoader`
+            See :py:class:`~_DataLoaderCatch`
             For normal training, you can mostly set ``num_workers=1``.
             Only use more workers if you notice a data loader bottleneck.
             Set ``num_workers=0`` if you want to debug the datasets
@@ -217,8 +241,8 @@ class Trainer3dTriplet:
     terminate: bool
     step: int
     epoch: int
-    train_loader: torch.utils.data.DataLoader
-    valid_loader: torch.utils.data.DataLoader
+    train_loader: _DataLoaderCatch
+    valid_loader: _DataLoaderCatch
     exp_name: str
     save_path: str  # Full path to where training files are stored
     num_classes: Optional[int]  # Number of different target classes in the train_dataset
@@ -368,7 +392,7 @@ class Trainer3dTriplet:
                 self.tb.add_graph(self.model, self.example_input)
             except Exception as e:
                 logger.warning(f'Could not add model graph to tensorboard.\n{e}')
-        self.train_loader = DataLoader(
+        self.train_loader = _DataLoaderCatch(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
             timeout=480 if self.num_workers > 0 else 0,
