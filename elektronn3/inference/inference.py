@@ -443,6 +443,7 @@ class Predictor:
             self.enable_tiling = False
         else:
             self.enable_tiling = True
+        self._warn_about_shapes = True
         self.model.eval()
 
     @torch.no_grad()
@@ -604,7 +605,7 @@ class Predictor:
                 relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
                 padded_inp[relevant_slice] = inp
                 padded_out_shape = (self.out_shape[0], *padded_shape[2:])
-                if np.any(padded_out_shape != self.out_shape):
+                if self._warn_about_shapes and np.any(padded_out_shape != self.out_shape):
                     sh_diff = np.subtract(padded_out_shape, self.out_shape)
                     # Only nonzero elements are multiplied, otherwise it will be 0.
                     wasted_pix = np.prod(sh_diff[sh_diff != 0])
@@ -618,6 +619,7 @@ class Predictor:
                         # f'At least {wasted_percentage:.2f}% of total compute will be '
                         # f'wasted by this padding.'
                     )
+                    self._warn_about_shapes = False
                     # TODO: Calculate exact compute waste by looking at increased tile overlaps
                     #  (the current estimation omits the (potentially high-impact) added per-tile
                     #  padding/overlaps via overlap_shape.
