@@ -261,6 +261,8 @@ class Trainer3d:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
+            collate_fn = None,
+            batch_avg = None
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -311,6 +313,8 @@ class Trainer3d:
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
+        self.collate_fn = collate_fn
+        self.batch_avg = batch_avg
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -497,6 +501,8 @@ class Trainer3d:
 
             dout_mask = dout[do_mask].view(-1, self.num_classes)
             dtarget_mask = dtarget[dl_mask]
+            if len(dout_mask) == 0:
+                continue
             dloss = self.criterion(dout_mask, dtarget_mask)
 
             if torch.isnan(dloss):
@@ -504,17 +510,23 @@ class Trainer3d:
                 raise NaNException
 
             # update step
-            self.optimizer.zero_grad()
-            if self.mixed_precision:
-                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
+            if self.batch_avg is None:
+                self.optimizer.zero_grad()
+                if self.mixed_precision:
+                    with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    dloss.backward()
+                self.optimizer.step()
             else:
                 dloss.backward()
-            self.optimizer.step()
+                if (i+1) % self.batch_avg == 0:
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
             # End of core training loop on self.device
 
             with torch.no_grad():
-                if self.epoch == 3:
+                if self.epoch == 0 or self.epoch == 100:
                     results = []
                     for j in range(pts.size(0)):
                         orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
