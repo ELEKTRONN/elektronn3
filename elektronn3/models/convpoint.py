@@ -36,39 +36,29 @@ def apply_bn(x, bn):
     return bn(x.transpose(1, 2)).transpose(1, 2).contiguous()
 
 
-def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbor_num: int) \
+def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbor_num: int, padding: int = None) \
         -> Tuple[torch.Tensor, torch.Tensor]:
     """ This function picks output_pts_num random points from input_pts and returns these points (queries) and
         their neighbor_num nearest neighbors from input_pts (indices).
     """
-    # # calculate output_pts by voxelization of valid points
-    # # if num of output_pts > num of valid points: add padding points after nn calculation
-    # initial_voxels = 100
-    # norm = 1000
-    # padding = 1000
-    #
-    # input_pts_np = input_pts.cpu().detach().numpy()
-    # summand = np.arange(input_pts_np.shape[0])+5
-    # input_pts_np = input_pts_np + summand.reshape(input_pts_np.shape[0], 1, 1)
-    # input_pts_np = input_pts_np[input_pts_np < padding].reshape(-1, 3)
-    #
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(input_pts_np)
-    #
-    # pcd, idcs = pcd.voxel_down_sample_and_trace(initial_voxels/norm*4, pcd.get_min_bound(), pcd.get_max_bound())
-    # idcs = np.max(idcs, axis=1)
-    # mask = np.ones(len(input_pts_np), dtype=bool)
-    # mask[idcs] = False
-    # pcd.points = o3d.utility.Vector3dVector(input_pts_np[mask])
+    if padding is not None:
+        input_pts_np = input_pts.cpu().detach().numpy()
+        output_pts = np.ones((len(input_pts_np), output_pts_num, 3))*padding
+        for ix, batch in enumerate(input_pts_np):
+            filtered_pts = batch[batch < padding].reshape(-1, 3)
+            output_pts[ix, :len(filtered_pts)] = \
+                filtered_pts[np.random.choice(len(filtered_pts), min(len(filtered_pts), output_pts_num), replace=False)]
 
-    indices, queries = nearest_neighbors.knn_batch_distance_pick(input_pts.cpu().detach().numpy(),
-                                                                 output_pts_num, neighbor_num, omp=True)
+        indices = nearest_neighbors.knn_batch(input_pts_np, output_pts, neighbor_num, omp=True)
+    else:
+        indices, output_pts = nearest_neighbors.knn_batch_distance_pick(input_pts.cpu().detach().numpy(),
+                                                                        output_pts_num, neighbor_num, omp=True)
     indices = torch.from_numpy(indices).long()
-    queries = torch.from_numpy(queries).float()
+    output_pts = torch.from_numpy(output_pts).float()
     if input_pts.is_cuda:
         indices = indices.to(input_pts.device)
-        queries = queries.to(input_pts.device)
-    return indices, queries
+        output_pts = output_pts.to(input_pts.device)
+    return indices, output_pts
 
 
 def indices_conv(input_pts: torch.Tensor, neighbor_num: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -102,7 +92,7 @@ class LayerBase(nn.Module, ABC):
 
 
 class PtConv(LayerBase):
-    def __init__(self, input_features, output_features, kernele_num, dim, act=None, use_bias=True):
+    def __init__(self, input_features, output_features, kernele_num, dim, act=None, use_bias=True, padding: int = None):
         """
         Args:
             input_features: Number of input channels (e.g. with RGB this would be 3)
@@ -137,6 +127,8 @@ class PtConv(LayerBase):
             self.bias = nn.Parameter(torch.Tensor(output_features), requires_grad=True)
             self.bias.data.uniform_(0, 0)
 
+        self.padding = padding
+
         # The kernel elements get initialized within the unit sphere. This includes only the elements of one single
         # kernel. The position of theses kernel elements are adjusted during training.
         center_data = np.zeros((dim, kernele_num))
@@ -168,7 +160,7 @@ class PtConv(LayerBase):
         """
         if indices_ is None:
             if isinstance(output_pts, int) and input_pts.size(1) != output_pts:
-                indices, next_pts_ = indices_conv_reduction(input_pts, output_pts, neighbor_num * dilation)
+                indices, next_pts_ = indices_conv_reduction(input_pts, output_pts, neighbor_num * dilation, self.padding)
             elif (output_pts is None) or (isinstance(output_pts, int) and input_pts.size(1) == output_pts):
                 indices, next_pts_ = indices_conv(input_pts, neighbor_num * dilation)
             else:
@@ -516,7 +508,7 @@ class SegSmall2(nn.Module):
 class SegBig(nn.Module):
     def __init__(self, input_channels, output_channels, trs=False, dimension=3, dropout=0, use_bias=False,
                  norm_type='bn', use_norm=True, kernel_size: int = 16, neighbor_nums=None, dilations=None,
-                 reductions=None, first_layer=True):
+                 reductions=None, first_layer=True, padding: int = None):
         super(SegBig, self).__init__()
 
         n_centers = kernel_size
@@ -531,33 +523,24 @@ class SegBig(nn.Module):
         pl = 64
 
         # 64 convolutional kernels
-        if first_layer:
-            self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
-            if self.dilations[0] != 1:
-                self.cv0_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        if self.dilations[1] != 1:
-            self.cv1_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        if self.dilations[2] != 1:
-            self.cv2_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        if self.dilations[3] != 1:
-            self.cv3_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
 
         # 128 convolutional kernels
-        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
-        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
         # Inputs get concatenated with previous inputs
-        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
+        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
 
         # 64 Convolutional kernels + Concatenated inputs
-        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
-        self.cv0d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv0d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
 
         # Fully connected layer
         self.fcout = nn.Linear(pl + pl, output_channels)
