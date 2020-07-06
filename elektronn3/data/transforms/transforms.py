@@ -181,13 +181,22 @@ class DropIfTooMuchBG:
 
 
 class RemapTargetIDs:
-    """Remap class IDs of targets to a new dense class mapping.
+    """Remap class IDs of targets to a new class mapping.
+    If ``ids`` is a dict, it is used as a lookup table of the form orig_id -> changed_id.
+    Each occurence of orig_id will be changed to changed_id.
+    If ``ids`` is a list, a dense remapping is performed (the given ids are
+    remapped to [0, 1, 2, ..., N - 1], where N is ``len(ids)``).
     E.g. if your targets contain the class IDs [1, 3, 7, 9] but you are only
     interested in classes 1, 3 and 9 and you
     don't want to train a sparse classifier with useless outputs, you can
     use ``RemapTargetIDs([1, 3, 9])`` to translate each occurence of IDs
-    [1, 3, 9] to [0, 1, 2], respectively."""
-    def __init__(self, ids: Sequence[int], reverse: bool = False):
+    [1, 3, 9] to [0, 1, 2], respectively.
+
+    If ``reverse=True``, the mapping is inverted (useful for converting back
+    to original mappings)."""
+
+    def __init__(self, ids: Union[Sequence[int], Dict[int, int]], reverse: bool = False):
+        ids = {int(k): int(v) for k, v in ids.items()}
         self.ids = ids
         self.reverse = reverse
 
@@ -199,11 +208,19 @@ class RemapTargetIDs:
         if target is None:
             return inp, target
         remapped_target = np.zeros_like(target)
-        for changed_id, orig_id in enumerate(self.ids):
-            if not self.reverse:
-                remapped_target[target == orig_id] = changed_id
-            else:
-                remapped_target[target == changed_id] = orig_id
+        if isinstance(self.ids, dict):
+            ids = self.ids if not self.reverse else {v: k for k, v in self.ids.items()}
+            mask = {}
+            for orig_id in ids.keys():
+                mask[orig_id] = target == orig_id
+            for orig_id, changed_id in self.ids.items():
+                remapped_target[mask[orig_id]] = changed_id
+        else:
+            for changed_id, orig_id in enumerate(self.ids):
+                if not self.reverse:
+                    remapped_target[target == orig_id] = changed_id
+                else:
+                    remapped_target[target == changed_id] = orig_id
         return inp, remapped_target
 
 
