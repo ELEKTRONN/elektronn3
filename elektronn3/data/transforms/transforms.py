@@ -371,7 +371,7 @@ class Normalize:
         if self.inplace:
             normalized = inp  # Refer to the same memory space
         else:
-            normalized = np.empty_like(inp)
+            normalized = inp.copy()
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
             raise ValueError('mean and std must have the same length as the C '
                              'axis (number of channels) of the input.')
@@ -601,7 +601,7 @@ class RandomGaussianBlur:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
-        blurred_inp = np.empty_like(inp)
+        blurred_inp = inp.copy()
         for c in channels:
             self.aniso_factor = self.aniso_factor[:inp[c].ndim]
             sigma = self.gaussian_std(shape=inp[c].ndim)
@@ -682,7 +682,7 @@ class AdditiveGaussianNoise:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if np.random.rand() > self.prob:
             return inp, target
-        noise = np.empty_like(inp)
+        noise = np.zeros_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         for c in channels:
             noise[c] = self.noise_generator(shape=inp[c].shape)
@@ -898,7 +898,7 @@ class ElasticTransform:
         else:
             raise ValueError("Input dimension not understood!")
 
-        deformed_img = np.empty_like(inp)
+        deformed_img = inp.copy()
         for c in channels:
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(ish)
 
@@ -931,7 +931,7 @@ class ElasticTransform:
             else:
                 self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
 
-            deformed_target = np.empty_like(target)
+            deformed_target = target.copy()
             if target_c:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
@@ -1044,9 +1044,9 @@ class RandomRotate2d:
         if inp.ndim == 3:  # 2D case
             rinp, rtarget = rot(inp, target)
         else:  # 3D case: Rotate each z slice separately by the same angle
-            rinp = np.empty_like(inp)
+            rinp = inp.copy()
             if target is not None:
-                rtarget = np.empty_like(target)
+                rtarget = target.copy()
                 for z in range(rinp.shape[1]):
                     if target_c:
                         rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
@@ -1068,7 +1068,7 @@ class Clahe2d:
         assert inp.ndim == 3, 'Only 2D data is supported'
         orig_dtype = inp.dtype
         inp = inp.astype(np.uint8)  # equalize_adapthist() requires uint8
-        clahe_inp = np.empty_like(inp)
+        clahe_inp = inp.copy()
         for c in range(inp.shape[0]):
             clahe_inp[c] = skimage.exposure.equalize_adapthist(inp[c])
         clahe_inp = clahe_inp.astype(orig_dtype)
