@@ -36,6 +36,8 @@ def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
     return tuple(nonspatial_slice + list(spatial_slice))
 
 
+# TODO Fix and document out_shape change for argmax outputs
+
 def tiled_apply(
         func: Callable[[torch.Tensor], torch.Tensor],
         inp: torch.Tensor,
@@ -43,6 +45,7 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
+        out_dtype: Optional[torch.dtype] = None,
         argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
 ) -> torch.Tensor:
@@ -101,6 +104,7 @@ def tiled_apply(
             Note: ``func(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
+        out_dtype: ``torch.dtype`` that the output will be cast to.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
         argmax_with_threshold
@@ -119,18 +123,18 @@ def tiled_apply(
             f'spatial inp shape {tuple(inp.shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
-    if out_shape[1] > 255 and argmax_with_threshold is not None:
-        raise NotImplementedError(
-            f'C = out_shape[1] = {out_shape[1]}, but '
-            f'argmax_with_threshold with C > 255 is not supported due to uint8 storage.'
-        )
-
     if offset is None:
         offset = np.zeros_like(tile_shape)
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
+    if out_dtype is None:
+        out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
+    if out_shape[1] > 255 and out_dtype == torch.uint8:
+        raise ValueError(
+            f'C = out_shape[1] = {out_shape[1]}, but '
+            f'out_dtype torch.uint8 can only hold values up to 255.'
+        )
     out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
@@ -198,9 +202,22 @@ def tiled_apply(
         if argmax_with_threshold is not None:
             out[out_slice] = (out_tile > argmax_with_threshold).to(out_dtype).argmax(dim=1).to(out_dtype)
         else:
-            out[out_slice] = out_tile
+            out[out_slice] = out_tile.to(out_dtype)
 
     return out
+
+
+class Argmax(nn.Module):
+    def __init__(self, dim=1, unsqueeze=True):
+        super().__init__()
+        self.dim = dim
+        self.unsqueeze = unsqueeze
+
+    def forward(self, x):
+        argmax = torch.argmax(x, self.dim)
+        if self.unsqueeze:  # Restore C dim as a workaround for unified slicing pattern in tiled_apply()
+            argmax.unsqueeze_(1)
+        return argmax
 
 
 class FlipAugment:
@@ -312,11 +329,19 @@ class Predictor:
 
             >>> out_channels: int = ?  # E.g. for binary classification it's 2
             >>> out_shape = (out_channels, *inp.shape[2:])
+        out_dtype: torch dtype that the output will be cast to
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        apply_argmax: If ``True``, the argmax of the model output is computed
+            and returned instead of the class score tensor.  This can be used
+            for classification if you are only interested in the final argmax
+            classification. This option can speed up predictions.
+            Note that since argmax is not influenced by softmax,
+            ``apply_softmax`` can be safely disabled if ``apply_argmax`` is
+            ``True``, even if the model was trained with a softmax loss.
         transform: Transformation function to be applied to inputs before
             performing inference. The primary use of this is for normalization.
             Make sure to use the same normalization parameters for inference as
@@ -358,11 +383,13 @@ class Predictor:
             overlap_shape: Optional[Tuple[int, ...]] = None,
             offset: Optional[Tuple[int, ...]] = None,
             out_shape: Optional[Tuple[int, ...]] = None,
+            out_dtype: Optional[torch.dtype] = None,
             float16: bool = False,
             apply_softmax: bool = True,
             transform: Optional[Transform] = None,
             augmentations: Union[int, Optional[Sequence]] = None,
             strict_shapes: bool = False,
+            apply_argmax: bool = False,
             argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
             report_inp_stats: bool = False
@@ -395,6 +422,7 @@ class Predictor:
         if out_shape is not None:
             out_shape = np.array(out_shape)
         self.out_shape = out_shape
+        self.out_dtype = out_dtype
         self.float16 = float16
         if float16 and not isinstance(model, str):
             raise NotImplementedError(
@@ -407,6 +435,7 @@ class Predictor:
             augmentations = DEFAULT_AUGMENTATIONS_3D[:augmentations]
         self.augmentations = augmentations
         self.strict_shapes = strict_shapes
+        self.apply_argmax = apply_argmax
         self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
         self.report_inp_stats = report_inp_stats
@@ -438,11 +467,16 @@ class Predictor:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
+        if apply_argmax:
+            self.model = nn.Sequential(self.model, Argmax(dim=1, unsqueeze=True))
+            if self.out_dtype is None:
+                self.out_dtype = torch.uint8
         if self.tile_shape is None and self.overlap_shape is None:
             #  have no spatial dimensions, so tiling doesn't make sense here.
             self.enable_tiling = False
         else:
             self.enable_tiling = True
+        self._warn_about_shapes = True
         self.model.eval()
 
     @torch.no_grad()
@@ -485,6 +519,7 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
+                out_dtype=self.out_dtype,
                 argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
             )
@@ -604,7 +639,7 @@ class Predictor:
                 relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
                 padded_inp[relevant_slice] = inp
                 padded_out_shape = (self.out_shape[0], *padded_shape[2:])
-                if np.any(padded_out_shape != self.out_shape):
+                if self._warn_about_shapes and np.any(padded_out_shape != self.out_shape):
                     sh_diff = np.subtract(padded_out_shape, self.out_shape)
                     # Only nonzero elements are multiplied, otherwise it will be 0.
                     wasted_pix = np.prod(sh_diff[sh_diff != 0])
@@ -618,6 +653,7 @@ class Predictor:
                         # f'At least {wasted_percentage:.2f}% of total compute will be '
                         # f'wasted by this padding.'
                     )
+                    self._warn_about_shapes = False
                     # TODO: Calculate exact compute waste by looking at increased tile overlaps
                     #  (the current estimation omits the (potentially high-impact) added per-tile
                     #  padding/overlaps via overlap_shape.

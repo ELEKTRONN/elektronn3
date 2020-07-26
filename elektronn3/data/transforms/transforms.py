@@ -181,13 +181,22 @@ class DropIfTooMuchBG:
 
 
 class RemapTargetIDs:
-    """Remap class IDs of targets to a new dense class mapping.
+    """Remap class IDs of targets to a new class mapping.
+    If ``ids`` is a dict, it is used as a lookup table of the form orig_id -> changed_id.
+    Each occurence of orig_id will be changed to changed_id.
+    If ``ids`` is a list, a dense remapping is performed (the given ids are
+    remapped to [0, 1, 2, ..., N - 1], where N is ``len(ids)``).
     E.g. if your targets contain the class IDs [1, 3, 7, 9] but you are only
     interested in classes 1, 3 and 9 and you
     don't want to train a sparse classifier with useless outputs, you can
     use ``RemapTargetIDs([1, 3, 9])`` to translate each occurence of IDs
-    [1, 3, 9] to [0, 1, 2], respectively."""
-    def __init__(self, ids: Sequence[int], reverse: bool = False):
+    [1, 3, 9] to [0, 1, 2], respectively.
+
+    If ``reverse=True``, the mapping is inverted (useful for converting back
+    to original mappings)."""
+
+    def __init__(self, ids: Union[Sequence[int], Dict[int, int]], reverse: bool = False):
+        ids = {int(k): int(v) for k, v in ids.items()}
         self.ids = ids
         self.reverse = reverse
 
@@ -199,11 +208,19 @@ class RemapTargetIDs:
         if target is None:
             return inp, target
         remapped_target = np.zeros_like(target)
-        for changed_id, orig_id in enumerate(self.ids):
-            if not self.reverse:
-                remapped_target[target == orig_id] = changed_id
-            else:
-                remapped_target[target == changed_id] = orig_id
+        if isinstance(self.ids, dict):
+            ids = self.ids if not self.reverse else {v: k for k, v in self.ids.items()}
+            mask = {}
+            for orig_id in ids.keys():
+                mask[orig_id] = target == orig_id
+            for orig_id, changed_id in self.ids.items():
+                remapped_target[mask[orig_id]] = changed_id
+        else:
+            for changed_id, orig_id in enumerate(self.ids):
+                if not self.reverse:
+                    remapped_target[target == orig_id] = changed_id
+                else:
+                    remapped_target[target == changed_id] = orig_id
         return inp, remapped_target
 
 
@@ -354,7 +371,7 @@ class Normalize:
         if self.inplace:
             normalized = inp  # Refer to the same memory space
         else:
-            normalized = np.empty_like(inp)
+            normalized = inp.copy()
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
             raise ValueError('mean and std must have the same length as the C '
                              'axis (number of channels) of the input.')
@@ -584,7 +601,7 @@ class RandomGaussianBlur:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
-        blurred_inp = np.empty_like(inp)
+        blurred_inp = inp.copy()
         for c in channels:
             self.aniso_factor = self.aniso_factor[:inp[c].ndim]
             sigma = self.gaussian_std(shape=inp[c].ndim)
@@ -665,7 +682,7 @@ class AdditiveGaussianNoise:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if np.random.rand() > self.prob:
             return inp, target
-        noise = np.empty_like(inp)
+        noise = np.zeros_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         for c in channels:
             noise[c] = self.noise_generator(shape=inp[c].shape)
@@ -881,7 +898,7 @@ class ElasticTransform:
         else:
             raise ValueError("Input dimension not understood!")
 
-        deformed_img = np.empty_like(inp)
+        deformed_img = inp.copy()
         for c in channels:
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(ish)
 
@@ -914,7 +931,7 @@ class ElasticTransform:
             else:
                 self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
 
-            deformed_target = np.empty_like(target)
+            deformed_target = target.copy()
             if target_c:
                 for tc in range(target_channels):
                     target_order = 0 if self.target_discrete_ix[tc] is True else 1
@@ -1027,9 +1044,9 @@ class RandomRotate2d:
         if inp.ndim == 3:  # 2D case
             rinp, rtarget = rot(inp, target)
         else:  # 3D case: Rotate each z slice separately by the same angle
-            rinp = np.empty_like(inp)
+            rinp = inp.copy()
             if target is not None:
-                rtarget = np.empty_like(target)
+                rtarget = target.copy()
                 for z in range(rinp.shape[1]):
                     if target_c:
                         rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
@@ -1051,7 +1068,7 @@ class Clahe2d:
         assert inp.ndim == 3, 'Only 2D data is supported'
         orig_dtype = inp.dtype
         inp = inp.astype(np.uint8)  # equalize_adapthist() requires uint8
-        clahe_inp = np.empty_like(inp)
+        clahe_inp = inp.copy()
         for c in range(inp.shape[0]):
             clahe_inp[c] = skimage.exposure.equalize_adapthist(inp[c])
         clahe_inp = clahe_inp.astype(orig_dtype)

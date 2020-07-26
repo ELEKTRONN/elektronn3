@@ -226,7 +226,7 @@ class PatchCreator(data.Dataset):
                     print(e)
                     logger.warning(
                         f'{fail_percentage}% of warping attempts are failing.\n'
-                        'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
+                        'Consider lowering lowering your input patch shapes or warp_kwargs[\'warp_amount\']).'
                     )
                     self._failed_warp_warned = True
                 continue
