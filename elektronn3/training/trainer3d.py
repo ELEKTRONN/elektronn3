@@ -373,7 +373,7 @@ class Trainer3d:
         self.train_loader = DataLoader(
             self.train_th, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=60 if self.num_workers > 0 else 0,
+            timeout=0 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
         # num_workers is set to 0 for valid_loader because validation background processes sometimes
@@ -399,11 +399,23 @@ class Trainer3d:
         visualizations are computed and logged to tensorboard."""
         self.start_time = datetime.datetime.now()
         self.end_time = self.start_time + datetime.timedelta(seconds=max_runtime)
-        self._save_model(suffix='_initial', verbose=False)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self._save_model(suffix='_initial', verbose=False)
         self._lr_nhood.clear()
         self._lr_nhood.append(self.optimizer.param_groups[0]['lr'])  # LR of the first training step
         while not self.terminate:
             try:
+                # save models manually
+                model_path = self.save_path + f'/models/state_dict_e{self.epoch}.pth'
+                if self.epoch == 0 or self.epoch % 10 == 0:
+                    torch.save({
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'global_step': self.step,
+                        'epoch': self.epoch,
+                    }, model_path)
+
                 stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
 
@@ -418,15 +430,6 @@ class Trainer3d:
                         valid_stats = self.curr_stats
                         stats.update(valid_stats)
 
-                # save models manually
-                model_path = self.save_path + f'/models/state_dict_e{self.epoch}.pth'
-                torch.save({
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'global_step': self.step,
-                    'epoch': self.epoch,
-                }, model_path)
-
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
                 # Render visualizations and log to tensorboard
@@ -435,10 +438,12 @@ class Trainer3d:
                 self._log_to_history_tracker(stats, misc)
 
                 # Save trained model state
-                self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
-                if stats['val_loss'] < self.best_val_loss:
-                    self.best_val_loss = stats['val_loss']
-                    self._save_model(suffix='_best', val_loss=stats['val_loss'])
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    self._save_model(val_loss=stats['val_loss'], verbose=False)  # Not verbose because it can get spammy.
+                    if stats['val_loss'] < self.best_val_loss:
+                        self.best_val_loss = stats['val_loss']
+                        self._save_model(suffix='_best', val_loss=stats['val_loss'])
             except KeyboardInterrupt:
                 if self.ipython_shell:
                     IPython.embed(header=self._shell_info)
@@ -460,7 +465,9 @@ class Trainer3d:
                         break
                 else:
                     raise e
-        self._save_model(suffix='_final')
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self._save_model(suffix='_final')
         if self.tb is not None:
             self.tb.close()  # Ensure that everything is flushed
 

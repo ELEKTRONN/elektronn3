@@ -54,6 +54,11 @@ def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbo
 
     indices = nearest_neighbors.knn_batch(input_pts_np, output_pts, neighbor_num, omp=True)
 
+    # calculate centroid of each neighborhood as new output point
+    for ix, batch in enumerate(indices):
+        pts_batch = input_pts_np[ix]
+        output_pts[ix] = np.mean(pts_batch[batch], axis=1)
+
     indices = torch.from_numpy(indices).long()
     output_pts = torch.from_numpy(output_pts).float()
 
@@ -211,9 +216,6 @@ class PtConv(LayerBase):
         dists = F.relu(self.l2(dists))
         dists = F.relu(self.l3(dists))
 
-        import ipdb
-        ipdb.set_trace()
-
         fs = features.size()
         features = features.transpose(2, 3)
         # [bs*np, fs, nn]
@@ -249,7 +251,7 @@ class PtConv(LayerBase):
 class SegBig(nn.Module):
     def __init__(self, input_channels, output_channels, trs=False, dimension=3, dropout=0, use_bias=False,
                  norm_type='bn', use_norm=True, kernel_size: int = 16, neighbor_nums=None, dilations=None,
-                 reductions=None, first_layer=True):
+                 reductions=None, first_layer=True, pl: int = 64):
         super(SegBig, self).__init__()
 
         n_centers = kernel_size
@@ -260,23 +262,11 @@ class SegBig(nn.Module):
         self.reductions = reductions
         self.first_layer = first_layer
 
-        # Number of convolutional kernels to start with
-        pl = 64
-
         # 64 convolutional kernels
-        if first_layer:
-            self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
-            if self.dilations[0] != 1:
-                self.cv0_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
+        self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
         self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        if self.dilations[1] != 1:
-            self.cv1_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
         self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        if self.dilations[2] != 1:
-            self.cv2_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
         self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias)
-        if self.dilations[3] != 1:
-            self.cv3_dil = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias)
 
         # 128 convolutional kernels
         self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias)
@@ -356,8 +346,11 @@ class SegBig(nn.Module):
         if self.reductions is None:
             self.reductions = [2048, 1024, 256, 64, 16, 8]
 
-        x0, _ = self.cv0(x, input_pts, 2, 4, dilation=self.dilations[0])
+        x0, _ = self.cv0(x, input_pts, 16, dilation=self.dilations[0])
         x0 = self.relu(apply_bn(x0, self.bn0))
+
+        import ipdb
+        ipdb.set_trace()
 
         # Number of output points = 2048, Neighborhood of 16 points
         x1, pts1 = self.cv1(x0, input_pts, self.neighbor_nums[1], self.reductions[0], dilation=self.dilations[1])

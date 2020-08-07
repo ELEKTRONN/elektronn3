@@ -15,10 +15,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
-import time
 import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighbors
 from abc import ABC
-from typing import Tuple
+from typing import Tuple, List
 
 
 # STATIC HELPER FUNCTIONS #
@@ -36,13 +35,14 @@ def apply_bn(x, bn):
     return bn(x.transpose(1, 2)).transpose(1, 2).contiguous()
 
 
-def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbor_num: int, padding: int = None) \
+def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbor_num: int, padding: int = None,
+                           centroids: bool = False) \
         -> Tuple[torch.Tensor, torch.Tensor]:
     """ This function picks output_pts_num random points from input_pts and returns these points (queries) and
         their neighbor_num nearest neighbors from input_pts (indices).
     """
+    input_pts_np = input_pts.cpu().detach().numpy()
     if padding is not None:
-        input_pts_np = input_pts.cpu().detach().numpy()
         output_pts = np.ones((len(input_pts_np), output_pts_num, 3))*padding
         for ix, batch in enumerate(input_pts_np):
             filtered_pts = batch[batch < padding].reshape(-1, 3)
@@ -51,8 +51,14 @@ def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbo
 
         indices = nearest_neighbors.knn_batch(input_pts_np, output_pts, neighbor_num, omp=True)
     else:
-        indices, output_pts = nearest_neighbors.knn_batch_distance_pick(input_pts.cpu().detach().numpy(),
-                                                                        output_pts_num, neighbor_num, omp=True)
+        indices, output_pts = nearest_neighbors.knn_batch_distance_pick(input_pts_np, output_pts_num, neighbor_num, omp=True)
+
+    if centroids:
+        # calculate centroid of each neighborhood as new output point
+        for ix, batch in enumerate(indices):
+            pts_batch = input_pts_np[ix]
+            output_pts[ix] = np.mean(pts_batch[batch], axis=1)
+
     indices = torch.from_numpy(indices).long()
     output_pts = torch.from_numpy(output_pts).float()
     if input_pts.is_cuda:
@@ -92,14 +98,21 @@ class LayerBase(nn.Module, ABC):
 
 
 class PtConv(LayerBase):
-    def __init__(self, input_features, output_features, kernele_num, dim, act=None, use_bias=True, padding: int = None):
+    def __init__(self, in_feats: int = 64, out_feats: int = 64, kernel_size: int = 16, dim: int = 3,
+                 act: str = None, use_bias: bool = True, padding: int = None, nn_center: bool = True,
+                 centroids: bool = False):
         """
         Args:
-            input_features: Number of input channels (e.g. with RGB this would be 3)
-            output_features: Number of convolutional kernels used in this layer. It defines the output
+            in_feats: Number of input channels (e.g. with RGB this would be 3)
+            out_feats: Number of convolutional kernels used in this layer. It defines the output
                 feature dimension, i.e. the size of y.
-            kernele_num: Number of elements per convolutional kernel.
+            kernel_size: Number of elements per convolutional kernel.
             dim: The dimensions of the problem. For 3D point clouds this is set to 3.
+            act: String identifier of activation function.
+            use_bias: Flag for using bias.
+            padding: Flag for adding points to ensure constant number of points per sample.
+            nn_center: Center neighborhoods before distance calculations.
+            centroids: Reduce point cloud to centroids of neighborhoods.
         """
         if act in [None, 'relu']:
             self.act = F.relu_
@@ -116,34 +129,33 @@ class PtConv(LayerBase):
         # Kernel depth equals number of input features. Thus, the number of needed weights is
         # Input_Channels x Kernel number x Kernel elements. These weights get initialized randomly.
         self.weight = \
-            nn.Parameter(torch.Tensor(input_features, kernele_num, output_features), requires_grad=True)
-        bound = math.sqrt(3.0) * math.sqrt(2.0 / (input_features + output_features))
+            nn.Parameter(torch.Tensor(in_feats, kernel_size, out_feats), requires_grad=True)
+        bound = math.sqrt(3.0) * math.sqrt(2.0 / (in_feats + out_feats))
         self.weight.data.uniform_(-bound, bound)
 
-        # The model is built around RELU(Wx+b) where b is the bias. If Batch Normalization is used, the bias term is
-        # not needed as it is included in the normalization. Thus, it is set to 0 when calling this function.
+        # Inititalize bias if necessary
         self.use_bias = use_bias
         if use_bias:
-            self.bias = nn.Parameter(torch.Tensor(output_features), requires_grad=True)
+            self.bias = nn.Parameter(torch.Tensor(out_feats), requires_grad=True)
             self.bias.data.uniform_(0, 0)
 
         self.padding = padding
+        self.nn_center = nn_center
+        self.centroids = centroids
 
         # The kernel elements get initialized within the unit sphere. This includes only the elements of one single
-        # kernel. The position of theses kernel elements are adjusted during training.
-        center_data = np.zeros((dim, kernele_num))
-        for i in range(kernele_num):
+        # kernel. The position of these kernel elements are adjusted during training.
+        center_data = np.zeros((dim, kernel_size))
+        for i in range(kernel_size):
             coord = np.random.rand(dim) * 2 - 1
             while (coord ** 2).sum() > 1:
                 coord = np.random.rand(dim) * 2 - 1
             center_data[:, i] = coord
         self.centers = nn.Parameter(torch.from_numpy(center_data).float(), requires_grad=True)
 
-        # Neural Network for adjusting the kernel element positions. First layer consists of 2*n_centers linear units,
-        # second and third layer have n_centers linear units. Each linear unit computes y = Wx+b.
-        self.l1 = nn.Linear(dim * kernele_num, 2 * kernele_num)
-        self.l2 = nn.Linear(2 * kernele_num, kernele_num)
-        self.l3 = nn.Linear(kernele_num, kernele_num)
+        self.l1 = nn.Linear(dim * kernel_size, 2 * kernel_size)
+        self.l2 = nn.Linear(2 * kernel_size, kernel_size)
+        self.l3 = nn.Linear(kernel_size, kernel_size)
 
     def forward(self, features, input_pts, neighbor_num, output_pts=None, normalize=False,
                 indices_=None, return_indices=False, dilation=1):
@@ -160,7 +172,8 @@ class PtConv(LayerBase):
         """
         if indices_ is None:
             if isinstance(output_pts, int) and input_pts.size(1) != output_pts:
-                indices, next_pts_ = indices_conv_reduction(input_pts, output_pts, neighbor_num * dilation, self.padding)
+                indices, next_pts_ = indices_conv_reduction(input_pts, output_pts, neighbor_num * dilation, self.padding,
+                                                            self.centroids)
             elif (output_pts is None) or (isinstance(output_pts, int) and input_pts.size(1) == output_pts):
                 indices, next_pts_ = indices_conv(input_pts, neighbor_num * dilation)
             else:
@@ -191,7 +204,8 @@ class PtConv(LayerBase):
         pts = input_pts.view(-1, input_pts.size(2))[indices]
 
         # Center each neighboorhood
-        pts = pts - output_pts.unsqueeze(2)
+        if self.nn_center:
+            pts = pts - output_pts.unsqueeze(2)
 
         if normalize:
             # Normalize to unit ball
@@ -508,7 +522,8 @@ class SegSmall2(nn.Module):
 class SegBig(nn.Module):
     def __init__(self, input_channels, output_channels, trs=False, dimension=3, dropout=0, use_bias=False,
                  norm_type='bn', use_norm=True, kernel_size: int = 16, neighbor_nums=None, dilations=None,
-                 reductions=None, first_layer=True, padding: int = None):
+                 reductions=None, first_layer=True, padding: int = None, nn_center: bool = True,
+                 centroids: bool = False, pl: int = 64, normalize=False):
         super(SegBig, self).__init__()
 
         n_centers = kernel_size
@@ -518,29 +533,42 @@ class SegBig(nn.Module):
         self.dilations = dilations
         self.reductions = reductions
         self.first_layer = first_layer
-
-        # Number of convolutional kernels to start with
-        pl = 64
+        if normalize:
+            print("In network normalization is on!")
+        self.normalize = normalize
 
         # 64 convolutional kernels
-        self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
 
         # 128 convolutional kernels
-        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
         # Inputs get concatenated with previous inputs
-        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
 
         # 64 Convolutional kernels + Concatenated inputs
-        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
-        self.cv0d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding)
+        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        self.cv0d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
 
         # Fully connected layer
         self.fcout = nn.Linear(pl + pl, output_channels)
@@ -591,6 +619,8 @@ class SegBig(nn.Module):
             self.bn1d = nn.GroupNorm(pl // 2, pl)
             self.bn0d = nn.GroupNorm(pl // 2, pl)
 
+        if dropout != 0:
+            print(f"Using Dropout with p = {dropout}")
         self.drop = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
 
@@ -606,49 +636,49 @@ class SegBig(nn.Module):
         if self.reductions is None:
             self.reductions = [2048, 1024, 256, 64, 16, 8]
 
-        x0, _ = self.cv0(x, input_pts, self.neighbor_nums[0], dilation=self.dilations[0])
+        x0, _ = self.cv0(x, input_pts, self.neighbor_nums[0], dilation=self.dilations[0], normalize=self.normalize)
         x0 = self.relu(apply_bn(x0, self.bn0))
 
         # Number of output points = 2048, Neighborhood of 16 points
-        x1, pts1 = self.cv1(x0, input_pts, self.neighbor_nums[1], self.reductions[0], dilation=self.dilations[1])
+        x1, pts1 = self.cv1(x0, input_pts, self.neighbor_nums[1], self.reductions[0], dilation=self.dilations[1], normalize=self.normalize)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
-        x2, pts2 = self.cv2(x1, pts1, self.neighbor_nums[2], self.reductions[1], dilation=self.dilations[2])
+        x2, pts2 = self.cv2(x1, pts1, self.neighbor_nums[2], self.reductions[1], dilation=self.dilations[2], normalize=self.normalize)
         x2 = self.relu(apply_bn(x2, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, self.neighbor_nums[3], self.reductions[2], dilation=self.dilations[3])
+        x3, pts3 = self.cv3(x2, pts2, self.neighbor_nums[3], self.reductions[2], dilation=self.dilations[3], normalize=self.normalize)
         x3 = self.relu(apply_bn(x3, self.bn3))
 
-        x4, pts4 = self.cv4(x3, pts3, self.neighbor_nums[4], self.reductions[3])
+        x4, pts4 = self.cv4(x3, pts3, self.neighbor_nums[4], self.reductions[3], normalize=self.normalize)
         x4 = self.relu(apply_bn(x4, self.bn4))
 
-        x5, pts5 = self.cv5(x4, pts4, self.neighbor_nums[5], self.reductions[4])
+        x5, pts5 = self.cv5(x4, pts4, self.neighbor_nums[5], self.reductions[4], normalize=self.normalize)
         x5 = self.relu(apply_bn(x5, self.bn5))
 
-        x6, pts6 = self.cv6(x5, pts5, self.neighbor_nums[6], self.reductions[5])
+        x6, pts6 = self.cv6(x5, pts5, self.neighbor_nums[6], self.reductions[5], normalize=self.normalize)
         x6 = self.relu(apply_bn(x6, self.bn6))
 
-        x5d, _ = self.cv5d(x6, pts6, self.neighbor_nums[7], pts5)
+        x5d, _ = self.cv5d(x6, pts6, self.neighbor_nums[7], pts5, normalize=self.normalize)
         x5d = self.relu(apply_bn(x5d, self.bn5d))
         x5d = torch.cat([x5d, x5], dim=2)
 
-        x4d, _ = self.cv4d(x5d, pts5, self.neighbor_nums[8], pts4)
+        x4d, _ = self.cv4d(x5d, pts5, self.neighbor_nums[8], pts4, normalize=self.normalize)
         x4d = self.relu(apply_bn(x4d, self.bn4d))
         x4d = torch.cat([x4d, x4], dim=2)
 
-        x3d, _ = self.cv3d(x4d, pts4, self.neighbor_nums[9], pts3)
+        x3d, _ = self.cv3d(x4d, pts4, self.neighbor_nums[9], pts3, normalize=self.normalize)
         x3d = self.relu(apply_bn(x3d, self.bn3d))
         x3d = torch.cat([x3d, x3], dim=2)
 
-        x2d, _ = self.cv2d(x3d, pts3, self.neighbor_nums[10], pts2)
+        x2d, _ = self.cv2d(x3d, pts3, self.neighbor_nums[10], pts2, normalize=self.normalize)
         x2d = self.relu(apply_bn(x2d, self.bn2d))
         x2d = torch.cat([x2d, x2], dim=2)
 
-        x1d, _ = self.cv1d(x2d, pts2, self.neighbor_nums[11], pts1)
+        x1d, _ = self.cv1d(x2d, pts2, self.neighbor_nums[11], pts1, normalize=self.normalize)
         x1d = self.relu(apply_bn(x1d, self.bn1d))
         x1d = torch.cat([x1d, x1], dim=2)
 
-        x0d, _ = self.cv0d(x1d, pts1, self.neighbor_nums[12], input_pts)
+        x0d, _ = self.cv0d(x1d, pts1, self.neighbor_nums[12], input_pts, normalize=self.normalize)
         x0d = self.relu(apply_bn(x0d, self.bn0d))
         x0d = torch.cat([x0d, x0], dim=2)
 
@@ -662,155 +692,104 @@ class SegBig(nn.Module):
             return xout
 
 ################################
-# TEST SEGMENTATION NETWORK
+# ADAPTABLE SEGMENTATION NETWORK
 ################################
 
 
-class SegTest(nn.Module):
-    def __init__(self, input_channels, output_channels, dimension=3, dropout=0):
-        super(SegTest, self).__init__()
+class SegAdapt(nn.Module):
+    def __init__(self, input_channels, output_channels, architecture: List[tuple] = None, trs: bool = False,
+                 dim: int = 3, dropout: int = 0, use_bias: bool = False, norm_type: str = 'gn',
+                 kernel_size: int = 16, padding: int = None, nn_center: bool = True, centroids: bool = False,
+                 kernel_num: int = 64, normalize: bool = False, act: str = None):
+        super(SegAdapt, self).__init__()
 
-        n_centers = 16
+        # define standard architecture
+        if architecture is None:
+            # (in_feats factor, out_feats factor, reduction, neighbor_num)
+            architecture = [(-1, 1, None, 32), (1, 1, 2048, 32), (1, 1, 1024, 32), (1, 1, 256, 16), (1, 2, 64, 8),
+                            (2, 2, 16, 8), (2, 2, 8, 4), (2, 2, 'd', 8), (4, 2, 'd', 8), (4, 1, 'd', 8),
+                            (2, 1, 'd', 16), (2, 1, 'd', 16), (2, 1, 'd', 16), ('drop', dropout), ('fcout', 2)]
 
-        # Number of convolutional kernels to start with
-        pl = 64
+        # define activation function
+        if act in [None, 'relu']:
+            self.act = nn.ReLU(inplace=True)
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
 
-        # 64 convolutional kernels
-        self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=False)
-        self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=False)
-        self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=False)
-        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=False)
+        self.normalize = normalize
+        self.reductions = []
+        self.neighbor_nums = []
+        self.layers = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        for layer in architecture:
+            if layer[0] == 'fcout':
+                self.layers.append(nn.Linear(layer[1] * kernel_num, output_channels))
+                continue
+            if layer[0] == 'drop':
+                self.layers.append(nn.Dropout(layer[1]))
+                continue
+            in_feats = kernel_num
+            if layer[0] == -1:
+                in_feats = input_channels
+                layer = (1, layer[1], layer[2], layer[3])
+            self.layers.append(PtConv(in_feats=layer[0] * in_feats, out_feats=layer[1] * kernel_num,
+                                      kernel_size=kernel_size, dim=dim, use_bias=use_bias, padding=padding,
+                                      nn_center=nn_center, centroids=centroids))
+            self.reductions.append(layer[2])
+            self.neighbor_nums.append(layer[3])
+            if norm_type.lower() == 'none':
+                self.norms.append(nn.Identity())
+            elif norm_type.lower() == 'bn':
+                self.norms.append(nn.BatchNorm1d(layer[1] * kernel_num, track_running_stats=trs))
+            elif norm_type == 'gn':
+                self.norms.append(nn.GroupNorm(layer[1] * kernel_num // 2, layer[1]*kernel_num))
 
-        # 128 convolutional kernels
-        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-        # Inputs get concatenated with previous inputs
-        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=False)
-
-        # 64 Convolutional kernels + Concatenated inputs
-        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=False)
-        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=False)
-        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=False)
-        self.cv0d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=False)
-
-        # Fully connected layer
-        self.fcout = nn.Linear(pl + pl, output_channels)
-
-        self.bn0 = nn.BatchNorm1d(pl)
-        self.bn1 = nn.BatchNorm1d(pl)
-        self.bn2 = nn.BatchNorm1d(pl)
-        self.bn3 = nn.BatchNorm1d(pl)
-        self.bn4 = nn.BatchNorm1d(2 * pl)
-        self.bn5 = nn.BatchNorm1d(2 * pl)
-        self.bn6 = nn.BatchNorm1d(2 * pl)
-
-        self.bn5d = nn.BatchNorm1d(2 * pl)
-        self.bn4d = nn.BatchNorm1d(2 * pl)
-        self.bn3d = nn.BatchNorm1d(pl)
-        self.bn2d = nn.BatchNorm1d(pl)
-        self.bn1d = nn.BatchNorm1d(pl)
-        self.bn0d = nn.BatchNorm1d(pl)
-
-        self.drop = nn.Dropout(dropout)
-
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, x, input_pts, return_features=False, output_mask=None):
+    def forward(self, x, input_pts, return_features=False):
         """
         Args:
             x: Batch of features
             input_pts: Batch of points
             return_features: Flag for returning calculated features.
-            output_mask: Mask for excluding points from prediction
         """
-
-        if output_mask is None:
-            output_mask = torch.ones((input_pts.shape[0], input_pts.shape[1]), dtype=torch.bool)
-
-        start = time.time()
-        x0, _ = self.cv0(x, input_pts, 16)
-        x0 = self.relu(apply_bn(x0, self.bn0))
-        print(f"cv0: {time.time() - start} s")
-
-        # Number of output points = 2048, Neighborhood of 16 points
-        start = time.time()
-        x1, pts1 = self.cv1(x0, input_pts, 16, 2048)
-        x1 = self.relu(apply_bn(x1, self.bn1))
-        print(f"cv1: {time.time() - start} s")
-
-        start = time.time()
-        x2, pts2 = self.cv2(x1, pts1, 16, 1024)
-        x2 = self.relu(apply_bn(x2, self.bn2))
-        print(f"cv2: {time.time() - start} s")
-
-        start = time.time()
-        x3, pts3 = self.cv3(x2, pts2, 16, 256)
-        x3 = self.relu(apply_bn(x3, self.bn3))
-        print(f"cv3: {time.time() - start} s")
-
-        start = time.time()
-        x4, pts4 = self.cv4(x3, pts3, 8, 64)
-        x4 = self.relu(apply_bn(x4, self.bn4))
-        print(f"cv4: {time.time() - start} s")
-
-        start = time.time()
-        x5, pts5 = self.cv5(x4, pts4, 8, 16)
-        x5 = self.relu(apply_bn(x5, self.bn5))
-        print(f"cv5: {time.time() - start} s")
-
-        start = time.time()
-        x6, pts6 = self.cv6(x5, pts5, 4, 8)
-        x6 = self.relu(apply_bn(x6, self.bn6))
-        print(f"cv6: {time.time() - start} s")
-
-        start = time.time()
-        x5d, _ = self.cv5d(x6, pts6, 4, pts5)
-        x5d = self.relu(apply_bn(x5d, self.bn5d))
-        x5d = torch.cat([x5d, x5], dim=2)
-        print(f"cv5d: {time.time() - start} s")
-
-        start = time.time()
-        x4d, _ = self.cv4d(x5d, pts5, 4, pts4)
-        x4d = self.relu(apply_bn(x4d, self.bn4d))
-        x4d = torch.cat([x4d, x4], dim=2)
-        print(f"cv4d: {time.time() - start} s")
-
-        start = time.time()
-        x3d, _ = self.cv3d(x4d, pts4, 4, pts3)
-        x3d = self.relu(apply_bn(x3d, self.bn3d))
-        x3d = torch.cat([x3d, x3], dim=2)
-        print(f"cv3d: {time.time() - start} s")
-
-        start = time.time()
-        x2d, _ = self.cv2d(x3d, pts3, 8, pts2)
-        x2d = self.relu(apply_bn(x2d, self.bn2d))
-        x2d = torch.cat([x2d, x2], dim=2)
-        print(f"cv2d: {time.time() - start} s")
-
-        start = time.time()
-        x1d, _ = self.cv1d(x2d, pts2, 8, pts1)
-        x1d = self.relu(apply_bn(x1d, self.bn1d))
-        x1d = torch.cat([x1d, x1], dim=2)
-        print(f"cv1d: {time.time() - start} s")
-
-        start = time.time()
-        x0d, _ = self.cv0d(x1d, pts1, 8, input_pts)
-        x0d = self.relu(apply_bn(x0d, self.bn0d))
-        x0d = torch.cat([x0d, x0], dim=2)
-        print(f"cv0d: {time.time() - start} s")
-
-        xout = x0d
-        xout = self.drop(xout)
-        start = time.time()
-        xout = self.fcout(xout)
-        print(f"fc: {time.time() - start} s")
-
-        if return_features:
-            return xout, x0d
-        else:
-            return xout
+        in_feats = x
+        in_pts = input_pts
+        feats = []
+        pts = []
+        dropout_cache = None
+        for ix, layer in enumerate(self.layers):
+            if type(layer) == nn.Dropout:
+                dropout_cache = in_feats
+                in_feats = layer(in_feats)
+                continue
+            if type(layer) == nn.Linear:
+                xout = layer(in_feats)
+                if return_features:
+                    if dropout_cache is not None:
+                        in_feats = dropout_cache
+                    return xout, in_feats
+                else:
+                    return xout
+            output_pts = self.reductions[ix]
+            if self.reductions[ix] == 'd':
+                output_pts = pts.pop()
+            elif ix != 0:
+                pts.append(in_pts)
+                feats.append(in_feats)
+            out_feats, out_pts = layer(in_feats, in_pts, self.neighbor_nums[ix], output_pts=output_pts,
+                                       normalize=self.normalize)
+            out_feats = self.act(apply_bn(out_feats, self.norms[ix]))
+            if self.reductions[ix] == 'd':
+                in_feats = torch.cat([out_feats, feats.pop()], dim=2)
+                in_pts = output_pts
+            else:
+                in_feats = out_feats
+                in_pts = out_pts
 
 
 ################################
