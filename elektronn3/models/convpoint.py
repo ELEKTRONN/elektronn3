@@ -629,17 +629,17 @@ class SegBig(nn.Module):
         if self.reductions is None:
             self.reductions = [2048, 1024, 256, 64, 16, 8]
 
-        x0, _ = self.cv0(x, input_pts, self.neighbor_nums[0], dilation=self.dilations[0], normalize=self.normalize)
+        x0, _ = self.cv0(x, input_pts, self.neighbor_nums[0], normalize=self.normalize)
         x0 = self.relu(apply_bn(x0, self.bn0))
 
         # Number of output points = 2048, Neighborhood of 16 points
-        x1, pts1 = self.cv1(x0, input_pts, self.neighbor_nums[1], self.reductions[0], dilation=self.dilations[1], normalize=self.normalize)
+        x1, pts1 = self.cv1(x0, input_pts, self.neighbor_nums[1], self.reductions[0], normalize=self.normalize)
         x1 = self.relu(apply_bn(x1, self.bn1))
 
-        x2, pts2 = self.cv2(x1, pts1, self.neighbor_nums[2], self.reductions[1], dilation=self.dilations[2], normalize=self.normalize)
+        x2, pts2 = self.cv2(x1, pts1, self.neighbor_nums[2], self.reductions[1], normalize=self.normalize)
         x2 = self.relu(apply_bn(x2, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, self.neighbor_nums[3], self.reductions[2], dilation=self.dilations[3], normalize=self.normalize)
+        x3, pts3 = self.cv3(x2, pts2, self.neighbor_nums[3], self.reductions[2], normalize=self.normalize)
         x3 = self.relu(apply_bn(x3, self.bn3))
 
         x4, pts4 = self.cv4(x3, pts3, self.neighbor_nums[4], self.reductions[3], normalize=self.normalize)
