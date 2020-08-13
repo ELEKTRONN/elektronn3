@@ -521,20 +521,15 @@ class SegSmall2(nn.Module):
 
 class SegBig(nn.Module):
     def __init__(self, input_channels, output_channels, trs=False, dimension=3, dropout=0, use_bias=False,
-                 norm_type='bn', use_norm=True, kernel_size: int = 16, neighbor_nums=None, dilations=None,
+                 norm_type='bn', use_norm=True, kernel_size: int = 16, neighbor_nums=None,
                  reductions=None, first_layer=True, padding: int = None, nn_center: bool = True,
                  centroids: bool = False, pl: int = 64, normalize=False):
         super(SegBig, self).__init__()
 
         n_centers = kernel_size
         self.neighbor_nums = neighbor_nums
-        if dilations is None:
-            dilations = [1, 1, 1, 1]
-        self.dilations = dilations
         self.reductions = reductions
         self.first_layer = first_layer
-        if normalize:
-            print("In network normalization is on!")
         self.normalize = normalize
 
         # 64 convolutional kernels
@@ -619,8 +614,6 @@ class SegBig(nn.Module):
             self.bn1d = nn.GroupNorm(pl // 2, pl)
             self.bn0d = nn.GroupNorm(pl // 2, pl)
 
-        if dropout != 0:
-            print(f"Using Dropout with p = {dropout}")
         self.drop = nn.Dropout(dropout)
         self.relu = nn.ReLU(inplace=True)
 
