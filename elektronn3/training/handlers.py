@@ -224,7 +224,10 @@ def _tb_log_sample_images(
     if target_batch is not None:
         target_batch = target_batch[:1]
     out_batch = images['out'][:1]
-    name = images.get('fname', [None])[0]
+
+    name = images.get('fname')
+    if name is not None:
+        name = name[0]
 
 
     if trainer.inference_kwargs['apply_softmax']:
