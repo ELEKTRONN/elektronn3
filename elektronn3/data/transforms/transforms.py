@@ -202,9 +202,9 @@ class RemapTargetIDs:
 
     def __call__(
             self,
-            inp: np.ndarray,  # returned without modifications
+            inp: Optional[np.ndarray],  # returned without modifications
             target: Optional[np.ndarray]
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         if target is None:
             return inp, target
         remapped_target = np.zeros_like(target)
@@ -213,7 +213,7 @@ class RemapTargetIDs:
             mask = {}
             for orig_id in ids.keys():
                 mask[orig_id] = target == orig_id
-            for orig_id, changed_id in self.ids.items():
+            for orig_id, changed_id in ids.items():
                 remapped_target[mask[orig_id]] = changed_id
         else:
             for changed_id, orig_id in enumerate(self.ids):
