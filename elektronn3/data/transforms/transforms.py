@@ -18,6 +18,7 @@ torchvision.transforms, but there are two key differences:
 
 from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
 
+import warnings
 import numpy as np
 import skimage.exposure
 import skimage.transform
@@ -184,7 +185,7 @@ class RemapTargetIDs:
     """Remap class IDs of targets to a new class mapping.
     If ``ids`` is a dict, it is used as a lookup table of the form orig_id -> changed_id.
     Each occurence of orig_id will be changed to changed_id.
-    If ``ids`` is a list, a dense remapping is performed (the given ids are
+    If ``ids`` is a list (deprecated), a dense remapping is performed (the given ids are
     remapped to [0, 1, 2, ..., N - 1], where N is ``len(ids)``).
     E.g. if your targets contain the class IDs [1, 3, 7, 9] but you are only
     interested in classes 1, 3 and 9 and you
@@ -196,7 +197,13 @@ class RemapTargetIDs:
     to original mappings)."""
 
     def __init__(self, ids: Union[Sequence[int], Dict[int, int]], reverse: bool = False):
-        ids = {int(k): int(v) for k, v in ids.items()}
+        if isinstance(ids, dict):
+            ids = {int(k): int(v) for k, v in ids.items()}
+        else:
+            warnings.warn(
+                'Passing lists to RemapTargetIDs is deprecated. Please use dicts instead (see docs).',
+                DeprecationWarning
+            )
         self.ids = ids
         self.reverse = reverse
 
