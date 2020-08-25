@@ -75,13 +75,13 @@ def plot_image(
         vmin = 0
         vmax = out_channels
 
-    fig, ax = plt.subplots(constrained_layout=True)
+    fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 10))
     if overlay is None:
-        aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+        aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='none')
     else:
         ax.imshow(image, cmap='gray')
         masked_overlay = np.ma.masked_where(overlay == 0, overlay)
-        aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha)
+        aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha, interpolation='none')
     if filename is not None:
         max_filename_length = 50  # Truncate long file names from the left
         if len(filename) > max_filename_length:
