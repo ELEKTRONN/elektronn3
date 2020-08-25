@@ -198,7 +198,7 @@ class DiceLoss(torch.nn.Module):
     def __init__(
             self,
             apply_softmax: bool = True,
-            weight: torch.Tensor = torch.tensor(1.),
+            weight: Optional[torch.Tensor] = None,
             smooth: float = 0.
     ):
         super().__init__()
@@ -207,6 +207,8 @@ class DiceLoss(torch.nn.Module):
         else:
             self.softmax = lambda x: x  # Identity (no softmax)
         self.dice = dice_loss
+        if weight is None:
+            weight = torch.tensor(1.)
         self.register_buffer('weight', weight)
         self.smooth = smooth
 
