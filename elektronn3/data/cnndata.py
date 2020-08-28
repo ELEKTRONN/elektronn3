@@ -479,7 +479,8 @@ def get_preview_batch(
     if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
         inp_np = inp_np[:, None]  # Add missing C dim
     if transform is not None:
-        inp_np, _ = transform(inp_np, None)
+        for n in range(inp_np.shape[0]):  # N is usually 1, so this is only iterated once with n=0
+            inp_np[0], _ = transform(inp_np[0], None)
     inp = torch.from_numpy(inp_np)
     return inp
 
