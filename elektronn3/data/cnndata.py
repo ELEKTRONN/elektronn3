@@ -447,13 +447,17 @@ def get_preview_batch(
         h5data: Tuple[str, str],
         preview_shape: Optional[Tuple[int, ...]] = None,
         transform: Optional[Callable] = None,
-        in_memory: bool = False
+        in_memory: bool = False,
+        dim: Optional[float] = None,
 ) -> torch.Tensor:
     fname, key = h5data
     inp_h5 = h5py.File(fname, 'r')[key]
     if in_memory:
         inp_h5 = inp_h5.value
-    dim = len(preview_shape)  # 2D or 3D
+    if dim is None:
+        if preview_shape is None:
+            raise ValueError('At least one of preview_shape, dim must be defined.')
+        dim = len(preview_shape)  # 2D or 3D
     inp_shape = np.array(inp_h5.shape[-dim:])
     if preview_shape is None:  # Slice everything
         inp_lo = np.zeros_like(inp_shape)
