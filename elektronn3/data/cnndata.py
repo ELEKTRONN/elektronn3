@@ -587,10 +587,18 @@ class Segmentation2d(data.Dataset):
         self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
-            self.inps = [
-                np.array(imageio.imread(fname)).astype(np.float32)[None]
-                for fname in self.inp_paths
-            ]
+            self.inps = []
+            multichannel_image = None
+            for fname in self.inp_paths:
+                img = imageio.imread(fname).astype(np.float32)
+                if multichannel_image:
+                    assert len(img.shape) == 3, f'Mixed multi-channel {multichannel_image} and single-channel images {fname} in gt.'
+                if len(img.shape) == 3:
+                    multichannel_image = fname
+                    # bring color channel to front
+                    self.inps.append(img.swapaxes(0,2).swapaxes(1,2))
+                else:
+                    self.inps.append(img[None])
             self.targets = [
                 np.array(imageio.imread(fname)).astype(np.int64)
                 for fname in self.target_paths
