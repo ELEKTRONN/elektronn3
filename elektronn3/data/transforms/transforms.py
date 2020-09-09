@@ -1109,16 +1109,19 @@ class AlbuSeg2d:
         self.albu = albu
 
     def __call__(self, inp, target):
-        assert inp.ndim == 3 and inp.shape[0] == 1
+        if inp.ndim != 3:
+            raise ValueError(f'target needs to have ndim=3, but it has shape {inp.shape}')
+        inp = inp.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C) because albmumentations requires it
         if target is not None:
-            if not (target.ndim == 2 and target.shape == inp.shape[1:]):
+            if not (target.ndim == 2 and target.shape == inp.shape[:-1]):
                 raise ValueError(f'Shapes not supported. inp: {inp.shape}, target: {target.shape}')
-            augmented = self.albu(image=inp[0], mask=target)  # Strip C dimension
+            augmented = self.albu(image=inp, mask=target)
             atarget = np.array(augmented['mask'], dtype=target.dtype)
         else:
-            augmented = self.albu(image=inp[0])  # Strip C dimension
+            augmented = self.albu(image=inp)
             atarget = None
-        ainp = np.array(augmented['image'], dtype=inp.dtype)[None]  # Re-attach C dimension
+        ainp = np.array(augmented['image'], dtype=inp.dtype)
+        ainp = ainp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)  convert back to PyTorch layout
         return ainp, atarget
 
 
