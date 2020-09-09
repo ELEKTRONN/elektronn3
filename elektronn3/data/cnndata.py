@@ -588,17 +588,19 @@ class Segmentation2d(data.Dataset):
 
         if self.in_memory:
             self.inps = []
-            multichannel_image = None
+            rgb_fname = None
             for fname in self.inp_paths:
-                img = imageio.imread(fname).astype(np.float32)
-                if multichannel_image:
-                    assert len(img.shape) == 3, f'Mixed multi-channel {multichannel_image} and single-channel images {fname} in gt.'
-                if len(img.shape) == 3:
-                    multichannel_image = fname
-                    # bring color channel to front
-                    self.inps.append(img.swapaxes(0,2).swapaxes(1,2))
+                inp = imageio.imread(fname).astype(np.float32)
+                if rgb_fname is not None and inp.ndim != 3:
+                    raise RuntimeError(f'Mixed multi-channel {rgb_fname} and single-channel images {fname} in gt.')
+                if inp.ndim == 2:
+                    inp = inp[None]  # (H, W) -> (C=1, H, W)
+                elif inp.ndim == 3:
+                    rgb_fname = fname
+                    inp = inp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
                 else:
-                    self.inps.append(img[None])
+                    raise RuntimeError(f'Image {fname} has shape {inp.shape}, but ndim should be 2 or 3.')
+                self.inps.append(inp)
             self.targets = [
                 np.array(imageio.imread(fname)).astype(np.int64)
                 for fname in self.target_paths
@@ -610,9 +612,14 @@ class Segmentation2d(data.Dataset):
             inp = self.inps[index]
             target = self.targets[index]
         else:
-            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=np.float32)
-            if inp.ndim == 2:  # (H, W)
-                inp = inp[None]  # (C=1, H, W)
+            fname = self.inp_paths[index]
+            inp = imageio.imread(fname).astype(np.float32)
+            if inp.ndim == 2:
+                inp = inp[None]  # (H, W) -> (C=1, H, W)
+            elif inp.ndim == 3:
+                inp = inp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
+            else:
+                raise RuntimeError(f'Image {fname} has shape {inp.shape}, but ndim should be 2 or 3.')
             target = np.array(imageio.imread(self.target_paths[index]), dtype=np.int64)
         while True:  # Only makes sense if RandomCrop is used
             try:
