@@ -479,7 +479,6 @@ class RandomGaussianBlur:
         return blurred_inp, target
 
 
-
 class RandomBlurring:  # Warning: This operates in-place!
 
     _default_scheduler = random_blurring.ScalarScheduler(

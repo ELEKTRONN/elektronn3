@@ -509,7 +509,7 @@ class SegSmall3(nn.Module):
         else:
             raise ValueError
 
-        n_centers = 16
+        n_centers = 24
 
         pl = 48
         self.cv2 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, act=self.act)
@@ -554,7 +554,6 @@ class SegSmall3(nn.Module):
             self.bn4d = nn.BatchNorm1d(2 * pl, track_running_stats=track_running_stats)
             self.bn3d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
             self.bn2d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
-
             self.bn1d = nn.BatchNorm1d(pl, track_running_stats=track_running_stats)
 
             self.bnout = nn.BatchNorm1d(pl)
@@ -580,19 +579,19 @@ class SegSmall3(nn.Module):
     def forward(self, x, input_pts, output_pts=None):
         if output_pts is None:
             output_pts = input_pts
-        x2, pts2 = self.cv2(x, input_pts, 24, 2048)
+        x2, pts2 = self.cv2(x, input_pts, 32, 2048)
         x2_dil, _ = self.cv2_dil(x, input_pts, 24, pts2, dilation=2)
         x2 = torch.cat([x2, x2_dil], dim=2)
 
         x2 = self.act(apply_bn(x2, self.bn2))
 
-        x3, pts3 = self.cv3(x2, pts2, 32, 512)
+        x3, pts3 = self.cv3(x2, pts2, 24, 1024)
         x3 = self.act(apply_bn(x3, self.bn3))
 
-        x4, pts4 = self.cv4(x3, pts3, 16, 128)
+        x4, pts4 = self.cv4(x3, pts3, 16, 256)
         x4 = self.act(apply_bn(x4, self.bn4))
 
-        x5, pts5 = self.cv5(x4, pts4, 8, 32)
+        x5, pts5 = self.cv5(x4, pts4, 8, 64)
         x5 = self.act(apply_bn(x5, self.bn5))
 
         x6, pts6 = self.cv6(x5, pts5, 4, 8)
