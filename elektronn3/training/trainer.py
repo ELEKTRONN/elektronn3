@@ -589,7 +589,7 @@ class Trainer:
                 images['inp'] = batch['inp'].numpy()
                 images['fname'] = batch.get('fname')
                 if 'target' in batch:
-                    images['target'] = batch['target'].numpy()
+                    images['target'] = self.adjust_mixed_target(dout, batch['target'].numpy())
                 if 'unlabeled' in batch:
                     images['unlabeled'] = batch['unlabeled']
                 images['out'] = dout.detach().cpu().numpy()
@@ -603,6 +603,12 @@ class Trainer:
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
         return stats, misc, images
+
+    def adjust_mixed_target(self, dout, target):
+        if target.ndim == dout.ndim and target.shape[1] != dout.shape[1]:
+            assert target.shape[1] == 2  # MixedDataset
+            target = target[:, 0]
+        return target
 
     def _put_current_attention_maps_into(self, images):
         if getattr(self.model, 'attention', None):
@@ -728,6 +734,7 @@ class Trainer:
                 val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             outs.append(out)
+            target = self.adjust_mixed_target(dout, target)
             targets.append(target)
 
         images = {
