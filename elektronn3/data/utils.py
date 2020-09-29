@@ -8,7 +8,7 @@
 import logging
 import os
 import signal
-from typing import Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import h5py
 import numpy as np
@@ -57,6 +57,27 @@ def calculate_stds(inputs: Sequence) -> Tuple[float]:
     inputs = np.concatenate(inputs, axis=1)
     stds = np.std(inputs, axis=1)
     return tuple(stds)
+
+
+def get_class_counts(targets: Sequence[np.ndarray]) -> Dict[int, str]:
+    """Get a dict that maps each target class to its number of labeled pixels/voxels"""
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
+    total = targets.size
+    classes, counts = np.unique(targets, return_counts=True)
+    cc = {cl: f'{co} ({co / total * 100:.2f}%)' for cl, co in zip(classes, counts)}
+    return cc
+
+
+def get_nonzero_label_ratio(targets: Sequence[np.ndarray]) -> float:
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
+    num_nonzero = np.count_nonzero(targets)
+    return num_nonzero / targets.size
 
 
 def calculate_class_weights(
