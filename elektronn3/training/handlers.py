@@ -1,9 +1,10 @@
 # These are default plotting handlers that work in some common training
 #  scenarios, but won't work in every case:
 
+import logging
 import os
 
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional, Callable, Sequence
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -13,9 +14,11 @@ import torch
 from torch.nn import functional as F
 
 from elektronn3.data.utils import squash01
-
+from elektronn3.data.transforms import RemapTargetIDs
 
 E3_CMAP: str = os.getenv('E3_CMAP')
+
+logger = logging.getLogger('elektronn3log')
 
 
 def get_cmap(out_channels: int):
@@ -132,6 +135,40 @@ def _get_batch2img_function(
         raise ValueError('Only 4D and 5D tensors are supported.')
 
 
+def write_to_kzip(trainer: 'Trainer', pred_batch: np.ndarray) -> None:
+    from knossos_utils import KnossosDataset
+    ks = trainer.knossos_preview_config
+    ds = KnossosDataset(ks['dataset'])
+    seg = pred_batch[0].swapaxes(0, 2)  # (N, D, H, W) -> (W, H, D)
+
+    # Set movement are in k.zip
+    area_min = ks['offset']
+    area_sz = ks['size']
+    area_max = tuple(xx + yy - 1 for xx, yy in zip(area_min, area_sz))
+    anno_str = f"""<?xml version="1.0" encoding="UTF-8"?>
+<things>
+    <parameters>
+        <MovementArea min.x="{area_min[0]}" min.y="{area_min[1]}" min.z="{area_min[2]}" max.x="{area_max[0]}" max.y="{area_max[1]}" max.z="{area_max[2]}"/>
+    </parameters>
+    <comments/>
+    <branchpoints/>
+</things>"""
+
+    kzip_path = f'{trainer.save_path}/preview_{trainer.step}.k.zip'
+    logger.info(f'Writing preview inference to {kzip_path}')
+    ds.save_to_kzip(
+        data=seg,
+        data_mag=ks.get('mag', 1),
+        kzip_path=kzip_path,
+        offset=ks['offset'],
+        mags=ks.get('target_mags', [1, 2]),
+        gen_mergelist=False,
+        upsample=False,
+        fast_resampling=False,
+        annotation_str=anno_str
+    )
+
+
 # TODO: Support regression scenario
 def _tb_log_preview(
         trainer: 'Trainer',  # For some reason Trainer can't be imported
@@ -173,6 +210,15 @@ def _tb_log_preview(
 
     out_slice = batch2img(out_batch)
     pred_slice = out_slice.argmax(0)
+
+    if trainer.knossos_preview_config is not None:
+        pred_batch = out_batch.argmax(1)
+        remap_ids = trainer.knossos_preview_config.get('remap_ids')
+        if remap_ids is not None:
+            remap = RemapTargetIDs(remap_ids, reverse=True)
+            _, pred_batch = remap(None, pred_batch)
+
+        write_to_kzip(trainer, pred_batch)
 
     for c in range(out_slice.shape[0]):
         trainer.tb.add_figure(

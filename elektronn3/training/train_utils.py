@@ -5,14 +5,39 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Marius Killinger, Philipp Schubert, Martin Drawitsch
 
+import logging
 import time
 import warnings
+from typing import Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 
 from elektronn3.training import plotting
 from elektronn3 import floatX
+
+logger = logging.getLogger('elektronn3log')
+
+
+def create_preview_batch_from_knossos(knossos_preview_config: Dict[str, str]) -> torch.Tensor:
+    from knossos_utils import KnossosDataset
+    config = knossos_preview_config
+    required_keys = ['dataset', 'size', 'offset', 'mag', 'target_mags']
+    for k in required_keys:
+        if k not in config.keys():
+            raise ValueError(f'Required key {k} missing from knossos_preview_config.')
+    logger.info(f'Loading preview region from dataset {config["dataset"]}')
+    ds = KnossosDataset(config['dataset'])
+    inp_np = ds.load_raw(
+        offset=config['offset'],
+        size=config['size'],
+        mag=config['mag'],
+        datatype=np.float32
+    )
+    inp_np = inp_np.swapaxes(0, 2)[None, None]  # (W, H, D) -> (N, C, D, H, W)
+    inp = torch.from_numpy(inp_np)
+    return inp
 
 
 class HistoryTracker:

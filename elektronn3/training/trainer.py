@@ -5,7 +5,6 @@
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
 import pprint
-import traceback
 from collections import deque
 
 import gc
@@ -34,7 +33,7 @@ from tqdm import tqdm
 import elektronn3
 from elektronn3.training import handlers
 from elektronn3.training.swa import SWA
-from elektronn3.training.train_utils import pretty_string_time
+from elektronn3.training.train_utils import pretty_string_time, create_preview_batch_from_knossos
 from elektronn3.training.train_utils import Timer, HistoryTracker
 
 from torch.utils import collect_env
@@ -143,7 +142,23 @@ class Trainer:
         batch_size: Desired batch size of training samples.
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
-            disabled.
+            disabled. As a more powerful alternative for KNOSSOS datasets, consider using
+            the ``knossos_preview_config`` option instead.
+        knossos_preview_config: Configures preview batch creation and preview inferences
+            based on a KNOSSOS dataset region. Here is an example of how it should look like:
+
+            >>> knossos_preview_config = {
+            ...     'dataset': 'path/to/knossos/dataset.conf',
+            ...     'offset': [0, 0, 0],  # Offset (min) coordinates
+            ...     'size': [256, 256, 64],  # Size (shape) of the region
+            ...     'mag': 1,  # source mag
+            ...     'target_mags': [1, 2, 3],  # List of target mags to which the inference results should be written
+            ...     'remap_ids': None  # Config for class ID remapping (optional). See transforms.RemapTargetIDs
+            ... }
+
+            Periodic preview inference results are written to .k.zip annotation files that can be
+            loaded with KNOSSOS and overlayed over the original data. .k.zip files are saved in the
+            training directory, with file names reflecting their training step.
         preview_interval: Determines how often to perform preview inference.
             Preview inference is performed every ``preview_interval`` epochs
             during training. Regardless of this value, preview predictions
@@ -244,6 +259,7 @@ class Trainer:
             valid_metrics: Optional[Dict] = None,
             ss_criterion: Optional[torch.nn.Module] = None,
             preview_batch: Optional[torch.Tensor] = None,
+            knossos_preview_config: Optional[Dict[str, str]] = None,
             preview_interval: int = 5,
             inference_kwargs: Optional[Dict[str, Any]] = None,
             hparams: Optional[Dict[str, Any]] = None,
@@ -274,6 +290,10 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
+        if knossos_preview_config is not None:
+            if preview_batch is not None:
+                raise ValueError('If you set a preview_knossos_source, you cannot also set a preview batch.')
+            preview_batch = create_preview_batch_from_knossos(knossos_preview_config)
         if enable_save_trace:
             logger.warning('enable_save_trace is deprecated. Please use the save_jit option instead.')
             assert save_jit in [None, 'trace']
@@ -298,6 +318,7 @@ class Trainer:
         self.valid_metrics = valid_metrics
         self.ss_criterion = ss_criterion
         self.preview_batch = preview_batch
+        self.knossos_preview_config = knossos_preview_config
         self.preview_interval = preview_interval
         self.inference_kwargs = inference_kwargs
         self.extra_save_steps = extra_save_steps
