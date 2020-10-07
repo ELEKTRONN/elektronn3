@@ -214,7 +214,7 @@ class RemapTargetIDs:
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         if target is None:
             return inp, target
-        remapped_target = np.zeros_like(target)
+        remapped_target = target.copy()
         if isinstance(self.ids, dict):
             ids = self.ids if not self.reverse else {v: k for k, v in self.ids.items()}
             mask = {}
