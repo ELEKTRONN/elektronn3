@@ -412,7 +412,7 @@ class Predictor:
             )
         if overlap_shape is not None:
             overlap_shape = np.array(overlap_shape)
-        if offset is not None:
+        if offset is not None and np.count_nonzero(offset) > 0:
             offset = np.array(offset)
             # Set overlap to offset shape because IMO that's the only reasonable choice.
             overlap_shape = offset
