@@ -52,10 +52,12 @@ def load_model(model_path: str, device: torch.device):
     # TorchScript serialization can be identified by checking if
     #  it's a zip file. Pickled Python models are not zip files.
     #  See https://github.com/pytorch/pytorch/pull/15578/files
-    if zipfile.is_zipfile(model_path):
+    if model_path.endswith('.pts'):
         return torch.jit.load(model_path, map_location=device)
-    else:
+    elif model_path.endswith('.pt'):
         return torch.load(model_path, map_location=device)
+    else:
+        raise ValueError(f'{model_path} has an unkown file extension. Supported are .pt and .pts')
 
 
 if __name__ == '__main__':

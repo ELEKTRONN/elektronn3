@@ -441,13 +441,12 @@ class Predictor:
         self.report_inp_stats = report_inp_stats
         if isinstance(model, str):
             if os.path.isfile(model):
-                # TorchScript serialization can be identified by checking if
-                #  it's a zip file. Pickled Python models are not zip files.
-                #  See https://github.com/pytorch/pytorch/pull/15578/files
-                if zipfile.is_zipfile(model):
+                if model.endswith('.pts'):
                     model = torch.jit.load(model, map_location=device)
-                else:
+                elif model.endswith('.pt'):
                     model = torch.load(model, map_location=device)
+                else:
+                    raise ValueError(f'{model} has an unkown file extension. Supported are .pt and .pts')
             else:
                 raise ValueError(f'Model path {model} not found.')
         self.model = model

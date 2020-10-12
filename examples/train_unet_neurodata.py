@@ -173,7 +173,7 @@ if args.resume is not None:  # Load pretrained network
         if lr_sched_state_dict is None:
             logger.warning('lr_sched_state_dict not found.')
     else:
-        raise ValueError(f'{pretrained} has an unkown file extension. Supported are: .pt, .pth and .pth')
+        raise ValueError(f'{pretrained} has an unkown file extension. Supported are: .pt, .pts and .pth')
 
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
