@@ -45,6 +45,7 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
+        device: Optional[torch.device] = None,
         out_dtype: Optional[torch.dtype] = None,
         argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
@@ -104,6 +105,7 @@ def tiled_apply(
             Note: ``func(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
+        device: Device on which to execute ``func``.
         out_dtype: ``torch.dtype`` that the output will be cast to.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
@@ -135,11 +137,10 @@ def tiled_apply(
             f'C = out_shape[1] = {out_shape[1]}, but '
             f'out_dtype torch.uint8 can only hold values up to 255.'
         )
-    out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
+    out = torch.empty(out_shape, dtype=out_dtype)
     out_shape = np.array(out.shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
-    device = inp.device
 
     # Create padded input with overlap
     padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
@@ -518,6 +519,7 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
+                device=self.device,
                 out_dtype=self.out_dtype,
                 argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
@@ -580,9 +582,6 @@ class Predictor:
             relevant_slice = None
             out_shape = self.out_shape
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
-        if self.device.type == 'cuda':
-            inp.pin_memory()
-        inp = inp.to(self.device, non_blocking=True)
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         # Lazily figure out these Predictor options based on the input it
