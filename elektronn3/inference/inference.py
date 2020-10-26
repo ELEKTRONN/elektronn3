@@ -45,7 +45,6 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
-        out_dtype: Optional[torch.dtype] = None,
         argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
 ) -> torch.Tensor:
@@ -104,7 +103,6 @@ def tiled_apply(
             Note: ``func(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
-        out_dtype: ``torch.dtype`` that the output will be cast to.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
         argmax_with_threshold
@@ -128,15 +126,8 @@ def tiled_apply(
     else:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    if out_dtype is None:
-        out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
-    if out_shape[1] > 255 and out_dtype == torch.uint8:
-        raise ValueError(
-            f'C = out_shape[1] = {out_shape[1]}, but '
-            f'out_dtype torch.uint8 can only hold values up to 255.'
-        )
-    out = torch.empty(out_shape, dtype=out_dtype)
-    out_shape = np.array(out.shape)
+    out = None
+    out_shape = np.array(out_shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
 
@@ -192,16 +183,14 @@ def tiled_apply(
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
         inp_tile = inp_padded[inp_slice].contiguous()
-        out_tile = func(inp_tile)
+        out_tile = func(inp_tile, final_crop_slice)
 
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
-        out_tile = out_tile[final_crop_slice]
         # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
-        if argmax_with_threshold is not None:
-            out[out_slice] = (out_tile > argmax_with_threshold).to(out_dtype).argmax(dim=1).to(out_dtype)
-        else:
-            out[out_slice] = out_tile.to(out_dtype)
+        if out is None:
+            out = torch.empty(out_shape.tolist(), dtype=out_tile.dtype)
+        out[out_slice] = out_tile
 
     return out
 
@@ -478,24 +467,29 @@ class Predictor:
         self.model.eval()
 
     @torch.no_grad()
-    def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
+    def _predict(self, dinp: torch.Tensor, crop_slice=None) -> torch.Tensor:
         dinp = dinp.to(self.device, dtype=self.dtype)
         dout = self.model(dinp)
-        if not self.augmentations:
-            return dout
+        if crop_slice is not None:
+            dout = dout[crop_slice]
 
         # Else, apply test-time augmentations and take the mean value.
         # Augmentations are applied directly on the compute device and
         #  intermediate results are stored on-device, so this can increase
         #  GPU memory usage!
-        douts = [dout]
-        for aug in self.augmentations:
-            dinp_aug = aug.forward(dinp)
-            dout_aug = self.model(dinp_aug.to(self.device))
-            dout = aug.backward(dout_aug)
-            douts.append(dout)
-        douts = torch.stack(douts)
-        dout = torch.mean(douts, dim=0)
+        if self.augmentations is not None:
+            douts = [dout]
+            for aug in self.augmentations:
+                dinp_aug = aug.forward(dinp)
+                dout_aug = self.model(dinp_aug.to(self.device))
+                dout = aug.backward(dout_aug)
+                if crop_slice:
+                    dout = dout[crop_slice]
+                douts.append(dout)
+            douts = torch.stack(douts)
+            dout = torch.mean(douts, dim=0)
+
+        dout = dout.to(self.out_dtype)
         return dout
 
     def _tiled_predict(
@@ -518,7 +512,6 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
-                out_dtype=self.out_dtype,
                 argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
             )
@@ -586,6 +579,10 @@ class Predictor:
         #  receives if they are not already set.
         # Not sure if that's a good idea because these are object-changing
         #  side-effects in the otherwise pure predict() function.
+        if self.out_dtype is None:
+            self.out_dtype = torch.uint8 if self.argmax_with_threshold is not None else inp.dtype
+        if out_shape[0] > 255 and self.out_dtype == torch.uint8:
+            raise ValueError(f'C = out_shape[0] = {out_shape[0]}, but out_dtype torch.uint8 can only hold values up to 255.')
         if self.tile_shape is None:
             self.tile_shape = spatial_shape
         if self.overlap_shape is None:
