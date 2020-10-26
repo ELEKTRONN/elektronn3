@@ -448,7 +448,9 @@ class Predictor:
                 ' a state_dict object (dict) or None.')
         if state_dict is not None:
             set_state_dict(model, state_dict)
-        if apply_softmax:
+        if not apply_softmax and augmentations is not None:
+            raise ValueError('When augmentations are enabled, apply_softmax cannot be False.')
+        if apply_softmax or augmentations is not None:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
