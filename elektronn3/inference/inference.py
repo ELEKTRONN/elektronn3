@@ -45,7 +45,6 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
-        argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
 ) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -105,7 +104,6 @@ def tiled_apply(
             later.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
-        argmax_with_threshold
 
     Returns:
         Output tensor, as a torch tensor of the same shape as the input tensor.
@@ -454,8 +452,14 @@ class Predictor:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
-        if apply_argmax:
-            self.model = nn.Sequential(self.model, Argmax(dim=1, unsqueeze=True))
+        self.apply_argmax_after_tta = False
+        if apply_argmax or argmax_with_threshold is not None:
+            self.apply_argmax_after_tta = augmentations is not None
+            if not self.apply_argmax_after_tta: # if augmentations are enabled, argmax is applied after augmentations, see _predict
+                argmax_layers = [Argmax(dim=1, unsqueeze=True)]
+                if argmax_with_threshold:
+                    argmax_layers = [nn.Threshold(argmax_with_threshold, 0)] + argmax_layers
+                self.model = nn.Sequential(self.model, *argmax_layers)
             if self.out_dtype is None:
                 self.out_dtype = torch.uint8
         if self.tile_shape is None and self.overlap_shape is None:
@@ -489,6 +493,11 @@ class Predictor:
             douts = torch.stack(douts)
             dout = torch.mean(douts, dim=0)
 
+        # if no augmentations, argmax was already applied by the model
+        if self.apply_argmax_after_tta:
+            if self.argmax_with_threshold:
+                dout[dout <= self.argmax_with_threshold] = 0
+            dout = dout.argmax(dim=1).to(self.out_dtype)
         dout = dout.to(self.out_dtype)
         return dout
 
@@ -512,7 +521,6 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
-                argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
