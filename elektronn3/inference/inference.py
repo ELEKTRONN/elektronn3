@@ -45,7 +45,6 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
-        device: Optional[torch.device] = None,
         out_dtype: Optional[torch.dtype] = None,
         argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
@@ -105,7 +104,6 @@ def tiled_apply(
             Note: ``func(inp)`` is never actually executed – ``out_shape`` is
             merely used to pre-allocate the output tensor so it can be filled
             later.
-        device: Device on which to execute ``func``.
         out_dtype: ``torch.dtype`` that the output will be cast to.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
@@ -193,7 +191,7 @@ def tiled_apply(
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
         out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
-        inp_tile = inp_padded[inp_slice].contiguous().to(device)
+        inp_tile = inp_padded[inp_slice].contiguous()
         out_tile = func(inp_tile)
 
         # Slice the relevant tile_shape-sized region out of the model output
@@ -481,6 +479,7 @@ class Predictor:
 
     @torch.no_grad()
     def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
+        dinp = dinp.to(self.device, dtype=self.dtype)
         dout = self.model(dinp)
         if not self.augmentations:
             return dout
@@ -519,7 +518,6 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
-                device=self.device,
                 out_dtype=self.out_dtype,
                 argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
