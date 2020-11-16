@@ -933,18 +933,19 @@ class ElasticTransform:
             else:
                 raise ValueError("Target dimension not understood!")
 
-            if self.target_discrete_ix is None:
-                self.target_discrete_ix = [True for i in range(target_channels)]
+            target_discrete_ix = self.target_discrete_ix
+            if target_discrete_ix is None:
+                target_discrete_ix = [True for i in range(target_channels)]
             else:
-                self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
+                target_discrete_ix = [i in target_discrete_ix for i in range(target_channels)]
 
             deformed_target = target.copy()
             if target_c:
                 for tc in range(target_channels):
-                    target_order = 0 if self.target_discrete_ix[tc] is True else 1
+                    target_order = 0 if target_discrete_ix[tc] is True else 1
                     deformed_target[tc] = map_coordinates(target[tc], target_indices, order=target_order).reshape(target_shape)
             else:
-                target_order = 0 if self.target_discrete_ix[0] is True else 1
+                target_order = 0 if target_discrete_ix[0] is True else 1
                 deformed_target = map_coordinates(target, target_indices, order=target_order).reshape(target_shape)
             return deformed_img, deformed_target
 
