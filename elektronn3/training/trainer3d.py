@@ -10,6 +10,7 @@ from collections import deque
 import time
 import gc
 import logging
+import random
 import os
 import shutil
 import warnings
@@ -39,11 +40,11 @@ from torch.utils import collect_env
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
-from morphx.data.chunkhandler import ChunkHandler
-from morphx.data.torchhandler import TorchHandler
+from neuronx.classes.chunkhandler import ChunkHandler
+from neuronx.classes.torchhandler import TorchHandler
 from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
-from morphx.data import basics
+from morphx.processing import basics
 from elektronn3.training.metrics import iou
 
 logger = logging.getLogger('elektronn3log')
@@ -262,7 +263,8 @@ class Trainer3d:
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
             collate_fn = None,
-            batch_avg = None
+            batch_avg = None,
+            lcp_flag: bool = False
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -315,6 +317,8 @@ class Trainer3d:
         self.mixed_precision = mixed_precision
         self.collate_fn = collate_fn
         self.batch_avg = batch_avg
+        self.lcp_flag = lcp_flag
+        self.tr_examples = 0
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -408,7 +412,7 @@ class Trainer3d:
             try:
                 # save models manually
                 model_path = self.save_path + f'/models/state_dict_e{self.epoch}.pth'
-                if self.epoch == 0 or self.epoch % 10 == 0:
+                if self.epoch == 0 or self.epoch % 5 == 0:
                     torch.save({
                         'model_state_dict': self.model.state_dict(),
                         'optimizer_state_dict': self.optimizer.state_dict(),
@@ -418,6 +422,7 @@ class Trainer3d:
 
                 stats, misc = self._train(max_steps, max_runtime)
                 self.epoch += 1
+                self.tr_examples = 0
 
                 if self.valid_th is None:
                     stats['val_loss'] = nan
@@ -465,6 +470,7 @@ class Trainer3d:
                         break
                 else:
                     raise e
+        self.train_th.terminate()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             self._save_model(suffix='_final')
@@ -488,6 +494,10 @@ class Trainer3d:
             o_mask = batch['o_mask']
             l_mask = batch['l_mask']
 
+            if self.lcp_flag:
+                pts = pts.transpose(1, 2)
+                features = features.transpose(1, 2)
+
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
             dfeats = features.to(self.device, non_blocking=True)
@@ -499,17 +509,18 @@ class Trainer3d:
             # dfeats: (batch_size, sample_num, 1)
             # dtarget: (batch_size, sample_num)
             # dout: (batch_size, sample_num, num_classes)
+
             dout = self.model(dfeats, dinp)
 
-            # # calculate loss similar to method of aboulch (convpoint repo).
-            # dloss = 0
-            # for i in range(dout.size(0)):
-            #     dloss += self.criterion(dout[i], dtarget[i])
+            if self.lcp_flag:
+                dout = dout.transpose(1, 2)
+                pts = pts.transpose(1, 2)
 
             dout_mask = dout[do_mask].view(-1, self.num_classes)
             dtarget_mask = dtarget[dl_mask]
             if len(dout_mask) == 0:
                 continue
+
             dloss = self.criterion(dout_mask, dtarget_mask)
 
             if torch.isnan(dloss):
@@ -533,15 +544,16 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                if self.epoch == 0 or self.epoch == 100:
-                    results = []
-                    for j in range(pts.size(0)):
-                        orig = PointCloud(pts[j].cpu().numpy(), labels=target[j].cpu().numpy())
-                        pred = PointCloud(pts[j].cpu().numpy(), labels=np.argmax(dout[j].cpu().numpy(), axis=1))
+                if self.epoch in [0, 5, 10, 20, 50, 100]:
+                    if self.tr_examples < 20:
+                        results = []
+                        orig = PointCloud(pts[0].cpu().numpy(), labels=target[0].cpu().numpy())
+                        pred = PointCloud(pts[0].cpu().numpy(), labels=np.argmax(dout[0].cpu().numpy(), axis=1))
                         results.append(orig)
                         results.append(pred)
-                    basics.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
-                batch_num += 1
+                        basics.save2pkl(results, self.im_path, 'epoch_{}_batch_{}'.format(self.epoch, batch_num))
+                        self.tr_examples += 1
+                    batch_num += 1
 
                 loss = float(dloss)
                 mean_target = float(target.to(torch.float32).mean())
@@ -637,36 +649,7 @@ class Trainer3d:
     def _validate(self):
         self.model.eval()
 
-        val_loss = []
-        stats = {'iou': []}
-        batch_iter = tqdm(enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader))
 
-        for i, batch in batch_iter:
-            pts = batch['pts']
-            features = batch['features']
-            target = batch['target']
-            o_mask = batch['o_mask']
-            l_mask = batch['l_mask']
-
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            dinp = pts.to(self.device, non_blocking=True)
-            dfeats = features.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
-            do_mask = o_mask.to(self.device, non_blocking=True)
-            dl_mask = l_mask.to(self.device, non_blocking=True)
-            dout = self.model(dfeats, dinp)
-            dout_mask = dout[do_mask].view(-1, self.num_classes)
-            dtarget_mask = dtarget[dl_mask]
-            val_loss.append(self.criterion(dout_mask, dtarget_mask).item())
-            out = dout.detach().cpu()
-            target_mask = target[l_mask]
-            out_mask = out[o_mask].view(-1, self.num_classes)
-            out_mask = np.argmax(out_mask, axis=1)
-            stats['iou'].append(iou(target_mask, out_mask, num_classes=self.num_classes))
-
-        stats['val_loss'] = np.mean(val_loss)
-        stats['val_loss_std'] = np.std(val_loss)
-        stats['iou'] = np.nanmean(stats['iou'])
 
         self.model.train()  # Reset model to training mode
         return stats
