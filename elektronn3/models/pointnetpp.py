@@ -4,7 +4,7 @@
 # originally from: https://github.com/dragonbook/pointnet2-pytorch
 import numpy as np
 import torch.nn.functional as F
-from torch.nn import Sequential as Seq, Linear as Lin, ReLU, BatchNorm1d as BN
+from torch.nn import Sequential as Seq, Linear as Lin, ReLU, BatchNorm1d as BN, GroupNorm as GN
 from torch_geometric.nn import PointConv, fps, radius, global_max_pool
 import torch
 import torch.nn.functional as F
@@ -41,9 +41,20 @@ class GlobalSAModule(torch.nn.Module):
         return x, pos, batch
 
 
-def MLP(channels, batch_norm=True):
+def MLP(channels, norm=None):
+    if norm == 'bn':
+        def transf(x): return BN(x, track_running_stats=False)
+    elif norm == 'gn':
+        def transf(x): return GN(max(1, int(x // 8)), x)
+    elif norm is None:
+        return Seq(*[
+            Seq(Lin(channels[i - 1], channels[i]), ReLU(),)
+            for i in range(1, len(channels))
+        ])
+    else:
+        raise NotImplementedError
     return Seq(*[
-        Seq(Lin(channels[i - 1], channels[i]), ReLU(), BN(channels[i]))
+        Seq(Lin(channels[i - 1], channels[i]), ReLU(), transf(channels[i]))
         for i in range(1, len(channels))
     ])
 
@@ -63,15 +74,15 @@ class FPModule(torch.nn.Module):
 
 
 class PointNet2(torch.nn.Module):
-    def __init__(self, num_classes, num_features):
+    def __init__(self, num_classes, num_features, norm='gn'):
         super(PointNet2, self).__init__()
-        self.sa1_module = SAModule(0.2, 0.2, MLP([num_features + 3, 64, 64, 128]))
-        self.sa2_module = SAModule(0.25, 0.4, MLP([128 + 3, 128, 128, 256]))
-        self.sa3_module = GlobalSAModule(MLP([256 + 3, 256, 512, 1024]))
+        self.sa1_module = SAModule(0.2, 0.2, MLP([num_features + 3, 64, 64, 128], norm))
+        self.sa2_module = SAModule(0.25, 0.4, MLP([128 + 3, 128, 128, 256], norm))
+        self.sa3_module = GlobalSAModule(MLP([256 + 3, 256, 512, 1024], norm))
 
-        self.fp3_module = FPModule(1, MLP([1024 + 256, 256, 256]))
-        self.fp2_module = FPModule(3, MLP([256 + 128, 256, 128]))
-        self.fp1_module = FPModule(3, MLP([128, 128, 128, 128]))
+        self.fp3_module = FPModule(1, MLP([1024 + 256, 256, 256], norm))
+        self.fp2_module = FPModule(3, MLP([256 + 128, 256, 128], norm))
+        self.fp1_module = FPModule(3, MLP([128, 128, 128, 128], norm))
 
         self.lin1 = torch.nn.Linear(128, 128)
         self.lin2 = torch.nn.Linear(128, 128)
