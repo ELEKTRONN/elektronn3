@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2019 - now
 # Max Planck Institute of Neurobiology, Martinsried, Germany
-# Authors: Jonathan Klimesch
+# Authors: Philipp Schubert, Jonathan Klimesch
 
 """
 This is an implementation of the ConvPoint architecture based on the Github repository
@@ -17,9 +17,10 @@ import numpy as np
 import math
 from typing import Tuple
 try:
-    import elektronn3.models.knn.nearest_neighbors as nearest_neighbors
+    import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighbors
 except ImportError:
-    import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighborsfrom abc import ABC
+    import elektronn3.models.knn.nearest_neighbors as nearest_neighbors
+from abc import ABC
 try:
     from torch_geometric.nn import XConv, fps, global_mean_pool
 except ImportError as e:

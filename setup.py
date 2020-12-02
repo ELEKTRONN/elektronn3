@@ -6,7 +6,8 @@ import numpy as np
 
 # build knn extension for pointconvs (knn directory copied from https://github.com/aboulch/ConvPoint)
 ext_modules = [Extension(
-    "elektronn3.models.knn.nearest_neighbors",
+    # TODO: change to "elektronn3.models.knn.nearest_neighbors" if this is compatible with loading of already trained models
+    "elektronn3.models.knn.lib.python.nearest_neighbors",
     sources=["elektronn3/models/knn/knn.pyx", "elektronn3/models/knn/knn_.cxx", ],  # source file(s)
     include_dirs=["./", np.get_include()],
     language="c++",
