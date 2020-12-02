@@ -47,6 +47,9 @@ from morphx.classes.pointcloud import PointCloud
 from morphx.processing import basics
 from elektronn3.training.metrics import iou
 
+from neuronx.pipeline.evaluate import full_evaluation_pipe
+from neuronx.pipeline.analyse import summarize_reports, generate_diagrams
+
 logger = logging.getLogger('elektronn3log')
 
 
@@ -120,7 +123,7 @@ class Trainer3d:
             training samples when iterated over.
             :py:class:`elektronn3.data.cnndata.PatchCreator` is currently
             recommended for constructing datasets.
-        valid_dataset: PyTorch dataset (``data.Dataset``) which produces
+        v_path: PyTorch dataset (``data.Dataset``) which produces
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
@@ -234,10 +237,11 @@ class Trainer3d:
             device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
-            valid_dataset: Optional[TorchHandler] = None,
+            v_path: str = None,
             pred_mapper: Optional[PredictionMapper] = None,
             val_freq: int = 1,
-            val_iter: int = 1,
+            val_red: int = 1,
+            target_names: List[str] = None,
             channel_num: int = 1,
             valid_metrics: Optional[Dict] = None,
             preview_batch: Optional[torch.Tensor] = None,
@@ -264,7 +268,8 @@ class Trainer3d:
             mixed_precision: bool = False,
             collate_fn = None,
             batch_avg = None,
-            lcp_flag: bool = False
+            lcp_flag: bool = False,
+            stop_epoch: int = 9999
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -293,10 +298,10 @@ class Trainer3d:
         self.criterion = criterion.to(device)
         self.optimizer = optimizer
         self.train_th = train_dataset
-        self.valid_th = valid_dataset
+        self.v_path = v_path
         self.pred_mapper = pred_mapper
         self.val_freq = val_freq
-        self.val_iter = val_iter
+        self.val_red = val_red
         self.channel_num = channel_num
         self.valid_metrics = valid_metrics
         self.preview_batch = preview_batch
@@ -319,6 +324,8 @@ class Trainer3d:
         self.batch_avg = batch_avg
         self.lcp_flag = lcp_flag
         self.tr_examples = 0
+        self.target_names = target_names
+        self.stop_epoch = stop_epoch
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -386,9 +393,9 @@ class Trainer3d:
         # The performance impact of disabling multiprocessing here is low in normal settings,
         # because the validation loader doesn't perform expensive augmentations, but just reads
         # data from hdf5s.
-        if valid_dataset is not None:
+        if v_path is not None:
             self.valid_loader = DataLoader(
-                self.valid_th, batch_size=self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
+                self.v_path, batch_size=self.batchsize, shuffle=True, num_workers=0, pin_memory=True,
                 worker_init_fn=_worker_init_fn
             )
         self.best_val_loss = np.inf  # Best recorded validation loss
@@ -424,16 +431,12 @@ class Trainer3d:
                 self.epoch += 1
                 self.tr_examples = 0
 
-                if self.valid_th is None:
+                if self.v_path is None:
                     stats['val_loss'] = nan
                 else:
                     if self.epoch == 1 or self.epoch % self.val_freq == 0:
-                        valid_stats = self._validate()
-                        stats.update(valid_stats)
-                        self.curr_stats = valid_stats
-                    else:
-                        valid_stats = self.curr_stats
-                        stats.update(valid_stats)
+                        self._validate(self.epoch)
+                    stats['val_loss'] = nan
 
                 # Log to stdout and text log file
                 self._log_basic(stats, misc)
@@ -583,6 +586,9 @@ class Trainer3d:
             if datetime.datetime.now() >= self.end_time:
                 logger.info(f'max_runtime ({max_runtime} seconds) exceeded. Terminating...')
                 self.terminate = True
+            if self.epoch > self.stop_epoch:
+                logger.info(f'max_epoch ({self.stop_epoch}) exceeded. Terminating...')
+                self.terminate = True
 
             if self.terminate:
                 break
@@ -646,13 +652,20 @@ class Trainer3d:
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     @torch.no_grad()
-    def _validate(self):
+    def _validate(self, epoch):
         self.model.eval()
-
-
-
-        self.model.train()  # Reset model to training mode
-        return stats
+        eval_name = f'eval_red{self.val_red}'
+        full_evaluation_pipe(self.save_path + '/', self.v_path, eval_name=eval_name, pipe_steps=[True, True],
+                             val_iter=1, batch_num=-1, save_worst_examples=False, model=self.model,
+                             specific_model=epoch, target_names=self.target_names, val_type='multiple_model')
+        report_name = eval_name + '_mv'
+        o_path = self.save_path + '/' + eval_name + '_valiter1_batchsize-1/'
+        summarize_reports(o_path, report_name)
+        r_path = o_path + report_name + '.pkl'
+        generate_diagrams(r_path, o_path, [''], [''], points=False, density=False, part_key='mv',
+                          filter_identifier=False, neg_identifier=[], time=True)
+        # Reset model to training mode
+        self.model.train()
 
     def _save_model(
             self,
