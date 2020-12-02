@@ -7,10 +7,8 @@
 import datetime
 from collections import deque
 
-import time
 import gc
 import logging
-import random
 import os
 import shutil
 import warnings
@@ -28,8 +26,6 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
-from tqdm import tqdm
-import sklearn.metrics as sm
 
 from elektronn3.training import handlers
 from elektronn3.training.swa import SWA
@@ -40,12 +36,9 @@ from torch.utils import collect_env
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
-from neuronx.classes.chunkhandler import ChunkHandler
-from neuronx.classes.torchhandler import TorchHandler
 from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import basics
-from elektronn3.training.metrics import iou
 
 from neuronx.pipeline.evaluate import full_evaluation_pipe
 from neuronx.pipeline.analyse import summarize_reports, generate_diagrams
@@ -488,7 +481,7 @@ class Trainer3d:
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
 
         timer = Timer()
-        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
+        batch_iter = enumerate(self.train_loader)
         batch_num = 0
         for i, batch in batch_iter:
             pts = batch['pts']
@@ -562,7 +555,6 @@ class Trainer3d:
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
                 misc['mean_target'].append(mean_target)
-                batch_iter.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
             # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
