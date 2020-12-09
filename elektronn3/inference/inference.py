@@ -615,9 +615,7 @@ class Predictor:
         out = out.cpu() if relevant_slice is None else out[relevant_slice].cpu()
         if self.verbose:
             dtime = time.time() - start
-            speed = inp.numel() / dtime / 1e6
-            # TODO: Report speed in terms of output, not input (This is not as easy as replacing
-            #       inp by out because out may contain padding that we don't want to count)
+            speed = out.numel() / dtime / 1e6 # TODO don’t count padding
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
 
