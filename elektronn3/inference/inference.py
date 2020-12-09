@@ -637,21 +637,16 @@ class Predictor:
                     'Make sure that out_shape is divisible by tile_shape or '
                     'relax this constraint by setting strict_shapes=False.'
                 )
-            elif np.any(inp.shape[2:] != self.out_shape[1:]):
-                raise NotImplementedError(
-                    'Automatic padding for out_shape that is not divisible '
-                    'by tile_shape is not (yet) implemented. Please change '
-                    'your input shape or tile_shape accordingly.'
-                )
             else:
-                orig_shape = inp.shape
-                padded_shape = np.array(inp.shape)
-                padded_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
-                padded_inp = np.zeros(padded_shape)
+                padded_out_shape = np.array(self.out_shape)
+                padded_out_shape[1:] = np.ceil(self.out_shape[1:] / self.tile_shape) * self.tile_shape
+                offset = self.offset if self.offset is not None else np.array([0,0,0])
+                padded_inp_shape = (*inp.shape[:2], *padded_out_shape[1:] + 2 * offset)
+                padded_inp = np.zeros(padded_inp_shape)
                 # Define the relevant region (that is: without the padding that was just added)
-                relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
-                padded_inp[relevant_slice] = inp
-                padded_out_shape = (self.out_shape[0], *padded_shape[2:])
+                relevant_slice_inp = _extend_nc([slice(0, d) for d in inp.shape[2:]])
+                relevant_slice_out = _extend_nc([slice(0, d) for d in self.out_shape[1:]])
+                padded_inp[relevant_slice_inp] = inp
                 if self._warn_about_shapes and np.any(padded_out_shape != self.out_shape):
                     sh_diff = np.subtract(padded_out_shape, self.out_shape)
                     # Only nonzero elements are multiplied, otherwise it will be 0.
@@ -673,8 +668,8 @@ class Predictor:
         else:
             padded_inp = inp
             padded_out_shape = self.out_shape
-            relevant_slice = None
-        return padded_inp, padded_out_shape, relevant_slice
+            relevant_slice_out = None
+        return padded_inp, padded_out_shape, relevant_slice_out
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')
