@@ -615,7 +615,10 @@ class Predictor:
         out = out.cpu() if relevant_slice is None else out[relevant_slice].cpu()
         if self.verbose:
             dtime = time.time() - start
-            speed = out.numel() / dtime / 1e6 # TODO don’t count padding
+            amount = out.numel()
+            if np.array_equal(out_shape[2:], inp.shape[2:]): # calculate the amount of valid data produced
+                amount = np.prod([*out.shape[:-3], *(out.shape[-3:] - 2 * self.overlap_shape)])
+            speed = amount / dtime / 1e6
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
 
