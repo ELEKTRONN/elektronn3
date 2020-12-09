@@ -114,14 +114,12 @@ def tiled_apply(
             f'(ndim={len(overlap_shape)}) don\'t match input shape '
             f'(ndim={inp.dim()}.'
         )
-    if not np.all(np.mod(inp.shape[2:], tile_shape) == 0):
+    if not np.all(np.mod(out_shape[2:], tile_shape) == 0):
         raise ValueError(
-            f'spatial inp shape {tuple(inp.shape[2:])} has to be divisible '
+            f'spatial out shape {tuple(out_shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
-    if offset is None:
-        offset = np.zeros_like(tile_shape)
-    else:
+    if offset is not None:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
     out = None
@@ -129,23 +127,27 @@ def tiled_apply(
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
 
-    # Create padded input with overlap
-    padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
-    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
+    if not np.array_equal(out_shape[2:], inp_shape[2:]): # input is already padded
+        inp_padded = inp
+    else:
+        # Create padded input with overlap
+        padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
+        logger.info(f'additional input padding to {padded_shape}')
+        inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
 
-    padslice = _extend_nc(
-        [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
-    )
-    inp_padded[padslice] = inp
+        padslice = _extend_nc(
+            [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
+        )
+        inp_padded[padslice] = inp
+
+        crop_low_corner = overlap_shape.copy()
+        crop_high_corner = tile_shape + overlap_shape
+        # Used to crop the output tile to the relevant, unpadded region
+        #  that will be written to the final output
+        final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
+    if offset is not None: # no cropping necessary for valid conv
+        final_crop_slice = None
     del inp
-
-    # Offset is subtracted here because otherwise, the final output tensor's
-    #  content will be shifted w.r.t. the input content.
-    crop_low_corner = overlap_shape.copy() - offset
-    crop_high_corner = tile_shape + overlap_shape - offset
-    # Used to crop the output tile to the relevant, unpadded region
-    #  that will be written to the final output
-    final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
 
     tiles = np.ceil(out_shape[2:] / tile_shape).astype(int)
     num_tiles = np.prod(tiles)
