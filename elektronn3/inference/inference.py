@@ -389,27 +389,7 @@ class Predictor:
             device = torch.device(device)
         self.device = device
         self.batch_size = batch_size
-        if tile_shape is not None:
-            tile_shape = np.array(tile_shape)
-        self.tile_shape = tile_shape
-        if (overlap_shape is not None and np.any(overlap_shape)) and (offset is not None and np.any(offset)):
-            raise ValueError(
-                f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
-                'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
-                'or offset (if the output is smaller).'
-            )
-        if overlap_shape is not None:
-            overlap_shape = np.array(overlap_shape)
-        if offset is not None and np.count_nonzero(offset) > 0:
-            offset = np.array(offset)
-            # Set overlap to offset shape because IMO that's the only reasonable choice.
-            overlap_shape = offset
-        self.overlap_shape = overlap_shape
-        self.offset = offset
 
-        if out_shape is not None:
-            out_shape = np.array(out_shape)
-        self.out_shape = out_shape
         self.out_dtype = out_dtype
         self.float16 = float16
         if float16 and not isinstance(model, str):
@@ -466,13 +446,40 @@ class Predictor:
                 self.model = nn.Sequential(self.model, *argmax_layers)
             if self.out_dtype is None:
                 self.out_dtype = torch.uint8
-        if self.tile_shape is None and self.overlap_shape is None:
-            #  have no spatial dimensions, so tiling doesn't make sense here.
-            self.enable_tiling = False
-        else:
-            self.enable_tiling = True
         self._warn_about_shapes = True
         self.model.eval()
+
+        if (overlap_shape is not None and np.any(overlap_shape)) and (offset is not None and np.any(offset)):
+            raise ValueError(
+                f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
+                'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
+                'or offset (if the output is smaller).'
+            )
+
+        if offset is None:
+            with torch.no_grad():
+                example_inp = torch.randn(1, 1, 132, 132, 132, device=device)
+                if float16:
+                    example_inp = example_inp.half()
+                example_out = self.model.forward(example_inp)
+            offset = np.subtract(example_inp.shape[2:], example_out.shape[2:]) // 2
+            logger.info(f'Inferred target offset: {offset[::-1]}.')
+            if np.count_nonzero(offset) == 0: # no valid conv → disable offset
+                offset = None
+        if offset is not None and np.count_nonzero(offset) > 0:
+            offset = np.array(offset)
+            # Set overlap to offset shape because IMO that's the only reasonable choice.
+            overlap_shape = offset
+            if out_shape is not None:
+                out_shape = np.array([*out_shape[:-3], *(out_shape[-3:] - 2 * offset)])
+                logger.info(f'Adjusted out_shape: {out_shape}')
+        self.offset = offset
+
+        self.overlap_shape = np.array(overlap_shape) if overlap_shape is not None else None
+        self.tile_shape = np.array(tile_shape) if tile_shape is not None else None
+        self.out_shape = np.array(out_shape) if out_shape is not None else None
+        # if no spatial dimensions are set tiling doesn't make sense
+        self.enable_tiling = self.tile_shape is not None and self.overlap_shape is not None
 
     @torch.no_grad()
     def _predict(self, dinp: torch.Tensor, crop_slice=None) -> torch.Tensor:
