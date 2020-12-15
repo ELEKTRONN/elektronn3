@@ -464,8 +464,8 @@ class Predictor:
                 example_out = self.model.forward(example_inp)
             offset = np.subtract(example_inp.shape[2:], example_out.shape[2:]) // 2
             logger.info(f'Inferred target offset: {offset[::-1]}.')
-            if np.count_nonzero(offset) == 0: # no valid conv → disable offset
-                offset = None
+        if offset is not None and np.count_nonzero(offset) == 0: # no valid conv → disable offset
+            offset = None
         if offset is not None and np.count_nonzero(offset) > 0:
             offset = np.array(offset)
             # Set overlap to offset shape because IMO that's the only reasonable choice.
