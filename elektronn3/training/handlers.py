@@ -43,7 +43,6 @@ def plot_image(
         overlay: Optional[np.ndarray] = None,
         overlay_alpha=0.5,
         cmap=None,
-        out_channels=None,
         colorbar=True,
         filename=None,
         vmin=None,
@@ -58,25 +57,10 @@ def plot_image(
     # Determine colormap and set discrete color values if needed.
     ticks = None
     ticklabels = None
-    if cmap is None and out_channels is not None:
-        # Assume label matrix with qualitative classes, no meaningful order
-        if cmap is not None:
-            raise ValueError('If out_channels is not None, manually setting cmap is not supported.')
-
-        if out_channels > 20:
-            raise NotImplementedError('out_channels > 20 is not supported for plotting.')
-        cmap = get_cmap(out_channels)
-
-        ticks = np.linspace(0.5, out_channels - 0.5, out_channels) # 0.5 for centered ticks
-        ticklabels = np.arange(out_channels)
-    if out_channels is not None:  # For label matrices
-        # Prevent colormap normalization. If vmax is not set, the colormap
-        #  is dynamically rescaled to fit between the minimum and maximum
-        #  values of the image to be plotted. This could lead to misleading
-        #  visualizations if the maximum value of the array to be plotted
-        #  is less than the global maximum of classes.
-        vmin = 0
-        vmax = out_channels
+    cmap_name = cmap if isinstance(cmap, str) else cmap.name
+    if cmap_name in {E3_CMAP, 'tab10', 'tab20'}: # qualitative cmap
+        ticks = np.linspace(0.5, vmax - 0.5, vmax) # 0.5 for centered ticks
+        ticklabels = np.arange(vmax)
 
     fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 10))
     if overlay is None:
@@ -226,15 +210,16 @@ def _tb_log_preview(
             plot_image(out_slice[c], cmap='gray'),
             trainer.step
         )
+    class_cmap = get_cmap(trainer.max_plot_id)
     trainer.tb.add_figure(
         f'{group}/pred',
-        plot_image(pred_slice, out_channels=trainer.out_channels),
+        plot_image(pred_slice, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap),
         trainer.step
     )
     inp_slice = batch2img(inp_batch)[0]
     trainer.tb.add_figure(
         f'{group}/pred_overlay',
-        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels),
+        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap),
         global_step=trainer.step
     )
 
@@ -297,6 +282,7 @@ def _tb_log_sample_images(
     # Check if the network is being trained for classification with class index target tensors
     if target_batch is not None:
         is_classification = target_batch.ndim == out_batch.ndim - 1
+        class_cmap = get_cmap(trainer.max_plot_id)
         # If it's not classification, we assume a regression scenario
         is_regression = np.all(target_batch.shape == out_batch.shape)
         # If not exactly one of the scenarios is detected, we can't handle it
@@ -396,14 +382,14 @@ def _tb_log_sample_images(
         global_step=trainer.step
     )
     if target_batch is not None:
-        _out_channels = trainer.out_channels if is_classification else None
-        _cmap = None if is_classification else 'gray'
+        _out_channels = trainer.max_plot_id if is_classification else None
+        _cmap = class_cmap if is_classification else 'gray'
         _target_slice = target_slice[None] if target_slice.ndim == 2 else target_slice
         for c in range(_target_slice.shape[0]):
             trainer.tb.add_figure(
                 f'{group}/target{c}',
                 plot_image(
-                    _target_slice[c], out_channels=_out_channels, filename=name, cmap=_cmap
+                    _target_slice[c], vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
                     # vmin=0., vmax=1.
                 ),
                 global_step=trainer.step
@@ -435,7 +421,7 @@ def _tb_log_sample_images(
             pred_slice = out_slice.argmax(0)
             trainer.tb.add_figure(
                 f'{group}/pred_slice',
-                plot_image(pred_slice, out_channels=trainer.out_channels, filename=name),
+                plot_image(pred_slice, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
                 global_step=trainer.step
             )
             if target_batch is not None and not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
@@ -443,12 +429,12 @@ def _tb_log_sample_images(
                 for c in range(_target_slice.shape[0]):
                     trainer.tb.add_figure(
                         f'{group}/target_overlay',
-                        plot_image(inp_slice, overlay=_target_slice[c], overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
+                        plot_image(inp_slice, overlay=_target_slice[c], overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
                         global_step=trainer.step
                     )
                 trainer.tb.add_figure(
                     f'{group}/pred_overlay',
-                    plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
+                    plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
                     global_step=trainer.step
                 )
 

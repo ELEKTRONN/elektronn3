@@ -385,6 +385,15 @@ class Trainer:
         self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
         self.out_channels = out_channels
+        self.max_plot_id = None
+
+        try:
+            self.max_plot_id = max(self.out_channels, self.criterion.ignore_index + 1)
+        except AttributeError: # no ignore_idx
+            self.max_plot_id = self.out_channels
+        except TypeError: # no out_channels
+            self.max_plot_id = None
+
         if enable_videos:
             try:
                 import moviepy
