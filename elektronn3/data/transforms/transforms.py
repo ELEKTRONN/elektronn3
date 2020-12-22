@@ -1115,7 +1115,7 @@ class AlbuSeg2d:
         inp = inp.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C) because albmumentations requires it
         if target is not None:
             if not (target.ndim == 2 and target.shape == inp.shape[:-1]):
-                raise ValueError(f'Shapes not supported. inp: {inp.shape}, target: {target.shape}')
+                raise ValueError(f'Shapes not supported. inp[:-1]: {inp.shape[:-1]}, target: {target.shape}')
             augmented = self.albu(image=inp, mask=target)
             atarget = np.array(augmented['mask'], dtype=target.dtype)
         else:

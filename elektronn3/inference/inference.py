@@ -112,13 +112,13 @@ def tiled_apply(
     """
     if not (inp.dim() - 2 == len(tile_shape) == len(overlap_shape)):
         raise ValueError(
-            f'tile shape (ndim={len(tile_shape)}) and overlap shape '
-            f'(ndim={len(overlap_shape)}) don\'t match input shape '
-            f'(ndim={inp.dim()}.'
+            f'ndims of tile shape ({len(tile_shape)}) and overlap shape '
+            f'({len(overlap_shape)}) don\'t match input shape ndim - 2'
+            f'({inp.dim() - 2}).'
         )
     if not np.all(np.mod(out_shape[2:], tile_shape) == 0):
         raise ValueError(
-            f'spatial out shape {tuple(out_shape[2:])} has to be divisible '
+            f'spatial out shape[2:] {tuple(out_shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
     if offset is not None:
