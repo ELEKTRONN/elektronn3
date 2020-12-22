@@ -451,22 +451,31 @@ class Predictor:
         self._warn_about_shapes = True
         self.model.eval()
 
-        if (overlap_shape is not None and np.any(overlap_shape)) and (offset is not None and np.any(offset)):
+        def is_set(array: Tuple[int, ...]):
+            return array is not None and np.any(array)
+
+        if is_set(overlap_shape) and is_set(offset):
             raise ValueError(
                 f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
                 'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
                 'or offset (if the output is smaller).'
             )
 
-        if offset is None:
-            offset = utils.calculate_offset(self.model)
-        if offset is not None and np.count_nonzero(offset) == 0: # no valid conv → disable offset
-            offset = None
-        if offset is not None and np.count_nonzero(offset) > 0:
-            offset = np.array(offset)
-            # Set overlap to offset shape because IMO that's the only reasonable choice.
-            overlap_shape = offset
-            if out_shape is not None:
+        if not is_set(tile_shape): # no tiling
+            assert not (is_set(out_shape) or is_set(overlap_shape) or is_set(offset)), 'If tile_shape is not set, out_shape, overlap_shape and offset should not be set either.'
+            self.enable_tiling = False
+        else:
+            assert is_set(out_shape), 'If tile_shape is set, out_shape is required to be set, too.'
+            self.enable_tiling = True
+            if offset is None:
+                offset = utils.calculate_offset(self.model)
+            if np.count_nonzero(offset) == 0: # no valid conv → disable offset
+                offset = None
+            else:
+                assert not is_set(overlap_shape), 'The passed model has an offset, so overlap_shape should not be specified because it will be set automatically.'
+                offset = np.array(offset)
+                # Set overlap to offset shape because IMO that's the only reasonable choice.
+                overlap_shape = offset
                 out_shape = np.array([*out_shape[:-3], *(out_shape[-3:] - 2 * offset)])
                 logger.info(f'Adjusted out_shape: {out_shape}')
         self.offset = offset
@@ -474,8 +483,6 @@ class Predictor:
         self.overlap_shape = np.array(overlap_shape) if overlap_shape is not None else None
         self.tile_shape = np.array(tile_shape) if tile_shape is not None else None
         self.out_shape = np.array(out_shape) if out_shape is not None else None
-        # if no spatial dimensions are set tiling doesn't make sense
-        self.enable_tiling = self.tile_shape is not None and self.overlap_shape is not None
 
     @torch.no_grad()
     def _predict(self, dinp: torch.Tensor, crop_slice=None) -> torch.Tensor:
