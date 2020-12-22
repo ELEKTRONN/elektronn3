@@ -16,6 +16,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
+from elektronn3.data import utils
+
 
 # TODO: It's confusing that tiled_apply expects out_shape to include the N dim, but
 #     Predictor has a parameter with the same name but which doesn't include N.
@@ -457,13 +459,7 @@ class Predictor:
             )
 
         if offset is None:
-            with torch.no_grad():
-                example_inp = torch.randn(1, 1, 132, 132, 132, device=device)
-                if float16:
-                    example_inp = example_inp.half()
-                example_out = self.model.forward(example_inp)
-            offset = np.subtract(example_inp.shape[2:], example_out.shape[2:]) // 2
-            logger.info(f'Inferred target offset: {offset[::-1]}.')
+            offset = utils.calculate_offset(self.model)
         if offset is not None and np.count_nonzero(offset) == 0: # no valid conv → disable offset
             offset = None
         if offset is not None and np.count_nonzero(offset) > 0:
@@ -640,7 +636,7 @@ class Predictor:
             else:
                 padded_out_shape = np.array(self.out_shape)
                 padded_out_shape[1:] = np.ceil(self.out_shape[1:] / self.tile_shape) * self.tile_shape
-                offset = self.offset if self.offset is not None else np.array([0,0,0])
+                offset = self.offset if self.offset is not None else np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
                 padded_inp_shape = (*inp.shape[:2], *padded_out_shape[1:] + 2 * offset)
                 padded_inp = np.zeros(padded_inp_shape)
                 # Define the relevant region (that is: without the padding that was just added)
