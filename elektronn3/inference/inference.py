@@ -476,7 +476,7 @@ class Predictor:
                 offset = np.array(offset)
                 # Set overlap to offset shape because IMO that's the only reasonable choice.
                 overlap_shape = offset
-                out_shape = np.array([*out_shape[:-3], *(out_shape[-3:] - 2 * offset)])
+                out_shape = np.array([*out_shape[:-len(offset)], *(out_shape[-len(offset):] - 2 * offset)])
                 logger.info(f'Adjusted out_shape: {out_shape}')
         self.offset = offset
 
