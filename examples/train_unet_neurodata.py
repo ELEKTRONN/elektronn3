@@ -122,9 +122,12 @@ save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
+    # data_root = '/wholebrain/u/mdraw/barrier_gt_phil_r2r_bn/'
+    # data_root = '/wholebrain/u/mdraw/barrier_gt_phil_n2v/'
+    data_root_lab = '/wholebrain/scratch/j0126/barrier_gt_phil/'
     fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
     input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
-    target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
+    target_h5data = [(os.path.join(data_root_lab, f), 'labels') for f in fnames]
     valid_indices = [1, 3, 5, 7]
 
     # These statistics are computed from the training dataset.
@@ -149,7 +152,6 @@ else:  # Use publicly available neuro_data_cdhw dataset
     dataset_std = (42.599973,)
     class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
-# TODO: Recalculate above class_weights with mode='inverse'
 
 max_steps = args.max_steps
 max_runtime = args.max_runtime
@@ -226,6 +228,16 @@ preview_batch = get_preview_batch(
     h5data=input_h5data[valid_indices[0]],
     preview_shape=(32, 320, 320),
 )
+
+# knossos_preview_config = {
+#     'dataset': '/wholebrain/songbird/j0126/areaxfs_v5/knossosdatasets/mag1/knossos.conf',
+#     'offset': [1000, 1000, 1000],  # Offset (min) coordinates
+#     'size': [256, 256, 64],  # Size (shape) of the region
+#     'mag': 1,  # source mag
+#     'target_mags': [1, 2, 3],  # List of target mags to which the inference results should be written
+#     'scale_brightness': 255 if os.getenv('CLUSTER') == 'WHOLEBRAIN' else 1.
+# }
+
 # Options for the preview inference (see elektronn3.inference.Predictor).
 # Attention: These values are highly dependent on model and data shapes!
 inference_kwargs = {
@@ -233,13 +245,18 @@ inference_kwargs = {
     'overlap_shape': (32, 64, 64),
     'offset': None,
     'apply_softmax': True,
-    'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std),
+    'transform': valid_transform,
 }
 
-optimizer = optim.SGD(
+# optimizer = optim.SGD(
+#     model.parameters(),
+#     lr=0.1,  # Learning rate is set by the lr_sched below
+#     momentum=0.9,
+#     weight_decay=0.5e-4,
+# )
+optimizer = optim.AdamW(
     model.parameters(),
-    lr=0,  # Learning rate is set by the lr_sched below
-    momentum=0.9,
+    lr=1e-3,  # Learning rate is set by the lr_sched below
     weight_decay=0.5e-4,
 )
 optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
@@ -256,15 +273,16 @@ else:
     lr_sched = torch.optim.lr_scheduler.CyclicLR(
         optimizer,
         base_lr=1e-6,
-        max_lr=0.1,
-        step_size_up=10000,
-        step_size_down=10000,
+        max_lr=1e-3,
+        step_size_up=2000,
+        step_size_down=6000,
         cycle_momentum=True if 'momentum' in optimizer.defaults else False
     )
     if optimizer_state_dict is not None:
         optimizer.load_state_dict(optimizer_state_dict)
     if lr_sched_state_dict is not None:
         lr_sched.load_state_dict(lr_sched_state_dict)
+# lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
 
 # Validation metrics
 valid_metrics = {  # mean metrics
@@ -293,7 +311,7 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batch_size=1,
+    batch_size=8,
     num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
@@ -302,6 +320,7 @@ trainer = Trainer(
     schedulers={'lr': lr_sched},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
+    # knossos_preview_config=knossos_preview_config,
     preview_interval=5,
     inference_kwargs=inference_kwargs,
     hparams=hparams,
