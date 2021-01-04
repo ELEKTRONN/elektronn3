@@ -234,6 +234,9 @@ class Trainer:
             powered by https://github.com/NVIDIA/apex to reduce memory usage
             and (if a GPU with Tensor Cores is used) make training much faster.
             This is currently experimental and might cause instabilities.
+        tqdm_kwargs: Extra arguments to be passed to tqdm progress bars.
+            For example, to disable tqdm outputs completely, pass
+            ``tqdm_kwargs={'disable': True}``.
     """
 
     tb: tensorboardX.SummaryWriter
@@ -281,6 +284,7 @@ class Trainer:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
+            tqdm_kwargs: Optional[Dict] = None
     ):
         inference_kwargs = {} if inference_kwargs is None else inference_kwargs
         if preview_batch is not None and (
@@ -331,6 +335,7 @@ class Trainer:
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
+        self.tqdm_kwargs = {} if tqdm_kwargs is None else tqdm_kwargs
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -547,7 +552,11 @@ class Trainer:
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         batch_iter = tqdm(
-            self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
+            self.train_loader,
+            'Training',
+            total=len(self.train_loader),
+            dynamic_ncols=True,
+            **self.tqdm_kwargs
         )
         unlabeled_iter = None if self.unlabeled_dataset is None else iter(self.unlabeled_loader)
         for i, batch in enumerate(batch_iter):
@@ -700,8 +709,11 @@ class Trainer:
         targets = []
         stats = {name: [] for name in self.valid_metrics.keys()}
         batch_iter = tqdm(
-            enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
-            dynamic_ncols=True
+            enumerate(self.valid_loader),
+            'Validating',
+            total=len(self.valid_loader),
+            dynamic_ncols=True,
+            **self.tqdm_kwargs
         )
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)

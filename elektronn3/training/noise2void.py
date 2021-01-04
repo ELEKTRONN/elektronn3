@@ -163,8 +163,11 @@ class Noise2VoidTrainer(Trainer):
         targets = []
         stats = {name: [] for name in self.valid_metrics.keys()}
         batch_iter = tqdm(
-            enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
-            dynamic_ncols=True
+            enumerate(self.valid_loader),
+            'Validating',
+            total=len(self.valid_loader),
+            dynamic_ncols=True,
+            **self.tqdm_kwargs
         )
         for i, batch in batch_iter:
             dimg = batch['inp'].to(self.device, non_blocking=True)

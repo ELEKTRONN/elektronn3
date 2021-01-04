@@ -53,7 +53,7 @@ class TripletTrainer(Trainer):
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         batch_iter = tqdm(
-            self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
+            self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True, **self.tqdm_kwargs
         )
         for i, batch in enumerate(batch_iter):
             if self.step in self.extra_save_steps:
