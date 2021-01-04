@@ -34,8 +34,9 @@ def create_preview_batch_from_knossos(knossos_preview_config: Dict[str, str]) ->
         size=config['size'],
         mag=config['mag'],
         datatype=np.float32
-    )
-    inp_np = inp_np.swapaxes(0, 2)[None, None]  # (W, H, D) -> (N, C, D, H, W)
+    )  # (D, H, W)
+    inp_np = inp_np[None, None]  # -> (N, C, D, H, W)
+    inp_np = inp_np / config.get('scale_brightness', 1.)
     inp = torch.from_numpy(inp_np)
     return inp
 
