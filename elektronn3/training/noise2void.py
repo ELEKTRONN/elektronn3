@@ -1,12 +1,17 @@
-# Trainer code for 2D and 3D Noise2Void (https://arxiv.org/abs/1811.10980)
-# Adapted from https://github.com/juglab/pn2v/blob/master/pn2v/training.py,
-# ported from NumPy to PyTorch and generalized to support 3D.
+"""
+Trainer code for 2D and 3D Noise2Void (https://arxiv.org/abs/1811.10980)
+Adapted from https://github.com/juglab/pn2v/blob/master/pn2v/training.py,
+ported from NumPy to PyTorch and generalized to support 3D.
+"""
+
+from typing import Callable
 
 import torch
 from torch import nn
 import numpy as np
 import itertools
 
+from scipy.ndimage.filters import gaussian_filter
 from tqdm import tqdm
 
 from elektronn3.training.trainer import Trainer, NaNException
@@ -69,37 +74,77 @@ def prepare_sample(img, ratio=1e-3, channels=None):
     return inp, target, mask
 
 
-def masked_mse_loss(out, target, mask):
+def masked_mse_loss(out, target, mask=None):
+    if mask is None:
+        return nn.functional.mse_loss(out, target)
     err = nn.functional.mse_loss(out, target, reduction='none')
     err *= mask
     loss = err.sum() / mask.sum()  # Scale by ratio of masked pixels
     return loss
 
 
-class Noise2Void(nn.Module):
-    def __int__(self, ratio=1e-3):
-        super().__init__()
-        self.ratio = ratio
-
-    def forward(self, x):
-        inp, target, mask = prepare_sample(x, ratio=self.ratio)
-        loss = masked_mse_loss(inp, target, mask)
-        return loss
-
-
 class Noise2VoidTrainer(Trainer):
-    """Trainer subclass with custom training and validation code for Noise2Void training."""
-    def __init__(self, *args, **kwargs):
+    """Trainer subclass with custom training and validation code for Noise2Void training.
+
+    Noise2Void is applied by default, but it can also be replaced or accompanied by additive
+    gaussian noise and gaussian blurring (see args below).
+
+    Args:
+        criterion: Training criterion. If ``n2v_ratio > 0``, it should expect 3 arguments,
+            the third being the Noise2Void mask. Per default, a masked MSE loss is used.
+        n2v_ratio: Ratio of pixels to be manipulated and masked in each image according to the
+            Noise2Void algorithm. If it is set to a value <= 0, Noise2Void is disabled.
+        agn_max_std: Maximum std (sigma parameter) for additive gaussian noise that is
+            optionally applied to the input image. Standard deviations are sampled from a uniform
+            distribution that ranges between 0 and ``agn_max_std``.
+            If it is set to a value <= 0, additive gaussian noise is disabled.
+        gblur_sigma: Sigma parameter for gaussian blurring that is optionally applied to the
+            input image. If it is set to a value <= 0, gaussian blurring is disabled.
+    """
+    def __init__(
+            self,
+            criterion: Callable = masked_mse_loss,
+            n2v_ratio: float = 1e-3,
+            agn_max_std: float = 0,
+            gblur_sigma: float = 0,
+            *args,
+            **kwargs
+    ):
         super().__init__(*args, **kwargs)
-        # self.criterion = Noise2Void()
-        self.ratio = 1e-3
+        self.criterion = criterion
+        self.n2v_ratio = n2v_ratio
+        self.agn_max_std = agn_max_std
+        self.gblur_sigma = gblur_sigma
 
     def _train_step(self, batch):
-        img = batch['inp'].to(self.device, non_blocking=True)
-        dinp, dtarget, dmask = prepare_sample(img, ratio=self.ratio)
+        # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
+        dimg = batch['inp'].to(self.device, non_blocking=True)
+
+        if self.n2v_ratio > 0:
+            dinp, dtarget, dmask = prepare_sample(dimg, ratio=self.n2v_ratio)
+        else:
+            dinp = dimg.clone()
+            dtarget = dimg
+            dmask = None
+
+        # Apply additive gaussian noise
+        if self.agn_max_std > 0:
+            agn_std = np.random.rand() * self.agn_max_std  # stds from range [0, agn_max_std]
+            dinp.add_(torch.randn_like(dinp).mul_(agn_std))
+
+        # Apply gaussian blurring
+        if self.gblur_sigma > 0:
+            dinp = dinp.cpu().numpy()
+            for n, c in itertools.product(range(dinp.shape[0]), range(dinp.shape[1])):
+                dinp[n, c] = gaussian_filter(dinp[n, c], sigma=self.gblur_sigma)
+            dinp = torch.as_tensor(dinp).to(self.device).float()
+
         # forward pass
         dout = self.model(dinp)
-        dloss = masked_mse_loss(dout, dtarget, dmask)
+        if dmask is None:
+            dloss = self.criterion(dout, dtarget)
+        else:
+            dloss = self.criterion(dout, dtarget, dmask)
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException
@@ -122,12 +167,33 @@ class Noise2VoidTrainer(Trainer):
             dynamic_ncols=True
         )
         for i, batch in batch_iter:
-            # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dimg = batch['inp'].to(self.device, non_blocking=True)
-            dinp, dtarget, dmask = prepare_sample(dimg, ratio=self.ratio)
+
+            if self.n2v_ratio > 0:
+                dinp, dtarget, dmask = prepare_sample(dimg, ratio=self.n2v_ratio)
+            else:
+                dinp = dimg.clone()
+                dtarget = dimg
+                dmask = None
+
+            # Apply additive gaussian noise
+            if self.agn_max_std > 0:
+                agn_std = np.random.rand() * self.agn_max_std  # stds from range [0, agn_max_std]
+                dinp.add_(torch.randn_like(dinp).mul_(agn_std))
+
+            # Apply gaussian blurring
+            if self.gblur_sigma > 0:
+                dinp = dinp.cpu().numpy()
+                for n, c in itertools.product(range(dinp.shape[0]), range(dinp.shape[1])):
+                    dinp[n, c] = gaussian_filter(dinp[n, c], sigma=self.gblur_sigma)
+                dinp = torch.as_tensor(dinp).to(self.device).float()
+
             # forward pass
             dout = self.model(dinp)
-            dloss = masked_mse_loss(dout, dtarget, dmask)
+            if dmask is None:
+                dloss = self.criterion(dout, dtarget)
+            else:
+                dloss = self.criterion(dout, dtarget, dmask)
             val_loss.append(dloss.item())
             out = dout.detach().cpu()
             outs.append(out)
