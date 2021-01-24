@@ -510,12 +510,17 @@ class Trainer:
         """Core training step on self.device"""
         inp = batch['inp']
         target = batch.get('target')
+        target_class = batch.get('class')
         # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
         dinp = inp.to(self.device, non_blocking=True)
         dtarget = target.to(self.device, non_blocking=True) if target is not None else None
+        dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
         # forward pass
         dout = self.model(dinp)
-        dloss = self.criterion(dout, dtarget)
+        if dtarget_class is not None:
+            dloss = self.criterion(dout, dtarget, dtarget_class)
+        else:
+            dloss = self.criterion(dout, dtarget)
 
         unlabeled = batch.get('unlabeled')
         if unlabeled is not None:  # Add a simple consistency loss
@@ -589,7 +594,7 @@ class Trainer:
                 images['inp'] = batch['inp'].numpy()
                 images['fname'] = batch.get('fname')
                 if 'target' in batch:
-                    images['target'] = self.adjust_mixed_target(dout, batch['target'].numpy())
+                    images['target'] = batch['target'].numpy()
                 if 'unlabeled' in batch:
                     images['unlabeled'] = batch['unlabeled']
                 images['out'] = dout.detach().cpu().numpy()
@@ -603,12 +608,6 @@ class Trainer:
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
 
         return stats, misc, images
-
-    def adjust_mixed_target(self, dout, target):
-        if target.ndim == dout.ndim and target.shape[1] != dout.shape[1]:
-            assert target.shape[1] == 2  # MixedDataset
-            target = target[:, 0]
-        return target
 
     def _put_current_attention_maps_into(self, images):
         if getattr(self.model, 'attention', None):
@@ -725,16 +724,19 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp = batch['inp']
             target = batch.get('target')
+            target_class = batch.get('class')
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True) if target is not None else None
+            dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
             dout = self.model(dinp)
             if dtarget is None:  # Use self-supervised unary loss function
                 val_loss.append(self.ss_criterion(dout).item())
+            elif dtarget_class is not None:
+                val_loss.append(self.criterion(dout, dtarget, dtarget_class).item())
             else:
                 val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             outs.append(out)
-            target = self.adjust_mixed_target(dout, target)
             targets.append(target)
 
         images = {
