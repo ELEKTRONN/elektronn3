@@ -8,6 +8,7 @@
 from typing import Sequence, Optional, Tuple, Callable, Union
 
 import torch
+import numpy as np
 
 from torch import nn
 from torch.nn import functional as F
@@ -588,6 +589,90 @@ class ACLoss(torch.nn.Module):
         loss = (1 - self.region_weight) * length_term + self.region_weight * region_term
         return loss
 
+
+class MixedCombinedLoss(torch.nn.Module):
+    """
+    Defines a loss function as a weighted sum of combinable loss criteria for multi-class classification with only
+    single class ground truths.
+
+    For each voxel, we construct a 2 channel output after the softmax:
+     channel 0: background (actual background + all but one classes) = (1-channel 1)
+     channel 1: foreground (the one class to which the target corresponds)
+
+    Args:
+        class_weight: a manual rescaling weight given to each
+            class.
+        criteria: List of loss criterion modules that should be combined.
+        criteria_weight: Weight assigned to the individual loss criteria (in the same
+            order as ``criteria``).
+        device: The device on which the loss should be computed. This needs
+            to be set to the device that the loss arguments are allocated on.
+        eps:
+    """
+
+    def __init__(self, class_weight, criteria, criteria_weight, device, eps=1e-10, **kwargs):
+        super(MixedCombinedLoss, self).__init__()
+
+        self.softmax = torch.nn.Softmax(dim=1)
+        self.class_weight = class_weight
+
+        self.criteria = torch.nn.ModuleList(criteria)
+        self.device = device
+
+        self.eps = eps
+
+        if criteria_weight is None:
+            weight = torch.ones(len(criteria))
+        else:
+            weight = torch.as_tensor(criteria_weight, dtype=torch.float32)
+            assert weight.shape == (len(criteria),)
+        self.register_buffer('weight', weight.to(self.device))
+
+    def forward(self, output_direct, target, target_class):
+
+        assert all([len(torch.unique(target_sample[0])) <= 2 for target_sample in
+                    target])  # background and that class for each sample in the batch
+        modified_target = torch.zeros_like(target)
+        modified_target[target != 0] = 1
+
+        logit_max = output_direct.max(axis=1)[0].unsqueeze(1)
+        output_shifted = output_direct - logit_max  # subtract max for numerical stability
+
+        # for dice
+        softmax_output = self.softmax(output_shifted)
+        softmax_output = (1 - self.eps) * softmax_output + self.eps  # eps for numerical stability
+        softmax_output = softmax_output[(range(softmax_output.shape[0]), target_class)].unsqueeze(1)
+        softmax_output = torch.cat([1 - softmax_output, softmax_output], dim=1)
+
+        # for crossentropy: compute in log softmax for the two classes for numerical stability
+        exp_output = output_shifted.exp()
+        exp_output_sum = exp_output.sum(axis=1).unsqueeze(1)
+        exp_output_sum_log = exp_output_sum.log()
+        # foreground i: log_softmax_i = -log(softmax(x)[i]) = x[i] - log(\sum_j exp(x[j]))
+        log_softmax_i = output_shifted - exp_output_sum_log
+
+        num_classes = output_direct.shape[1]
+        idx = [np.arange(num_classes) != i for i in range(num_classes)]  # todo: only compute for target class
+        exp_output_sum_minus_i = torch.stack([exp_output[:, idx[k]].sum(axis=1) for k in range(num_classes)], dim=1)
+        # assert torch.allclose(exp_output_sum_minus_i, exp_output_sum - exp_output)
+        # background -i: log_softmax_minus_i = log(1-softmax(x)[i]) = log(\sum_j!=i exp(x[j])) - log(\sum_j exp(x[j]))
+        log_softmax_minus_i = (exp_output_sum_minus_i).log() - exp_output_sum_log
+
+        log_softmax_i_output = log_softmax_i[range(softmax_output.shape[0]), target_class].unsqueeze(1)
+        log_softmax_minus_i_output = log_softmax_minus_i[range(softmax_output.shape[0]), target_class].unsqueeze(1)
+        log_softmax_output = torch.cat([log_softmax_minus_i_output, log_softmax_i_output], dim=1)
+
+        loss = torch.tensor(0., device=softmax_output.device)
+        for crit, crit_weight in zip(self.criteria, self.weight):
+            for i in range(softmax_output.shape[0]):  # todo: not element-wise; process full batch
+                if isinstance(crit, torch.nn.NLLLoss):
+                    crit_loss = crit(log_softmax_output[i].unsqueeze(0), modified_target[i].unsqueeze(0)).mean()
+                elif isinstance(crit, DiceLoss):
+                    crit_loss = crit(softmax_output[i].unsqueeze(0), modified_target[i].unsqueeze(0))
+                else:
+                    raise NotImplementedError()
+                loss += crit_loss * crit_weight * self.class_weight[target_class[i]]
+        return loss
 
 ##### ALTERNATIVE VERSIONS OF DICE LOSS #####
 

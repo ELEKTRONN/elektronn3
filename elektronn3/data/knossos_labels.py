@@ -7,7 +7,6 @@ import knossos_utils
 import numpy as np
 import torch
 import torch.utils.data
-
 from elektronn3.data import transforms
 from elektronn3.data.knossos import KnossosRawData
 
@@ -43,6 +42,7 @@ class KnossosLabels(torch.utils.data.Dataset):
             (x=512, y=512, z=512) of the dataset is considered. The bounds should be one of the
             bounds of different patches in the knossos dataset. If ``None``, then whole dataset is returned.
             label_offset: offset of the indices in the knossos labels, default is 0.
+            label_order: change the order of the classes in the labels
            """
 
     def __init__(
@@ -56,7 +56,8 @@ class KnossosLabels(torch.utils.data.Dataset):
             epoch_size: int = 100,
             label_names: Optional[Sequence[str]] = None,
             knossos_bounds: Optional[Sequence[Sequence[Sequence[int]]]] = None,  # xyz
-            label_offset: int = 0
+            label_offset: int = 0,
+            label_order: Optional[Sequence[int]] = None
     ):
         self.conf_path_label = conf_path_label
         self.conf_path_raw_data = conf_path_raw_data
@@ -76,6 +77,7 @@ class KnossosLabels(torch.utils.data.Dataset):
         self.dir_path = dir_path_label
         self.knossos_bounds = knossos_bounds
         self.label_offset = label_offset  # todo: verify correct handling of this offset
+        self.label_order = label_order
 
         self._get_file_bounds(label_names)
         self._get_data()
@@ -166,6 +168,10 @@ class KnossosLabels(torch.utils.data.Dataset):
             'target': torch.as_tensor(label).long(),
             'fname': target['fname']
         }
+        if self.label_order is not None:
+            sample_target = sample['target'].detach().clone()
+            for i, label in enumerate(self.label_order):
+                sample['target'][sample_target == i] = label
         return sample
 
     def __len__(self) -> int:
