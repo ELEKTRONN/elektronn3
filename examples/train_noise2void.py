@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
-    '-s', '--epoch-size', type=int, default=100,
+    '-s', '--epoch-size', type=int, default=800,
     help='How many training samples to process between '
          'validation/preview/extended-stat calculation phases.'
 )
@@ -233,7 +233,7 @@ else:
 valid_dataset = PatchCreator(
     input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
-    epoch_size=args.epoch_size,
+    epoch_size=40,
     warp_prob=0,
     transform=valid_transform,
     **common_data_kwargs
