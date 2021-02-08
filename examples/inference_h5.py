@@ -40,6 +40,9 @@ from elektronn3.inference import Predictor
 parser = argparse.ArgumentParser(description='Inference from and to HDF5 files.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 args = parser.parse_args()
+# Write the flags passed to python via argument passer to logfile
+# They will appear as "Namespace(arg1=val1, arg2=val2, ...)" at the top of the logfile
+logger.info("Arguments given to python via flags: {}".format(args))
 
 
 if not args.disable_cuda and torch.cuda.is_available():
@@ -63,7 +66,7 @@ apply_softmax: bool = True  # Disable this if you don't want to apply softmax on
 float16: bool = False  # Save memory by setting this to True. Can also improve speed on some setups.
 out_channels: int = 2  # Adjust this if your model outputs more channels/classes
 export_channel: int = 1  # Specify a channel whose contents will be written to the output file
-model_path: str = '~/e3training/base/model_best.pts'  # Change this to the model you want to use.
+model_path: str = '/wholebrain/scratch/fkies/e3training/Sequential__20-11-23_16-03-07/model_best.pts'  # Change this to the model you want to use.
 inpath: str = '~/neuro_data_cdhw/raw_0.h5'  # Path to the file on which to run inference.
 inkey: str = 'raw'  # Change this to the name of the HDF5 dataset from which inputs should be read
 outpath: Optional[str] = None  # 'path/to/outputfile.h5'  # Default: Write to a file next to infile

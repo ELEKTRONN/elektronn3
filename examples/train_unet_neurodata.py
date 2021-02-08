@@ -70,6 +70,9 @@ else:
 import elektronn3
 elektronn3.select_mpl_backend('Agg')
 logger = logging.getLogger('elektronn3log')
+# Write the flags passed to python via argument passer to logfile
+# They will appear as "Namespace(arg1=val1, arg2=val2, ...)" at the top of the logfile
+logger.debug("Arguments given to python via flags: {}".format(args))
 
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics
