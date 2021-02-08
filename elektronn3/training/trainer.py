@@ -510,12 +510,17 @@ class Trainer:
         """Core training step on self.device"""
         inp = batch['inp']
         target = batch.get('target')
+        target_class = batch.get('class')
         # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
         dinp = inp.to(self.device, non_blocking=True)
         dtarget = target.to(self.device, non_blocking=True) if target is not None else None
+        dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
         # forward pass
         dout = self.model(dinp)
-        dloss = self.criterion(dout, dtarget)
+        if dtarget_class is not None:
+            dloss = self.criterion(dout, dtarget, dtarget_class)
+        else:
+            dloss = self.criterion(dout, dtarget)
 
         unlabeled = batch.get('unlabeled')
         if unlabeled is not None:  # Add a simple consistency loss
@@ -719,11 +724,15 @@ class Trainer:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             inp = batch['inp']
             target = batch.get('target')
+            target_class = batch.get('class')
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True) if target is not None else None
+            dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
             dout = self.model(dinp)
             if dtarget is None:  # Use self-supervised unary loss function
                 val_loss.append(self.ss_criterion(dout).item())
+            elif dtarget_class is not None:
+                val_loss.append(self.criterion(dout, dtarget, dtarget_class).item())
             else:
                 val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
