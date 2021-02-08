@@ -107,6 +107,21 @@ class GAPTripletMarginLoss(nn.TripletMarginLoss):
         )
 
 
+class MaskedMSELoss(nn.Module):
+    """Masked MSE loss where only pixels that are masked are considered.
+
+    Expects an optional binary mask as the third argument.
+    If no mask is supplied (``None``), the loss is equivalent to ``torch.nn.MSELoss``."""
+    @staticmethod
+    def forward(out, target, mask=None):
+        if mask is None:
+            return F.mse_loss(out, target)
+        err = F.mse_loss(out, target, reduction='none')
+        err *= mask
+        loss = err.sum() / mask.sum()  # Scale by ratio of masked pixels
+        return loss
+
+
 class DistanceWeightedMSELoss(nn.Module):
     """Weighted MSE loss for signed euclidean distance transform targets.
 

@@ -15,6 +15,7 @@ from scipy.ndimage.filters import gaussian_filter
 from tqdm import tqdm
 
 from elektronn3.training.trainer import Trainer, NaNException
+from elektronn3.modules.loss import MaskedMSELoss
 
 import logging
 logger = logging.getLogger('elektronn3log')
@@ -74,15 +75,6 @@ def prepare_sample(img, ratio=1e-3, channels=None):
     return inp, target, mask
 
 
-def masked_mse_loss(out, target, mask=None):
-    if mask is None:
-        return nn.functional.mse_loss(out, target)
-    err = nn.functional.mse_loss(out, target, reduction='none')
-    err *= mask
-    loss = err.sum() / mask.sum()  # Scale by ratio of masked pixels
-    return loss
-
-
 class Noise2VoidTrainer(Trainer):
     """Trainer subclass with custom training and validation code for Noise2Void training.
 
@@ -90,8 +82,10 @@ class Noise2VoidTrainer(Trainer):
     gaussian noise and gaussian blurring (see args below).
 
     Args:
+        model: PyTorch model (``nn.Module``) that shall be trained.
         criterion: Training criterion. If ``n2v_ratio > 0``, it should expect 3 arguments,
             the third being the Noise2Void mask. Per default, a masked MSE loss is used.
+        *args: *Other positional args. See signature of :py:class:`elektronn3.training.Trainer`*
         n2v_ratio: Ratio of pixels to be manipulated and masked in each image according to the
             Noise2Void algorithm. If it is set to a value <= 0, Noise2Void is disabled.
         agn_max_std: Maximum std (sigma parameter) for additive gaussian noise that is
@@ -100,18 +94,19 @@ class Noise2VoidTrainer(Trainer):
             If it is set to a value <= 0, additive gaussian noise is disabled.
         gblur_sigma: Sigma parameter for gaussian blurring that is optionally applied to the
             input image. If it is set to a value <= 0, gaussian blurring is disabled.
+        **kwargs: Other keyword args. See signature of :py:class:`elektronn3.training.Trainer`
     """
     def __init__(
             self,
-            criterion: Callable = masked_mse_loss,
+            model: torch.nn.Module,
+            criterion: torch.nn.Module = MaskedMSELoss(),
+            *args,
             n2v_ratio: float = 1e-3,
             agn_max_std: float = 0,
             gblur_sigma: float = 0,
-            *args,
             **kwargs
     ):
-        super().__init__(*args, **kwargs)
-        self.criterion = criterion
+        super().__init__(model, criterion, *args, **kwargs)
         self.n2v_ratio = n2v_ratio
         self.agn_max_std = agn_max_std
         self.gblur_sigma = gblur_sigma

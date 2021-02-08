@@ -10,7 +10,6 @@ import argparse
 import logging
 import os
 import random
-import zipfile
 
 import torch
 from torch import nn
@@ -78,7 +77,7 @@ logger.debug("Arguments given to python via flags: {}".format(args))
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics
 from elektronn3.training import SWA
-from elektronn3.modules import DiceLoss, CombinedLoss
+from elektronn3.modules import MaskedMSELoss
 from elektronn3.models.unet import UNet
 
 
@@ -275,9 +274,7 @@ else:
 
 # lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 200, 0.9)  # No-op scheduler
 
-crossentropy = nn.CrossEntropyLoss(weight=class_weights)
-dice = DiceLoss(apply_softmax=True, weight=class_weights)
-criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
+criterion = MaskedMSELoss()
 
 # Create trainer
 from elektronn3.training.noise2void import Noise2VoidTrainer
