@@ -149,8 +149,6 @@ else:  # Use publicly available neuro_data_cdhw dataset
     dataset_std = (42.599973,)
     class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
-# TODO: Recalculate above class_weights with mode='inverse'
-
 max_steps = args.max_steps
 max_runtime = args.max_runtime
 
@@ -158,25 +156,22 @@ optimizer_state_dict = None
 lr_sched_state_dict = None
 if args.resume is not None:  # Load pretrained network
     pretrained = os.path.expanduser(args.resume)
-    _warning_str = 'Loading model without optimizer state. Prefer state dicts'
-    if zipfile.is_zipfile(pretrained):  # Zip file indicates saved ScriptModule
-        logger.warning(_warning_str)
+    logger.info(f'Loading model from {pretrained}')
+    if pretrained.endswith('.pt'):  # nn.Module
+        model = torch.load(pretrained, map_location=device)
+    elif pretrained.endswith('.pts'):  # ScriptModule
         model = torch.jit.load(pretrained, map_location=device)
-    else:  # Either state dict or pickled model
+    elif pretrained.endswith('.pth'):
         state = torch.load(pretrained)
-        if isinstance(state, dict):
-            model.load_state_dict(state['model_state_dict'])
-            optimizer_state_dict = state.get('optimizer_state_dict')
-            lr_sched_state_dict = state.get('lr_sched_state_dict')
-            if optimizer_state_dict is None:
-                logger.warning('optimizer_state_dict not found.')
-            if lr_sched_state_dict is None:
-                logger.warning('lr_sched_state_dict not found.')
-        elif isinstance(state, nn.Module):
-            logger.warning(_warning_str)
-            model = state
-        else:
-            raise ValueError(f'Can\'t load {pretrained}.')
+        model.load_state_dict(state['model_state_dict'], strict=False)
+        optimizer_state_dict = state.get('optimizer_state_dict')
+        lr_sched_state_dict = state.get('lr_sched_state_dict')
+        if optimizer_state_dict is None:
+            logger.warning('optimizer_state_dict not found.')
+        if lr_sched_state_dict is None:
+            logger.warning('lr_sched_state_dict not found.')
+    else:
+        raise ValueError(f'{pretrained} has an unkown file extension. Supported are: .pt, .pts and .pth')
 
 dataset_mean = (0.0,)
 dataset_std = (1.0,)

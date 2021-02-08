@@ -160,7 +160,7 @@ if args.resume is not None:  # Load pretrained network
     pretrained = os.path.expanduser(args.resume)
     logger.info(f'Loading model from {pretrained}')
     if pretrained.endswith('.pt'):  # nn.Module
-        model = torch.jit.load(pretrained, map_location=device)
+        model = torch.load(pretrained, map_location=device)
     elif pretrained.endswith('.pts'):  # ScriptModule
         model = torch.jit.load(pretrained, map_location=device)
     elif pretrained.endswith('.pth'):
