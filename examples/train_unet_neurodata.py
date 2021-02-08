@@ -41,9 +41,9 @@ parser.add_argument(
     '-j', '--jit', metavar='MODE', default='onsave',
     choices=['disabled', 'train', 'onsave'],
     help="""Options:
-"disabled": Completely disable JIT tracing;
-"onsave": Use regular Python model for training, but trace it on-demand for saving training state;
-"train": Use traced model for training and serialize it on disk"""
+"disabled": Completely disable JIT (TorchScript) compilation;
+"onsave": Use regular Python model for training, but JIT-compile it on-demand for saving training state;
+"train": Use JIT-compiled model for training and serialize it on disk."""
 )
 parser.add_argument('--seed', type=int, default=0, help='Base seed for all RNGs.')
 parser.add_argument(
@@ -106,18 +106,13 @@ model = UNet(
 # Example for a model-compatible input.
 example_input = torch.ones(1, 1, 32, 64, 64)
 
-enable_save_trace = False if args.jit == 'disabled' else True
+save_jit = None if args.jit == 'disabled' else 'script'
 if args.jit == 'onsave':
-    # Make sure that tracing works
-    tracedmodel = torch.jit.trace(model, example_input.to(device))
+    # Make sure that compilation works at all
+    jitmodel = torch.jit.script(model)
 elif args.jit == 'train':
-    if getattr(model, 'checkpointing', False):
-        raise NotImplementedError(
-            'Traced models with checkpointing currently don\'t '
-            'work, so either run with --disable-trace or disable '
-            'checkpointing.')
-    tracedmodel = torch.jit.trace(model, example_input.to(device))
-    model = tracedmodel
+    jitmodel = torch.jit.script(model)
+    model = jitmodel
 
 
 # USER PATHS
@@ -319,7 +314,7 @@ trainer = Trainer(
     save_root=save_root,
     exp_name=args.exp_name,
     example_input=example_input,
-    save_jit='script',
+    save_jit=save_jit,
     schedulers={'lr': lr_sched},
     valid_metrics=valid_metrics,
     preview_batch=preview_batch,
