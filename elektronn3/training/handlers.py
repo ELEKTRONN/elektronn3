@@ -132,11 +132,10 @@ def write_to_kzip(trainer: 'Trainer', pred_batch: np.ndarray) -> None:
     # Set movement are in k.zip
     area_min = ks['offset']
     area_sz = ks['size']
-    area_max = tuple(xx + yy - 1 for xx, yy in zip(area_min, area_sz))
     anno_str = f"""<?xml version="1.0" encoding="UTF-8"?>
 <things>
     <parameters>
-        <MovementArea min.x="{area_min[0]}" min.y="{area_min[1]}" min.z="{area_min[2]}" max.x="{area_max[0]}" max.y="{area_max[1]}" max.z="{area_max[2]}"/>
+        <MovementArea min.x="{area_min[0]}" min.y="{area_min[1]}" min.z="{area_min[2]}" size.x="{area_sz[0]}" size.y="{area_sz[1]}" size.z="{area_sz[2]}"/>
     </parameters>
     <comments/>
     <branchpoints/>
