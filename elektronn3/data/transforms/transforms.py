@@ -380,8 +380,8 @@ class Normalize:
         else:
             normalized = inp.copy()
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
-            raise ValueError('mean and std must have the same length as the C '
-                             'axis (number of channels) of the input.')
+            raise ValueError(f'mean ({self.mean.shape[0]}) and std ({self.std.shape[0]}) must have the same length as the C '
+                             f'axis (number of channels) of the input ({inp.shape[0]}).')
         for c in range(inp.shape[0]):
             normalized[c] = (inp[c] - self.mean[c]) / self.std[c]
         return normalized, target
