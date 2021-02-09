@@ -122,7 +122,11 @@ def _get_batch2img_function(
 def write_to_kzip(trainer: 'Trainer', pred_batch: np.ndarray) -> None:
     from knossos_utils import KnossosDataset
     ks = trainer.knossos_preview_config
-    ds = KnossosDataset(ks['dataset'])
+    if isinstance(ks['dataset'], str):
+        dataset_path = ks['dataset']
+    else:
+        dataset_path = ks['dataset'][0]
+    ds = KnossosDataset(dataset_path)
     seg = pred_batch[0].swapaxes(0, 2)  # (N, D, H, W) -> (W, H, D)
 
     # Set movement are in k.zip
@@ -265,8 +269,7 @@ def _tb_log_sample_images(
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
-
-    inp_slice = batch2img_inp(images['inp'])[0]
+    inp_slice = batch2img_inp(images['inp'])
 
     uinp_batch = images.get('unlabeled')
     if uinp_batch is not None:
@@ -312,7 +315,7 @@ def _tb_log_sample_images(
 
         # Assume that target has the same shape as the output and pad it, too
         if target_batch is not None:
-            padded_target_batch = np.zeros(inp_batch.shape, dtype=target_batch.dtype)
+            padded_target_batch = np.zeros((*target_batch.shape[:2], *inp_batch.shape[2:]), dtype=target_batch.dtype)
             padded_target_batch[slc] = target_batch
             target_batch = padded_target_batch
 
@@ -376,11 +379,13 @@ def _tb_log_sample_images(
         # TODO: Add output and target overlay videos (not straightforward
         #       because the 2D overlay code currently uses matplotlib)
 
-    trainer.tb.add_figure(
-        f'{group}/inp',
-        plot_image(inp_slice, cmap='gray', filename=name),
-        global_step=trainer.step
-    )
+    for channel in range(inp_slice.shape[0]):
+        trainer.tb.add_figure(
+            f'{group}/inp{channel}',
+            plot_image(inp_slice[channel], cmap='gray', filename=name),
+            global_step=trainer.step
+        )
+
     if target_batch is not None:
         _out_channels = trainer.max_plot_id if is_classification else None
         _cmap = class_cmap if is_classification else 'gray'
@@ -417,7 +422,6 @@ def _tb_log_sample_images(
     # Only make pred and overlay plots in classification scenarios
     if target_batch is not None:
         if is_classification:
-
             pred_slice = out_slice.argmax(0)
             trainer.tb.add_figure(
                 f'{group}/pred_slice',
@@ -425,18 +429,17 @@ def _tb_log_sample_images(
                 global_step=trainer.step
             )
             if target_batch is not None and not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
-                _target_slice = target_slice[None] if target_slice.ndim == 2 else target_slice
-                for c in range(_target_slice.shape[0]):
+                for c in range(inp_slice.shape[0]):
                     trainer.tb.add_figure(
-                        f'{group}/target_overlay',
-                        plot_image(inp_slice, overlay=_target_slice[c], overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
+                        f'{group}/target_overlay{c}',
+                        plot_image(inp_slice[c], overlay=target_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
                         global_step=trainer.step
                     )
-                trainer.tb.add_figure(
-                    f'{group}/pred_overlay',
-                    plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
-                    global_step=trainer.step
-                )
+                    trainer.tb.add_figure(
+                        f'{group}/pred_overlay',
+                        plot_image(inp_slice[c], overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
+                        global_step=trainer.step
+                    )
 
 
 def _tb_log_sample_images_all_img(

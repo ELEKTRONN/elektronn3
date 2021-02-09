@@ -28,14 +28,20 @@ def create_preview_batch_from_knossos(knossos_preview_config: Dict[str, str]) ->
         if k not in config.keys():
             raise ValueError(f'Required key {k} missing from knossos_preview_config.')
     logger.info(f'Loading preview region from dataset {config["dataset"]}')
-    ds = KnossosDataset(config['dataset'])
-    inp_np = ds.load_raw(
-        offset=config['offset'],
-        size=config['size'],
-        mag=config['mag'],
-        datatype=np.float32
-    )  # (D, H, W)
-    inp_np = inp_np[None, None]  # -> (N, C, D, H, W)
+    datasets = config['dataset']
+    if isinstance(datasets, str):
+        datasets = [datasets]
+    inp_np = []
+    for idx, dataset_path in enumerate(datasets):
+        ds = KnossosDataset(dataset_path)
+        inp_np.append(ds.load_raw(
+            offset=config['offset'],
+            size=config['size'],
+            mag=config['mag'],
+            datatype=np.float32
+        ))  # (D, H, W)
+    inp_np = np.stack(inp_np, axis=0) # C, D, H, W
+    inp_np = inp_np[None]  # (N, C, D, H, W)
     inp_np = inp_np / config.get('scale_brightness', 1.)
     inp = torch.from_numpy(inp_np)
     return inp

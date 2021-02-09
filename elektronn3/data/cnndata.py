@@ -6,6 +6,7 @@
 
 __all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
 
+import glob
 import logging
 import os
 import sys
@@ -586,21 +587,46 @@ class Segmentation2d(data.Dataset):
         self.target_dtype = target_dtype
         self.epoch_multiplier = epoch_multiplier
 
+        def load_image(fname):
+            inp = imageio.imread(fname).astype(np.float32)
+            if inp.ndim == 2:
+                inp = inp[None]  # (H, W) -> (C=1, H, W)
+            elif inp.ndim == 3:
+                inp = inp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
+            else:
+                raise RuntimeError(f'Image {fname} has shape {inp.shape}, but ndim should be 2 or 3.')
+            return inp
+
         if self.in_memory:
             self.inps = []
-            rgb_fname = None
-            for fname in self.inp_paths:
-                inp = imageio.imread(fname).astype(np.float32)
-                if rgb_fname is not None and inp.ndim != 3:
-                    raise RuntimeError(f'Mixed multi-channel {rgb_fname} and single-channel images {fname} in gt.')
-                if inp.ndim == 2:
-                    inp = inp[None]  # (H, W) -> (C=1, H, W)
-                elif inp.ndim == 3:
-                    rgb_fname = fname
-                    inp = inp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
+            rgb_fnames = {}
+            gray_fnames = {}
+            for input_path in self.inp_paths:
+                if os.path.isdir(input_path):
+                    multi_input = []
+                    for channel_idx, input_file in enumerate(sorted(glob.glob(str(input_path) + '/*'))):
+                        inp = load_image(str(input_file))
+                        if inp.shape[0] == 1:
+                            gray_fnames[channel_idx] = input_file
+                        elif inp.shape[0] == 3:
+                            rgb_fnames[channel_idx] = input_file
+                        rgb_fname = rgb_fnames.get(channel_idx)
+                        if rgb_fname is not None and inp.shape[0] == 1:
+                            raise RuntimeError(f'GT input layer {channel_idx} has mixed multi-channel ({rgb_fname}) and single-channel images ({input_file}).')
+                        gray_fname = gray_fnames.get(channel_idx)
+                        if gray_fname is not None and inp.shape[0] == 3:
+                            raise RuntimeError(f'GT input layer {channel_idx} has mixed multi-channel ({input_file}) and single-channel images ({gray_fname}).')
+                        multi_input.append(inp)
+                    self.inps.append(np.concatenate(multi_input))
                 else:
-                    raise RuntimeError(f'Image {fname} has shape {inp.shape}, but ndim should be 2 or 3.')
-                self.inps.append(inp)
+                    inp = load_image(input_path)
+                    if inp.shape[0] == 1:
+                        gray_fnames[0] = input_path
+                    elif inp.shape[0] == 3:
+                        rgb_fnames[0] = input_path
+                    if len(rgb_fnames) > 0 and inp.shape[0] == 1 or len(gray_fnames) > 0 and inp.shape[0] == 3:
+                        raise RuntimeError(f'Mixed multi-channel ({rgb_fnames[0]}) and single-channel images ({gray_fnames[0]}) in gt.')
+                    self.inps.append(inp)
             self.targets = [
                 np.array(imageio.imread(fname)).astype(np.int64)
                 for fname in self.target_paths

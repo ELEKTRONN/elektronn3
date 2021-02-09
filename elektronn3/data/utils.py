@@ -64,14 +64,14 @@ def calculate_offset(model, tile_shape=None):
     with torch.no_grad():
         param = next(model.parameters())
         if tile_shape:
-            example_inp = torch.randn(1, 1, *tile_shape, device=param.device, dtype=param.dtype)
+            example_inp = torch.randn(1, param.size()[1], *tile_shape, device=param.device, dtype=param.dtype)
             example_out = model.eval().forward(example_inp)
         else:
             try: # default for 3d UNet
-                example_inp = torch.randn(1, 1, 90, 90, 90, device=param.device, dtype=param.dtype)
+                example_inp = torch.randn(1, param.size()[1], 90, 90, 90, device=param.device, dtype=param.dtype)
                 example_out = model.eval().forward(example_inp)
             except RuntimeError: # default for 2d UNet
-                example_inp = torch.randn(1, 1, 186, 186, device=param.device, dtype=param.dtype)
+                example_inp = torch.randn(1, param.size()[1], 186, 186, device=param.device, dtype=param.dtype)
                 example_out = model.eval().forward(example_inp)
     offset = np.subtract(example_inp.shape[2:], example_out.shape[2:]) // 2
     logger.info(f'Inferred target offset: {offset}.')
