@@ -388,16 +388,14 @@ def _tb_log_sample_images(
     if target_batch is not None:
         _out_channels = trainer.max_plot_id if is_classification else None
         _cmap = class_cmap if is_classification else 'gray'
-        _target_slice = target_slice[None] if target_slice.ndim == 2 else target_slice
-        for c in range(_target_slice.shape[0]):
-            trainer.tb.add_figure(
-                f'{group}/target{c}',
-                plot_image(
-                    _target_slice[c], vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
-                    # vmin=0., vmax=1.
-                ),
-                global_step=trainer.step
-            )
+        trainer.tb.add_figure(
+            f'{group}/target',
+            plot_image(
+                target_slice, vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
+                # vmin=0., vmax=1.
+            ),
+            global_step=trainer.step
+        )
 
     for key, img in images.items():
         if key.startswith('att'):
