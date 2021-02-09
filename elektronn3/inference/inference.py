@@ -472,7 +472,6 @@ class Predictor:
             if np.count_nonzero(offset) == 0: # no valid conv → disable offset
                 offset = None
             else:
-                assert not is_set(overlap_shape), 'The passed model has an offset, so overlap_shape should not be specified because it will be set automatically.'
                 offset = np.array(offset)
                 # Set overlap to offset shape because IMO that's the only reasonable choice.
                 overlap_shape = offset
