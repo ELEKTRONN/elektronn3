@@ -442,7 +442,10 @@ class PatchCreator(data.Dataset):
         logger.info('')
 
         return inp_sources, target_sources
-
+    
+    def set_offset(self, offset):
+        self.offset = np.array(offset)
+        self.target_patch_shape = self.patch_shape - self.offset * 2
 
 def get_preview_batch(
         h5data: Tuple[str, str],
