@@ -18,6 +18,7 @@ from pickle import PickleError
 from textwrap import dedent
 from typing import Tuple, Dict, Optional, Callable, Any, Sequence, List, Union
 
+from tqdm import tqdm
 import inspect
 import IPython
 import numpy as np
@@ -481,7 +482,7 @@ class Trainer3d:
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
 
         timer = Timer()
-        batch_iter = enumerate(self.train_loader)
+        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
         batch_num = 0
         for i, batch in batch_iter:
             pts = batch['pts']
