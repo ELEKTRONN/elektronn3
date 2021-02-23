@@ -5,41 +5,13 @@
 
 """
 adopted from https://github.com/pochih/FCN-pytorch/blob/master/python/fcn.py
-LICENSE https://github.com/meetshah1995/pytorch-semseg/blob/master/LICENSE
-
+LICENSE: OpenSource
 """
 
 from __future__ import print_function
 
-import torch
 import torch.nn as nn
-import torch.optim as optim
-from torchvision import models
 from torchvision.models.vgg import VGG
-
-
-def resize_conv_ala_distill(in_feat, out_feat, kernel_size, stride, padding,
-                                  output_padding, dilation):
-    """
-    # TODO: needs refinement to work with arbitrary kernel size, stride and padding etc.
-    https://distill.pub/2016/deconv-checkerboard/
-    https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
-    Args:
-        in_feat ():
-        out_feat ():
-        kernel_size ():
-        stride ():
-        padding ():
-        output_padding ():
-        dilation ():
-
-    Returns:
-
-    """
-    return nn.Sequential(nn.UpsamplingNearest2d(scale_factor=stride),
-           nn.ReflectionPad2d(padding),
-           nn.Conv2d(in_feat, out_feat, kernel_size=kernel_size, stride=1,
-           dilation=dilation))
 
 
 class FCN32s(nn.Module):
@@ -155,19 +127,14 @@ class FCNs(nn.Module):
         self.base_net = base_net
         self.relu    = nn.ReLU(inplace=True)
         self.deconv1 = nn.ConvTranspose2d(512, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        # self.deconv1 = resize_conv_ala_distill(512, 512, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn1     = nn.BatchNorm2d(512)
         self.deconv2 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        # self.deconv2 = resize_conv_ala_distill(512, 256, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn2     = nn.BatchNorm2d(256)
         self.deconv3 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        # self.deconv3 = resize_conv_ala_distill(256, 128, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn3     = nn.BatchNorm2d(128)
         self.deconv4 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        # self.deconv4 = resize_conv_ala_distill(128, 64, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn4     = nn.BatchNorm2d(64)
         self.deconv5 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        # self.deconv5 = resize_conv_ala_distill(64, 32, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
         self.bn5     = nn.BatchNorm2d(32)
         self.classifier = nn.Conv2d(32, n_class, kernel_size=1)
 
@@ -236,6 +203,7 @@ cfg = {
     'vgg16': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
     'vgg19': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
 }
+
 
 def make_layers(cfg, batch_norm=False, in_channels=3):
     layers = []

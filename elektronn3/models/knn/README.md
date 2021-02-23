@@ -1,3 +1,5 @@
+For license see https://github.com/aboulch/ConvPoint/blob/master/LICENSE.md
+
 # NanoFLANN wrapper
 
 ## Compiling the K-nearest neighbors library
