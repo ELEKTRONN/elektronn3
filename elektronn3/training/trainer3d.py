@@ -290,6 +290,11 @@ class Trainer3d:
                 raise exc
         self.model = model
         self.criterion = criterion.to(device)
+
+        self.ads_criterion = torch.nn.CrossEntropyLoss(weight=None).to(device)
+        self.dnh_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 3., 2.])).to(device)
+        self.abt_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 2., 5.])).to(device)
+
         self.optimizer = optimizer
         self.train_th = train_dataset
         self.v_path = v_path
@@ -518,7 +523,40 @@ class Trainer3d:
             if len(dout_mask) == 0:
                 continue
 
-            dloss = self.criterion(dout_mask, dtarget_mask)
+            ads_target = dtarget_mask.clone()
+            ads_target[ads_target == 3] = 1
+            ads_target[ads_target == 4] = 1
+            ads_target[ads_target == 5] = 0
+            ads_target[ads_target == 6] = 0
+            ads_loss = self.ads_criterion(dout_mask[:, [1, 2, 3]], ads_target)
+            counter = 1
+
+            dnh_target = dtarget_mask.clone()
+            dnh_mask = (dnh_target == 0) | (dnh_target == 5) | (dnh_target == 6)
+            dnh_target = dnh_target[dnh_mask]
+            dnh_target[dnh_target == 5] = 1
+            dnh_target[dnh_target == 6] = 2
+            dnh_out = dout_mask[dnh_mask][:, [6, 7, 8]]
+            if len(dnh_target) == 0:
+                dnh_loss = 0.
+            else:
+                dnh_loss = self.dnh_criterion(dnh_out, dnh_target)
+                counter += 1
+
+            abt_target = dtarget_mask.clone()
+            abt_mask = (abt_target == 1) | (abt_target == 3) | (abt_target == 4)
+            abt_target = abt_target[abt_mask]
+            abt_target[abt_target == 1] = 0
+            abt_target[abt_target == 3] = 1
+            abt_target[abt_target == 4] = 2
+            abt_out = dout_mask[abt_mask][:, [3, 4, 5]]
+            if len(abt_target) == 0:
+                abt_loss = 0.
+            else:
+                abt_loss = self.abt_criterion(abt_out, abt_target)
+                counter += 1
+
+            dloss = (ads_loss + dnh_loss + abt_loss) / 3
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -656,7 +694,7 @@ class Trainer3d:
         summarize_reports(o_path, report_name)
         r_path = o_path + report_name + '.pkl'
         generate_diagrams(r_path, o_path, [''], [''], points=False, density=False, part_key='mv',
-                          filter_identifier=False, neg_identifier=[], time=True)
+                          filter_identifier=False, neg_identifier=[], time=True, class_keys=['macro avg'] + self.target_names)
         # Reset model to training mode
         self.model.train()
 
