@@ -601,7 +601,7 @@ class Segmentation2d(data.Dataset):
             return inp
 
         if self.in_memory:
-            self.inps = []
+            self.inputs = []
             rgb_fnames = {}
             gray_fnames = {}
             for input_path in self.inp_paths:
@@ -620,7 +620,7 @@ class Segmentation2d(data.Dataset):
                         if gray_fname is not None and inp.shape[0] == 3:
                             raise RuntimeError(f'GT input layer {channel_idx} has mixed multi-channel ({input_file}) and single-channel images ({gray_fname}).')
                         multi_input.append(inp)
-                    self.inps.append(np.concatenate(multi_input))
+                    self.inputs.append(np.concatenate(multi_input))
                 else:
                     inp = load_image(input_path)
                     if inp.shape[0] == 1:
@@ -629,7 +629,7 @@ class Segmentation2d(data.Dataset):
                         rgb_fnames[0] = input_path
                     if len(rgb_fnames) > 0 and inp.shape[0] == 1 or len(gray_fnames) > 0 and inp.shape[0] == 3:
                         raise RuntimeError(f'Mixed multi-channel ({rgb_fnames[0]}) and single-channel images ({gray_fnames[0]}) in gt.')
-                    self.inps.append(inp)
+                    self.inputs.append(inp)
             self.targets = [
                 np.array(imageio.imread(fname)).astype(np.int64)
                 for fname in self.target_paths
@@ -638,7 +638,7 @@ class Segmentation2d(data.Dataset):
     def __getitem__(self, index):
         index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         if self.in_memory:
-            inp = self.inps[index]
+            inp = self.inputs[index]
             target = self.targets[index]
         else:
             fname = self.inp_paths[index]
@@ -691,7 +691,7 @@ class Reconstruction2d(data.Dataset):
         self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
-            self.inps = [
+            self.inputs = [
                 np.array(imageio.imread(fname)).astype(np.float32)[None]
                 for fname in self.inp_paths
             ]
@@ -699,7 +699,7 @@ class Reconstruction2d(data.Dataset):
     def __getitem__(self, index):
         index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         if self.in_memory:
-            inp = self.inps[index]
+            inp = self.inputs[index]
         else:
             inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
             if inp.ndim == 2:  # (H, W)
@@ -744,14 +744,14 @@ class TripletData2d(data.Dataset):
         self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
-            self.inps = [
+            self.inputs = [
                 np.array(imageio.imread(fname)).astype(np.float32)[None]
                 for fname in self.inp_paths
             ]
 
     def _get(self, index):
         if self.in_memory:
-            inp = self.inps[index]
+            inp = self.inputs[index]
         else:
             inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
             if inp.ndim == 2:  # (H, W)
