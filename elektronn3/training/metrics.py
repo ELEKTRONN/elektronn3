@@ -33,7 +33,7 @@ References:
 """
 
 from functools import lru_cache
-from typing import Optional
+from typing import Callable, Optional
 
 import sklearn.metrics
 import torch
@@ -313,13 +313,20 @@ def bin_auroc(target, out):
 
 
 class Evaluator:
-    def __init__(self, metric_fn, index=None, ignore=None):
+    name: str = 'generic'
+
+    def __init__(
+            self,
+            metric_fn: Callable,
+            index: Optional[int] = None,
+            ignore: Optional[int] = None,
+    ):
         self.metric_fn = metric_fn
         self.index = index
         self.ignore = ignore
         self.num_classes = None
 
-    def __call__(self, target, out):
+    def __call__(self, target: torch.Tensor, out: torch.Tensor) -> float:
         if self.num_classes is None:
             self.num_classes = out.shape[1]
         pred = _argmax(out)
@@ -330,20 +337,25 @@ class Evaluator:
 
 
 class Accuracy(Evaluator):
+    name = 'accuracy'
     def __init__(self, *args, **kwargs): super().__init__(accuracy, *args, **kwargs)
 
 
 class Precision(Evaluator):
+    name = 'precision'
     def __init__(self, *args, **kwargs): super().__init__(precision, *args, **kwargs)
 
 
 class Recall(Evaluator):
+    name = 'recall'
     def __init__(self, *args, **kwargs): super().__init__(recall, *args, **kwargs)
 
 
 class IoU(Evaluator):
+    name = 'IoU'
     def __init__(self, *args, **kwargs): super().__init__(iou, *args, **kwargs)
 
 
 class DSC(Evaluator):
+    name = 'DSC'
     def __init__(self, *args, **kwargs): super().__init__(dice_coefficient, *args, **kwargs)
