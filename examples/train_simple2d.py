@@ -121,15 +121,12 @@ optimizer = optim.Adam(
 )
 lr_sched = optim.lr_scheduler.StepLR(optimizer, lr_stepsize, lr_dec)
 
-valid_metrics = {
-    'val_accuracy': metrics.bin_accuracy,
-    'val_precision': metrics.bin_precision,
-    'val_recall': metrics.bin_recall,
-    'val_DSC': metrics.bin_dice_coefficient,
-    'val_IoU': metrics.bin_iou,
-    # 'val_AP': metrics.bin_average_precision,  # expensive
-    # 'val_AUROC': metrics.bin_auroc,  # expensive
-}
+# Validation metrics
+valid_metrics = {}
+for evaluator in [metrics.Accuracy, metrics.Precision, metrics.Recall, metrics.DSC, metrics.IoU]:
+    valid_metrics[f'val_{evaluator.name}_mean'] = evaluator()  # Mean metrics
+    for c in range(out_channels):
+        valid_metrics[f'val_{evaluator.name}_c{c}'] = evaluator(c)
 
 criterion = nn.CrossEntropyLoss().to(device)
 

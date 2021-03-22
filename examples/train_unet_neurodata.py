@@ -283,19 +283,11 @@ else:
 # lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
 
 # Validation metrics
-valid_metrics = {  # mean metrics
-    'val_accuracy_mean': metrics.Accuracy(),
-    'val_precision_mean': metrics.Precision(),
-    'val_recall_mean': metrics.Recall(),
-    'val_DSC_mean': metrics.DSC(),
-    'val_IoU_mean': metrics.IoU(),
-}
-if out_channels > 2:
-    # Add separate per-class accuracy metrics only if there are more than 2 classes
-    valid_metrics.update({
-        f'val_IoU_c{i}': metrics.Accuracy(i)
-        for i in range(out_channels)
-    })
+valid_metrics = {}
+for evaluator in [metrics.Accuracy, metrics.Precision, metrics.Recall, metrics.DSC, metrics.IoU]:
+    valid_metrics[f'val_{evaluator.name}_mean'] = evaluator()  # Mean metrics
+    for c in range(out_channels):
+        valid_metrics[f'val_{evaluator.name}_c{c}'] = evaluator(c)
 
 crossentropy = nn.CrossEntropyLoss(weight=class_weights)
 dice = DiceLoss(apply_softmax=True, weight=class_weights)
