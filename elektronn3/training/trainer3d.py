@@ -293,7 +293,7 @@ class Trainer3d:
 
         self.ads_criterion = torch.nn.CrossEntropyLoss(weight=None).to(device)
         self.dnh_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 3., 2.])).to(device)
-        self.abt_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 2., 5.])).to(device)
+        self.abt_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 2., 6.])).to(device)
 
         self.optimizer = optimizer
         self.train_th = train_dataset
@@ -528,7 +528,7 @@ class Trainer3d:
             ads_target[ads_target == 4] = 1
             ads_target[ads_target == 5] = 0
             ads_target[ads_target == 6] = 0
-            ads_loss = self.ads_criterion(dout_mask[:, [1, 2, 3]], ads_target)
+            ads_loss = self.ads_criterion(dout_mask[:, [0, 1, 2]], ads_target)
             counter = 1
 
             dnh_target = dtarget_mask.clone()
