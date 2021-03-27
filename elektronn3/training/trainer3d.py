@@ -41,8 +41,8 @@ from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import basics
 
-from neuronx.pipeline.evaluate import full_evaluation_pipe
-from neuronx.pipeline.analyse import summarize_reports, generate_diagrams
+from neuronx.pipeline.evaluate import predict_and_evaluate
+from neuronx.pipeline.analyse import merge_reports, generate_class_diagrams
 
 logger = logging.getLogger('elektronn3log')
 
@@ -290,11 +290,6 @@ class Trainer3d:
                 raise exc
         self.model = model
         self.criterion = criterion.to(device)
-
-        self.ads_criterion = torch.nn.CrossEntropyLoss(weight=None).to(device)
-        self.dnh_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 3., 2.])).to(device)
-        self.abt_criterion = torch.nn.CrossEntropyLoss(weight=torch.tensor([1., 2., 6.])).to(device)
-
         self.optimizer = optimizer
         self.train_th = train_dataset
         self.v_path = v_path
@@ -321,7 +316,6 @@ class Trainer3d:
         self.mixed_precision = mixed_precision
         self.collate_fn = collate_fn
         self.batch_avg = batch_avg
-        self.lcp_flag = lcp_flag
         self.tr_examples = 0
         self.target_names = target_names
         self.stop_epoch = stop_epoch
@@ -496,9 +490,8 @@ class Trainer3d:
             o_mask = batch['o_mask']
             l_mask = batch['l_mask']
 
-            if self.lcp_flag:
-                pts = pts.transpose(1, 2)
-                features = features.transpose(1, 2)
+            pts = pts.transpose(1, 2)
+            features = features.transpose(1, 2)
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
@@ -507,57 +500,16 @@ class Trainer3d:
             do_mask = o_mask.to(self.device, non_blocking=True)
             dl_mask = l_mask.to(self.device, non_blocking=True)
 
-            # dinp: (batch_size, sample_num, 3)
-            # dfeats: (batch_size, sample_num, 1)
-            # dtarget: (batch_size, sample_num)
-            # dout: (batch_size, sample_num, num_classes)
-
             dout = self.model(dfeats, dinp)
-
-            if self.lcp_flag:
-                dout = dout.transpose(1, 2)
-                pts = pts.transpose(1, 2)
+            dout = dout.transpose(1, 2)
+            pts = pts.transpose(1, 2)
 
             dout_mask = dout[do_mask].view(-1, self.num_classes)
             dtarget_mask = dtarget[dl_mask]
             if len(dout_mask) == 0:
                 continue
 
-            ads_target = dtarget_mask.clone()
-            ads_target[ads_target == 3] = 1
-            ads_target[ads_target == 4] = 1
-            ads_target[ads_target == 5] = 0
-            ads_target[ads_target == 6] = 0
-            ads_loss = self.ads_criterion(dout_mask[:, [0, 1, 2]], ads_target)
-            counter = 1
-
-            dnh_target = dtarget_mask.clone()
-            dnh_mask = (dnh_target == 0) | (dnh_target == 5) | (dnh_target == 6)
-            dnh_target = dnh_target[dnh_mask]
-            dnh_target[dnh_target == 5] = 1
-            dnh_target[dnh_target == 6] = 2
-            dnh_out = dout_mask[dnh_mask][:, [6, 7, 8]]
-            if len(dnh_target) == 0:
-                dnh_loss = 0.
-            else:
-                dnh_loss = self.dnh_criterion(dnh_out, dnh_target)
-                counter += 1
-
-            abt_target = dtarget_mask.clone()
-            abt_mask = (abt_target == 1) | (abt_target == 3) | (abt_target == 4)
-            abt_target = abt_target[abt_mask]
-            abt_target[abt_target == 1] = 0
-            abt_target[abt_target == 3] = 1
-            abt_target[abt_target == 4] = 2
-            abt_out = dout_mask[abt_mask][:, [3, 4, 5]]
-            if len(abt_target) == 0:
-                abt_loss = 0.
-            else:
-                abt_loss = self.abt_criterion(abt_out, abt_target)
-                counter += 1
-
-            dloss = (ads_loss + dnh_loss + abt_loss) / 3
-
+            dloss = self.criterion(dout_mask, dtarget_mask)
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
@@ -685,17 +637,20 @@ class Trainer3d:
     @torch.no_grad()
     def _validate(self, epoch):
         self.model.eval()
-        eval_name = f'eval_red{self.val_red}'
-        full_evaluation_pipe(self.save_path + '/', self.v_path, eval_name=eval_name, pipe_steps=[True, True],
-                             val_iter=1, batch_num=-1, save_worst_examples=False, model=self.model,
-                             specific_model=epoch, target_names=self.target_names, val_type='multiple_model')
-        report_name = eval_name + '_mv'
-        o_path = self.save_path + '/' + eval_name + '_valiter1_batchsize-1/'
-        summarize_reports(o_path, report_name)
-        r_path = o_path + report_name + '.pkl'
-        generate_diagrams(r_path, o_path, [''], [''], points=False, density=False, part_key='mv',
-                          filter_identifier=False, neg_identifier=[], time=True, class_keys=['macro avg'] + self.target_names)
-        # Reset model to training mode
+        evaluation_mode = 'mv'
+        evaluation_name = 'evaluation'
+        report_name = evaluation_name + f'_{evaluation_mode}'
+        output_path = os.path.join(self.save_path, evaluation_name)
+        diagram_folder = os.path.join(output_path, 'diagrams')
+        if not os.path.exists(diagram_folder):
+            os.makedirs(diagram_folder)
+
+        predict_and_evaluate(self.save_path + '/', self.v_path, report_name=evaluation_name,
+                             prediction_redundancy=1, batch_size=-1, model=self.model,
+                             specific_model=epoch, label_names=self.target_names,
+                             evaluation_mode=evaluation_mode)
+        report_path = merge_reports(output_path, report_name)
+        generate_class_diagrams(report_path, diagram_folder, part_key=evaluation_mode, class_keys=['macro avg'] + self.target_names)
         self.model.train()
 
     def _save_model(
