@@ -260,9 +260,8 @@ class Trainer3d:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
-            collate_fn = None,
-            batch_avg = None,
-            lcp_flag: bool = False,
+            collate_fn=None,
+            lcp_flag=True,
             stop_epoch: int = 9999
     ):
         if preview_batch is not None and (
@@ -315,11 +314,10 @@ class Trainer3d:
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
         self.collate_fn = collate_fn
-        self.batch_avg = batch_avg
         self.tr_examples = 0
         self.target_names = target_names
         self.stop_epoch = stop_epoch
-
+        self.lcp_flag = lcp_flag
         self._tracker = HistoryTracker()
         self._timer = Timer()
         self._first_plot = True
@@ -490,8 +488,10 @@ class Trainer3d:
             o_mask = batch['o_mask']
             l_mask = batch['l_mask']
 
-            pts = pts.transpose(1, 2)
-            features = features.transpose(1, 2)
+            # --- LightConvPoint uses different ordering than ConvPoint
+            if self.lcp_flag:
+                pts = pts.transpose(1, 2)
+                features = features.transpose(1, 2)
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
@@ -501,9 +501,13 @@ class Trainer3d:
             dl_mask = l_mask.to(self.device, non_blocking=True)
 
             dout = self.model(dfeats, dinp)
-            dout = dout.transpose(1, 2)
-            pts = pts.transpose(1, 2)
 
+            if self.lcp_flag:
+                dout = dout.transpose(1, 2)
+                pts = pts.transpose(1, 2)
+
+            # --- do_mask and dl_mask contain output and label masks where the TorchHandler has
+            # marked vertices which should be excluded from the predictions (e.g. cell organelles)
             dout_mask = dout[do_mask].view(-1, self.num_classes)
             dtarget_mask = dtarget[dl_mask]
             if len(dout_mask) == 0:
@@ -515,20 +519,13 @@ class Trainer3d:
                 raise NaNException
 
             # update step
-            if self.batch_avg is None:
-                self.optimizer.zero_grad()
-                if self.mixed_precision:
-                    with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    dloss.backward()
-                self.optimizer.step()
+            self.optimizer.zero_grad()
+            if self.mixed_precision:
+                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
+                    scaled_loss.backward()
             else:
                 dloss.backward()
-                if (i+1) % self.batch_avg == 0:
-                    self.optimizer.step()
-                    self.optimizer.zero_grad()
-            # End of core training loop on self.device
+            self.optimizer.step()
 
             with torch.no_grad():
                 if self.epoch in [0, 5, 10, 20, 50, 100]:
