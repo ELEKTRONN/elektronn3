@@ -18,12 +18,15 @@ torchvision.transforms, but there are two key differences:
 
 from typing import Sequence, Tuple, Optional, Dict, Any, Callable, Union
 
+import warnings
 import numpy as np
 import skimage.exposure
 import skimage.transform
 
 from scipy.ndimage.filters import gaussian_filter
 from scipy.ndimage.interpolation import map_coordinates
+from scipy.ndimage.morphology import distance_transform_edt
+
 
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
@@ -160,18 +163,71 @@ class RandomSlicewiseTransform:
 class DropIfTooMuchBG:
     """Filter transform that skips a sample if the background class is too
     dominant in the target."""
-    def __init__(self, bg_id=0, threshold=0.9):
+    def __init__(self, bg_id=0, threshold=0.9, prob=1.0):
         self.bg_id = bg_id
         self.threshold = threshold
+        self.prob = prob
 
     def __call__(
             self,
             inp: np.ndarray,
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
+        if np.random.rand() > self.prob:
+            return inp, target
         if np.sum(target == self.bg_id) / target.size > self.threshold:
             raise _DropSample
         return inp, target  # Return inp, target unmodified
+
+
+class RemapTargetIDs:
+    """Remap class IDs of targets to a new class mapping.
+    If ``ids`` is a dict, it is used as a lookup table of the form orig_id -> changed_id.
+    Each occurence of orig_id will be changed to changed_id.
+    If ``ids`` is a list (deprecated), a dense remapping is performed (the given ids are
+    remapped to [0, 1, 2, ..., N - 1], where N is ``len(ids)``).
+    E.g. if your targets contain the class IDs [1, 3, 7, 9] but you are only
+    interested in classes 1, 3 and 9 and you
+    don't want to train a sparse classifier with useless outputs, you can
+    use ``RemapTargetIDs([1, 3, 9])`` to translate each occurence of IDs
+    [1, 3, 9] to [0, 1, 2], respectively.
+
+    If ``reverse=True``, the mapping is inverted (useful for converting back
+    to original mappings)."""
+
+    def __init__(self, ids: Union[Sequence[int], Dict[int, int]], reverse: bool = False):
+        if isinstance(ids, dict):
+            ids = {int(k): int(v) for k, v in ids.items()}
+        else:
+            warnings.warn(
+                'Passing lists to RemapTargetIDs is deprecated. Please use dicts instead (see docs).',
+                DeprecationWarning
+            )
+        self.ids = ids
+        self.reverse = reverse
+
+    def __call__(
+            self,
+            inp: Optional[np.ndarray],  # returned without modifications
+            target: Optional[np.ndarray]
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        if target is None:
+            return inp, target
+        remapped_target = target.copy()
+        if isinstance(self.ids, dict):
+            ids = self.ids if not self.reverse else {v: k for k, v in self.ids.items()}
+            mask = {}
+            for orig_id in ids.keys():
+                mask[orig_id] = target == orig_id
+            for orig_id, changed_id in ids.items():
+                remapped_target[mask[orig_id]] = changed_id
+        else:
+            for changed_id, orig_id in enumerate(self.ids):
+                if not self.reverse:
+                    remapped_target[target == orig_id] = changed_id
+                else:
+                    remapped_target[target == changed_id] = orig_id
+        return inp, remapped_target
 
 
 class SmoothOneHotTarget:
@@ -203,6 +259,86 @@ class SmoothOneHotTarget:
         onehot = np.moveaxis(eye[target], -1, 0)
         assert np.all(onehot.argmax(0) == target)
         return inp, onehot
+
+
+class DistanceTransformTarget:
+    """Converts discrete binary label target tensors to their (signed)
+    euclidean distance transform (EDT) representation.
+
+    Based on the method proposed in https://arxiv.org/abs/1805.02718.
+
+    Args:
+        scale: Scalar value to divide distances before applying normalization
+        normalize_fn: Function to apply to distance map for normalization.
+        inverted: Invert target labels before computing transform if ``True``.
+             This means the distance map will show the distance to the nearest
+             foreground pixel at each background pixel location (which is the
+             opposite behavior of standard distance transform).
+        signed: Compute signed distance transform (SEDT), where foreground
+            regions are not 0 but the negative distance to the nearest
+            foreground border.
+        vector: Return distance vector map instead of scalars.
+    """
+    def __init__(
+            self,
+            scale: Optional[float] = 50.,
+            normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = np.tanh,
+            inverted: bool = True,
+            signed: bool = True,
+            vector: bool = False
+    ):
+        self.scale = scale
+        self.normalize_fn = normalize_fn
+        self.inverted = inverted
+        self.signed = signed
+        self.vector = vector
+
+    def edt(self, target: np.ndarray) -> np.ndarray:
+        sh = target.shape
+        if target.min() == 1:  # If everything is 1, the EDT should be inf for every pixel
+            nc = target.ndim if self.vector else 1
+            return np.full((nc, *sh), np.inf, dtype=np.float32)
+
+        if self.vector:
+            if target.ndim == 2:
+                coords = np.mgrid[:sh[0], :sh[1]]
+            elif target.ndim == 3:
+                coords = np.mgrid[:sh[0], :sh[1], :sh[2]]
+            else:
+                raise RuntimeError(f'Target shape {sh} not understood.')
+            inds = distance_transform_edt(
+                target, return_distances=False, return_indices=True
+            ).astype(np.float32)
+            dist = inds - coords
+            # assert np.isclose(np.sqrt(dist[0] ** 2 + dist[1] ** 2), distance_transform_edt(target))
+            return dist
+
+        # Else: Regular scalar edt
+        dist = distance_transform_edt(target).astype(np.float32)[None]
+        return dist
+
+    def __call__(
+            self,
+            inp: np.ndarray,  # returned without modifications
+            target: Optional[np.ndarray]
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        if target is None:
+            return inp, target
+        # assert target.max() <= 1
+        # Ensure np.bool dtype, invert if needed
+        if self.inverted:
+            target = target == 0
+        else:
+            target = target > 0
+        dist = self.edt(target)
+        if self.signed:
+            # Compute same transform on the inverted target. The inverse transform can be
+            #  subtracted from the original transform to get a signed distance transform.
+            invdist = self.edt(~target)
+            dist -= invdist
+        if self.normalize_fn is not None:
+            dist = self.normalize_fn(dist / self.scale)
+        return inp, dist
 
 
 class Normalize:
@@ -241,13 +377,16 @@ class Normalize:
         if self.inplace:
             normalized = inp  # Refer to the same memory space
         else:
-            normalized = np.empty_like(inp)
+            normalized = inp.copy()
         if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
-            raise ValueError('mean and std must have the same length as the C '
-                             'axis (number of channels) of the input.')
+            raise ValueError(f'mean ({self.mean.shape[0]}) and std ({self.std.shape[0]}) must have the same length as the C '
+                             f'axis (number of channels) of the input ({inp.shape[0]}).')
         for c in range(inp.shape[0]):
             normalized[c] = (inp[c] - self.mean[c]) / self.std[c]
         return normalized, target
+
+    def __repr__(self):
+        return f'Normalize(mean={self.mean}, std={self.std}, inplace={self.inplace})'
 
 
 # TODO: Support uniform distribution (or any distribution in general)
@@ -265,7 +404,6 @@ class RandomBrightnessContrast:
             augmentation. The input is returned unmodified with a probability
             of ``1 - prob``.
     """
-
 
     def __init__(
             self,
@@ -469,7 +607,7 @@ class RandomGaussianBlur:
             return inp, target
 
         channels = range(inp.shape[0]) if self.channels is None else self.channels
-        blurred_inp = np.empty_like(inp)
+        blurred_inp = inp.copy()
         for c in channels:
             self.aniso_factor = self.aniso_factor[:inp[c].ndim]
             sigma = self.gaussian_std(shape=inp[c].ndim)
@@ -549,7 +687,7 @@ class AdditiveGaussianNoise:
     ) -> Tuple[np.ndarray, np.ndarray]:
         if np.random.rand() > self.prob:
             return inp, target
-        noise = np.empty_like(inp)
+        noise = np.zeros_like(inp)
         channels = range(inp.shape[0]) if self.channels is None else self.channels
         for c in channels:
             noise[c] = self.noise_generator(shape=inp[c].shape)
@@ -558,24 +696,28 @@ class AdditiveGaussianNoise:
 
 
 class RandomCrop:
-    def __init__(self, size: Sequence[int]):
-        self.size = np.array(size)
+    def __init__(self, crop_shape: Sequence[int]):
+        self.crop_shape = np.array(crop_shape)
 
     def __call__(
             self,
             inp: np.ndarray,
             target: Optional[np.ndarray] = None  # returned without modifications
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        ndim_spatial = len(self.size)  # Number of spatial axes E.g. 3 for (C,D,H.W)
-        img_shape = inp.shape[-ndim_spatial:]
+        ndim_spatial = len(self.crop_shape)  # Number of spatial axes E.g. 3 for (C,D,H.W)
+        img_shape = np.array(inp.shape[-ndim_spatial:])
         # Number of nonspatial axes (like the C axis). Usually this is one
         ndim_nonspatial = inp.ndim - ndim_spatial
+        if any(self.crop_shape > img_shape):
+            raise ValueError(
+                f'crop shape {self.crop_shape} can\'t be larger than image shape {img_shape}.'
+            )
         # Calculate the "lower" corner coordinate of the slice
         coords_lo = np.array([
-            np.random.randint(0, img_shape[i] - self.size[i] + 1)
+            np.random.randint(0, img_shape[i] - self.crop_shape[i] + 1)
             for i in range(ndim_spatial)
         ])
-        coords_hi = coords_lo + self.size  # Upper ("high") corner coordinate.
+        coords_hi = coords_lo + self.crop_shape  # Upper ("high") corner coordinate.
         # Calculate necessary slice indices for reading the file
         nonspatial_slice = [  # Slicing all available content in these dims.
             slice(0, inp.shape[i]) for i in range(ndim_nonspatial)
@@ -634,7 +776,6 @@ class ElasticTransform:
         sigma: Sigma parameter of the gaussian smoothing performed on the
             random displacement field. High ``sigma`` values (> 4) lead
             to less randomness and more spatial consistency.
-            Lower values
         alpha: Factor by which all random displacements are multiplied.
             Each local displacement is drawn from the range
             ``[-alpha, alpha]``, so e.g. for ``alpha=1`` you won't see
@@ -700,7 +841,7 @@ class ElasticTransform:
         if inp.ndim == 4:
             if self.draw_debug_grid:
                 inp, target = _draw_debug_grid(inp, target)
-            ish, tsh = np.array(inp.shape[-3:]), np.array(target.shape[-3:])
+            ish = np.array(inp.shape[-3:])
             dz = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
@@ -715,6 +856,8 @@ class ElasticTransform:
             indices = np.reshape(z, (-1, 1)), np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
 
             # If there is a target, apply the same deformation field to the target
+            if target is not None:
+                tsh = np.array(target.shape[-3:])
             if target is not None and np.any(ish != tsh):
                 if self.draw_debug_grid:
                     inp, target = _draw_debug_grid(inp, target)
@@ -731,7 +874,7 @@ class ElasticTransform:
             else:
                 target_indices = indices
         elif inp.ndim == 3:
-            ish, tsh = np.array(inp.shape[-2:]), np.array(target.shape[-2:])
+            ish = np.array(inp.shape[-2:])
             dy = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             dx = gaussian_filter(np.random.rand(*ish) * 2 - 1, self.sigma, mode="constant", cval=0) * self.alpha
             y, x = np.array(
@@ -743,6 +886,8 @@ class ElasticTransform:
             indices = np.reshape(y, (-1, 1)), np.reshape(x, (-1, 1))
 
             # If there is a target, apply the same deformation field to the target
+            if target is not None:
+                tsh = np.array(target.shape[-2:])
             if target is not None and np.any(ish != tsh):
                 # Crop input re-indexing arrays to the target region and transform coordinates
                 #  to the target' own frame by subtracting the input-target offset
@@ -758,7 +903,7 @@ class ElasticTransform:
         else:
             raise ValueError("Input dimension not understood!")
 
-        deformed_img = np.empty_like(inp)
+        deformed_img = inp.copy()
         for c in channels:
             deformed_img[c] = map_coordinates(inp[c], indices, order=1).reshape(ish)
 
@@ -786,18 +931,19 @@ class ElasticTransform:
             else:
                 raise ValueError("Target dimension not understood!")
 
-            if self.target_discrete_ix is None:
-                self.target_discrete_ix = [True for i in range(target_channels)]
+            target_discrete_ix = self.target_discrete_ix
+            if target_discrete_ix is None:
+                target_discrete_ix = [True for i in range(target_channels)]
             else:
-                self.target_discrete_ix = [i in self.target_discrete_ix for i in range(target_channels)]
+                target_discrete_ix = [i in target_discrete_ix for i in range(target_channels)]
 
-            deformed_target = np.empty_like(target)
+            deformed_target = target.copy()
             if target_c:
                 for tc in range(target_channels):
-                    target_order = 0 if self.target_discrete_ix[tc] is True else 1
+                    target_order = 0 if target_discrete_ix[tc] is True else 1
                     deformed_target[tc] = map_coordinates(target[tc], target_indices, order=target_order).reshape(target_shape)
             else:
-                target_order = 0 if self.target_discrete_ix[0] is True else 1
+                target_order = 0 if target_discrete_ix[0] is True else 1
                 deformed_target = map_coordinates(target, target_indices, order=target_order).reshape(target_shape)
             return deformed_img, deformed_target
 
@@ -815,6 +961,8 @@ class SqueezeTarget:
             inp: np.ndarray,  # Returned without modifications
             target: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray]:
+        if target is None:
+            return inp, target
         return inp, target.squeeze(axis=self.dim)
 
 
@@ -877,12 +1025,13 @@ class RandomRotate2d:
         angle = np.random.uniform(*self.angle_range)
         rot_opts = {'angle': angle, 'preserve_range': True, 'mode': 'reflect'}
 
-        if target.ndim == inp.ndim - 1:  # Implicit (no) channel dimension
-            target_c = False
-        elif target.ndim == inp.ndim:  # Explicit channel dimension
-            target_c = True
-        else:
-            raise ValueError('Target dimension not understood.')
+        if target is not None:
+            if target.ndim == inp.ndim - 1:  # Implicit (no) channel dimension
+                target_c = False
+            elif target.ndim == inp.ndim:  # Explicit channel dimension
+                target_c = True
+            else:
+                raise ValueError('Target dimension not understood.')
 
         def rot(inp, target):
             """Rotate in 2D space"""
@@ -897,20 +1046,39 @@ class RandomRotate2d:
             else:
                 target = skimage.transform.rotate(target, **rot_opts).astype(target.dtype)
             return inp, target
-        
+
         if inp.ndim == 3:  # 2D case
             rinp, rtarget = rot(inp, target)
         else:  # 3D case: Rotate each z slice separately by the same angle
-            rinp = np.empty_like(inp)
-            rtarget = np.empty_like(target)
-            for z in range(rinp.shape[1]):
-                if target_c:
-                    rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
-                else:
-                    rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
-
+            rinp = inp.copy()
+            if target is not None:
+                rtarget = target.copy()
+                for z in range(rinp.shape[1]):
+                    if target_c:
+                        rinp[:, z], rtarget[:, z] = rot(inp[:, z], target[:, z])
+                    else:
+                        rinp[:, z], rtarget[z] = rot(inp[:, z], target[z])
+            else:
+                for z in range(rinp.shape[1]):
+                    rinp[:, z], _ = rot(inp[:, z], None)
+                rtarget = None
         return rinp, rtarget
 
+
+class Clahe2d:
+    def __call__(
+            self,
+            inp: np.ndarray,
+            target: Optional[np.ndarray] = None
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        assert inp.ndim == 3, 'Only 2D data is supported'
+        orig_dtype = inp.dtype
+        inp = inp.astype(np.uint8)  # equalize_adapthist() requires uint8
+        clahe_inp = inp.copy()
+        for c in range(inp.shape[0]):
+            clahe_inp[c] = skimage.exposure.equalize_adapthist(inp[c])
+        clahe_inp = clahe_inp.astype(orig_dtype)
+        return clahe_inp, target
 
 
 # TODO: Support other image shapes
@@ -930,23 +1098,29 @@ class AlbuSeg2d:
 
         >>> import albumentations
         >>> transform = AlbuSeg2d(albumentations.ShiftScaleRotate(
-        ...     p=0.98, rotate_limit=180, scale_limit=0.1, interpolation=3
+        ...     p=0.98, rotate_limit=180, scale_limit=0.1, interpolation=2
         ... ))
+        ... # Note that interpolation=2 means cubic interpolation (-> cv2.CUBIC constant).
+        ... # Don't confuse this with scipy's interpolation options.
     """
 
     def __init__(self, albu: 'albumentations.core.transforms_interface.DualTransform'):
         self.albu = albu
 
     def __call__(self, inp, target):
-        assert inp.ndim == 3 and inp.shape[0] == 1
+        if inp.ndim != 3:
+            raise ValueError(f'target needs to have ndim=3, but it has shape {inp.shape}')
+        inp = inp.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C) because albmumentations requires it
         if target is not None:
-            assert target.ndim == 2 and target.shape == inp.shape[1:]
-            augmented = self.albu(image=inp[0], mask=target)  # Strip C dimension
+            if not (target.ndim == 2 and target.shape == inp.shape[:-1]):
+                raise ValueError(f'Shapes not supported. inp[:-1]: {inp.shape[:-1]}, target: {target.shape}')
+            augmented = self.albu(image=inp, mask=target)
             atarget = np.array(augmented['mask'], dtype=target.dtype)
         else:
-            augmented = self.albu(image=inp[0])  # Strip C dimension
+            augmented = self.albu(image=inp)
             atarget = None
-        ainp = np.array(augmented['image'], dtype=inp.dtype)[None]  # Re-attach C dimension
+        ainp = np.array(augmented['image'], dtype=inp.dtype)
+        ainp = ainp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)  convert back to PyTorch layout
         return ainp, atarget
 
 

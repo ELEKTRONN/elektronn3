@@ -77,7 +77,7 @@ logger.debug("Arguments given to python via flags: {}".format(args))
 from elektronn3.data import PatchCreator, transforms, utils, get_preview_batch
 from elektronn3.training import Trainer, Backup, metrics
 from elektronn3.training import SWA
-from elektronn3.modules import DiceLoss, CombinedLoss
+from elektronn3.modules import MaskedMSELoss
 from elektronn3.models.unet import UNet
 
 
@@ -91,7 +91,7 @@ logger.info(f'Running on device: {device}')
 # hparams = {'n_blocks': 4, 'start_filts': 32, 'planar_blocks': (0,)}
 hparams = {}
 
-out_channels = 2
+out_channels = 1
 model = UNet(
     out_channels=out_channels,
     n_blocks=4,
@@ -99,6 +99,7 @@ model = UNet(
     planar_blocks=(0,),
     activation='relu',
     normalization='batch',
+    # enc_res_blocks=1,
     # conv_mode='valid',
     # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
@@ -120,12 +121,9 @@ save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-    # data_root = '/wholebrain/u/mdraw/barrier_gt_phil_r2r_bn/'
-    # data_root = '/wholebrain/u/mdraw/barrier_gt_phil_n2v/'
-    data_root_lab = '/wholebrain/scratch/j0126/barrier_gt_phil/'
     fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
     input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
-    target_h5data = [(os.path.join(data_root_lab, f), 'labels') for f in fnames]
+    target_h5data = [(os.path.join(data_root, f), 'labels') for f in fnames]
     valid_indices = [1, 3, 5, 7]
 
     # These statistics are computed from the training dataset.
@@ -149,7 +147,6 @@ else:  # Use publicly available neuro_data_cdhw dataset
     dataset_mean = (155.291411,)
     dataset_std = (42.599973,)
     class_weights = torch.tensor([0.2653, 0.7347]).to(device)
-
 
 max_steps = args.max_steps
 max_runtime = args.max_runtime
@@ -175,10 +172,13 @@ if args.resume is not None:  # Load pretrained network
     else:
         raise ValueError(f'{pretrained} has an unkown file extension. Supported are: .pt, .pts and .pth')
 
+dataset_mean = (0.0,)
+dataset_std = (1.0,)
+
 # Transformations to be applied to samples before feeding them to the network
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
-    transforms.Normalize(mean=dataset_mean, std=dataset_std, inplace=True)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std)
 ]
 train_transform = transforms.Compose(common_transforms + [
     # transforms.RandomRotate2d(prob=0.9),
@@ -196,27 +196,34 @@ common_data_kwargs = {  # Common options for training and valid sets.
     # 'offset': (8, 20, 20),
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
-train_dataset = PatchCreator(
-    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    train=True,
-    epoch_size=args.epoch_size,
-    warp_prob=0.2,
-    warp_kwargs={
-        'sample_aniso': aniso_factor != 1,
-        'perspective': True,
-        'warp_amount': 1.0,
-    },
-    transform=train_transform,
-    **common_data_kwargs
-)
-valid_dataset = None if not valid_indices else PatchCreator(
+
+if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set:
+    train_transform = transforms.Normalize(mean=(0.0,), std=(255.0,))  # normalize [0, 255] -> [0, 1]
+
+    from elektronn3.data.knossos import KnossosRawData
+
+    train_dataset = KnossosRawData(
+        conf_path='/wholebrain/songbird/j0126/areaxfs_v5/knossosdatasets/mag1/knossos.conf',
+        patch_shape=common_data_kwargs['patch_shape'],
+        transform=train_transform,
+        epoch_size=args.epoch_size,
+        mode='caching',
+    )
+else:
+    train_dataset = PatchCreator(
+        input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
+        train=True,
+        epoch_size=args.epoch_size,
+        warp_prob=0,
+        transform=train_transform,
+        **common_data_kwargs
+    )
+
+valid_dataset = PatchCreator(
     input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
     train=False,
-    epoch_size=40,  # How many samples to use for each validation run
+    epoch_size=40,
     warp_prob=0,
-    warp_kwargs={'sample_aniso': aniso_factor != 1},
     transform=valid_transform,
     **common_data_kwargs
 )
@@ -232,34 +239,10 @@ inference_kwargs = {
     'tile_shape': (32, 64, 64),
     'overlap_shape': (32, 64, 64),
     'offset': None,
-    'apply_softmax': True,
+    'apply_softmax': False,
+    'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std),
 }
 
-# knossos_preview_config = {
-#     'dataset': '/wholebrain/songbird/j0126/areaxfs_v5/knossosdatasets/mag1/knossos.conf',
-#     'offset': [1000, 1000, 1000],  # Offset (min) coordinates
-#     'size': [256, 256, 64],  # Size (shape) of the region
-#     'mag': 1,  # source mag
-#     'target_mags': [1, 2, 3],  # List of target mags to which the inference results should be written
-#     'scale_brightness': 255 if os.getenv('CLUSTER') == 'WHOLEBRAIN' else 1.
-# }
-
-# Options for the preview inference (see elektronn3.inference.Predictor).
-# Attention: These values are highly dependent on model and data shapes!
-inference_kwargs = {
-    'tile_shape': (32, 64, 64),
-    'overlap_shape': (32, 64, 64),
-    'offset': None,
-    'apply_softmax': True,
-    'transform': valid_transform,
-}
-
-# optimizer = optim.SGD(
-#     model.parameters(),
-#     lr=0.1,  # Learning rate is set by the lr_sched below
-#     momentum=0.9,
-#     weight_decay=0.5e-4,
-# )
 optimizer = optim.AdamW(
     model.parameters(),
     lr=1e-3,  # Learning rate is set by the lr_sched below
@@ -278,31 +261,24 @@ if do_lr_range_test:
 else:
     lr_sched = torch.optim.lr_scheduler.CyclicLR(
         optimizer,
-        base_lr=1e-6,
+        base_lr=1e-7,
         max_lr=1e-3,
         step_size_up=2000,
-        step_size_down=6000,
+        step_size_down=8000,
         cycle_momentum=True if 'momentum' in optimizer.defaults else False
     )
     if optimizer_state_dict is not None:
         optimizer.load_state_dict(optimizer_state_dict)
     if lr_sched_state_dict is not None:
         lr_sched.load_state_dict(lr_sched_state_dict)
-# lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
 
-# Validation metrics
-valid_metrics = {}
-for evaluator in [metrics.Accuracy, metrics.Precision, metrics.Recall, metrics.DSC, metrics.IoU]:
-    valid_metrics[f'val_{evaluator.name}_mean'] = evaluator()  # Mean metrics
-    for c in range(out_channels):
-        valid_metrics[f'val_{evaluator.name}_c{c}'] = evaluator(c)
+# lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 200, 0.9)  # No-op scheduler
 
-crossentropy = nn.CrossEntropyLoss(weight=class_weights)
-dice = DiceLoss(apply_softmax=True, weight=class_weights)
-criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
+criterion = MaskedMSELoss()
 
 # Create trainer
-trainer = Trainer(
+from elektronn3.training.noise2void import Noise2VoidTrainer
+trainer = Noise2VoidTrainer(
     model=model,
     criterion=criterion,
     optimizer=optimizer,
@@ -310,15 +286,14 @@ trainer = Trainer(
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
     batch_size=8,
-    num_workers=2,
+    num_workers=4,
     save_root=save_root,
     exp_name=args.exp_name,
     example_input=example_input,
     save_jit=save_jit,
     schedulers={'lr': lr_sched},
-    valid_metrics=valid_metrics,
+    # valid_metrics=valid_metrics,
     preview_batch=preview_batch,
-    # knossos_preview_config=knossos_preview_config,
     preview_interval=5,
     inference_kwargs=inference_kwargs,
     hparams=hparams,

@@ -4,12 +4,15 @@
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Martin Drawitsch, Philipp Schubert
 import datetime
+import pprint
 from collections import deque
 
 import gc
 import logging
 import os
 import shutil
+import warnings
+import zipfile
 
 from itertools import islice
 from math import nan
@@ -27,13 +30,13 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
+import elektronn3
 from elektronn3.training import handlers
 from elektronn3.training.swa import SWA
-from elektronn3.training.train_utils import pretty_string_time
+from elektronn3.training.train_utils import pretty_string_time, create_preview_batch_from_knossos
 from elektronn3.training.train_utils import Timer, HistoryTracker
 
 from torch.utils import collect_env
-from elektronn3.training import metrics
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
@@ -85,15 +88,7 @@ def _change_log_file_to(
 
 
 class Trainer:
-    """ Training loop abstraction with IPython and tensorboard integration.
-
-    Hitting Ctrl-C anytime during the training will drop you to the IPython
-    training shell where you can access training data and make interactive
-    changes.
-    To continue training, hit Ctrl-D twice.
-    If you want the process to terminate after leaving the shell, set
-    ``self.terminate = True`` inside it and then hit Ctrl-D twice.
-
+    """ General training loop abstraction for supervised training.
 
     Args:
         model: PyTorch model (``nn.Module``) that shall be trained.
@@ -114,9 +109,17 @@ class Trainer:
             validation samples when iterated over.
             The length (``len(valid_dataset)``) of it determines how many
             samples are used for one validation metric calculation.
+        unlabeled_dataset: Unlabeled dataset (only inputs) for
+            semi-supervised training. If this is supplied, ``ss_criterion``
+            needs to be set to the loss that should be computed on unlabeled
+            inputs.
         valid_metrics: Validation metrics to be calculated on
             validation data after each training epoch. All metrics are logged
             to tensorboard.
+        ss_criterion: Loss criterion for the self-supervised part of
+            semi-supervised training. The ``ss_criterion`` loss is computed
+            on batches from the ``unlabeled_dataset`` and added to the
+            supervised loss in each training step.
         save_root: Root directory where training-related files are
             stored. Files are always written to the subdirectory
             ``save_root/exp_name/``.
@@ -127,12 +130,35 @@ class Trainer:
             name and a time stamp in the format ``'%y-%m-%d_%H-%M-%S'``.
         example_input: An example input tensor that can be fed to the
             ``model``. This is used for JIT tracing during model serialization.
-        enable_save_trace: If ``True``, the model is JIT-traced with
-            ``example_input`` every time it is serialized to disk.
+        save_jit: Chooses if/how a JIT version (.pts file) of the
+            ``model`` should always be saved in addition to regular model
+            snapshots. Choices:
+
+            - ``None`` (default): Disable saving JIT models.
+            - ``'script'`` (recommended if possible): The model is compiled
+              directly with ``torch.jit.script()`` and saved as a .pts file
+            - ``'trace'``: The model is JIT-traced with ``example_input``
+              and saved as a .pts file
         batch_size: Desired batch size of training samples.
         preview_batch: Set a fixed input batch for preview predictions.
             If it is ``None`` (default), preview batch functionality will be
-            disabled.
+            disabled. As a more powerful alternative for KNOSSOS datasets, consider using
+            the ``knossos_preview_config`` option instead.
+        knossos_preview_config: Configures preview batch creation and preview inferences
+            based on a KNOSSOS dataset region. Here is an example of how it should look like:
+
+            >>> knossos_preview_config = {
+            ...     'dataset': 'path/to/knossos/dataset.conf',
+            ...     'offset': [0, 0, 0],  # Offset (min) coordinates
+            ...     'size': [256, 256, 64],  # Size (shape) of the region
+            ...     'mag': 1,  # source mag
+            ...     'target_mags': [1, 2, 3],  # List of target mags to which the inference results should be written
+            ...     'remap_ids': None  # Config for class ID remapping (optional). See transforms.RemapTargetIDs
+            ... }
+
+            Periodic preview inference results are written to .k.zip annotation files that can be
+            loaded with KNOSSOS and overlayed over the original data. .k.zip files are saved in the
+            training directory, with file names reflecting their training step.
         preview_interval: Determines how often to perform preview inference.
             Preview inference is performed every ``preview_interval`` epochs
             during training. Regardless of this value, preview predictions
@@ -161,6 +187,9 @@ class Trainer:
             overlay image plots.
         enable_videos: Enables video visualizations for 3D image data
             in tensorboard. Requires the moviepy package.
+            Warning: Videos are stored as GIFs and can get very large,
+            so only use this if you log seldomly or have a lot of storage
+            capacity.
         enable_tensorboard: If ``True``, tensorboard logging/plotting is
             enabled during training.
         tensorboard_root_path: Path to the root directory under which
@@ -205,6 +234,9 @@ class Trainer:
             powered by https://github.com/NVIDIA/apex to reduce memory usage
             and (if a GPU with Tensor Cores is used) make training much faster.
             This is currently experimental and might cause instabilities.
+        tqdm_kwargs: Extra arguments to be passed to tqdm progress bars.
+            For example, to disable tqdm outputs completely, pass
+            ``tqdm_kwargs={'disable': True}``.
     """
 
     tb: tensorboardX.SummaryWriter
@@ -226,14 +258,19 @@ class Trainer:
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
             valid_dataset: Optional[torch.utils.data.Dataset] = None,
+            unlabeled_dataset: Optional[torch.utils.data.Dataset] = None,
             valid_metrics: Optional[Dict] = None,
+            ss_criterion: Optional[torch.nn.Module] = None,
             preview_batch: Optional[torch.Tensor] = None,
+            knossos_preview_config: Optional[Dict[str, str]] = None,
             preview_interval: int = 5,
             inference_kwargs: Optional[Dict[str, Any]] = None,
+            hparams: Optional[Dict[str, Any]] = None,
             extra_save_steps: Sequence[int] = (),
             exp_name: Optional[str] = None,
             example_input: Optional[torch.Tensor] = None,
             enable_save_trace: bool = False,
+            save_jit: Optional[str] = None,
             batch_size: int = 1,
             num_workers: int = 0,
             schedulers: Optional[Dict[Any, Any]] = None,
@@ -247,6 +284,7 @@ class Trainer:
             sample_plotting_handler: Optional[Callable] = None,
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
+            tqdm_kwargs: Optional[Dict] = None
     ):
         inference_kwargs = {} if inference_kwargs is None else inference_kwargs
         if preview_batch is not None and (
@@ -256,30 +294,48 @@ class Trainer:
                 'If preview_batch is set, you will also need to specify '
                 'tile_shape and overlap_shape or offset in inference_kwargs!'
             )
+        if knossos_preview_config is not None:
+            if preview_batch is not None:
+                raise ValueError('If you set a preview_knossos_source, you cannot also set a preview batch.')
+            preview_batch = create_preview_batch_from_knossos(knossos_preview_config)
+        if enable_save_trace:
+            logger.warning('enable_save_trace is deprecated. Please use the save_jit option instead.')
+            assert save_jit in [None, 'trace']
+            save_jit = 'trace'
+
+        # Ensure that all nn.Modules are on the right device
         model.to(device)
+        if isinstance(criterion, torch.nn.Module):
+            criterion.to(device)
+        if isinstance(ss_criterion, torch.nn.Module):
+            ss_criterion.to(device)
 
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
         self.model = model
-        self.criterion = criterion.to(device)
+        self.criterion = criterion
         self.optimizer = optimizer
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.unlabeled_dataset = unlabeled_dataset
         self.valid_metrics = valid_metrics
+        self.ss_criterion = ss_criterion
         self.preview_batch = preview_batch
+        self.knossos_preview_config = knossos_preview_config
         self.preview_interval = preview_interval
         self.inference_kwargs = inference_kwargs
         self.extra_save_steps = extra_save_steps
         self.overlay_alpha = overlay_alpha
         self.save_root = os.path.expanduser(save_root)
         self.example_input = example_input
-        self.enable_save_trace = enable_save_trace
+        self.save_jit = save_jit
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
+        self.tqdm_kwargs = {} if tqdm_kwargs is None else tqdm_kwargs
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -292,6 +348,19 @@ class Trainer:
         self.inference_kwargs.setdefault('batch_size', 1)
         self.inference_kwargs.setdefault('verbose', True)
         self.inference_kwargs.setdefault('apply_softmax', True)
+
+        if self.unlabeled_dataset is not None and self.ss_criterion is None:
+            raise ValueError('If an unlabeled_dataset is supplied, you must also set ss_criterion.')
+
+        if hparams is None:
+            hparams = {}
+        else:
+            for k, v in hparams.items():
+                if isinstance(v, (tuple, list)):
+                    # Convert to str because tensorboardX doesn't support
+                    # tuples and lists in add_hparams()
+                    hparams[k] = str(v)
+        self.hparams = hparams
 
         if self.mixed_precision:
             from apex import amp
@@ -321,6 +390,15 @@ class Trainer:
         self._lr_nhood = deque(maxlen=3)  # Keeps track of the last, current and next learning rate
 
         self.out_channels = out_channels
+        self.max_plot_id = None
+
+        try:
+            self.max_plot_id = max(self.out_channels, self.criterion.ignore_index + 1)
+        except AttributeError: # no ignore_idx
+            self.max_plot_id = self.out_channels
+        except TypeError: # no out_channels
+            self.max_plot_id = None
+
         if enable_videos:
             try:
                 import moviepy
@@ -342,35 +420,33 @@ class Trainer:
                 tb_path = os.path.join(tensorboard_root_path, self.exp_name)
                 os.makedirs(tb_path, exist_ok=True)
             self.tb = tensorboardX.SummaryWriter(logdir=tb_path, flush_secs=20)
-            try:
-                self.tb.add_graph(self.model, self.example_input)
-            except Exception as e:
-                logger.warning(f'Could not add model graph to tensorboard.\n{e}')
+
+            if self.hparams:
+                self.tb.add_hparams(hparam_dict=self.hparams, metric_dict={})
+
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batch_size, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=120 if self.num_workers > 0 else 0,
+            timeout=60 if self.num_workers > 0 else 0,
             worker_init_fn=_worker_init_fn
         )
-        # num_workers is set to 0 for valid_loader because validation background processes sometimes
-        # fail silently and stop responding, bringing down the whole training process.
-        # This issue might be related to https://github.com/pytorch/pytorch/issues/1355.
-        # The performance impact of disabling multiprocessing here is low in normal settings,
-        # because the validation loader doesn't perform expensive augmentations, but just reads
-        # data from hdf5s.
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
-                self.valid_dataset, self.batch_size, shuffle=True,
-                num_workers=self.num_workers,
-                pin_memory=True, timeout=120 if self.num_workers > 0 else 0,
-                worker_init_fn=_worker_init_fn
+                self.valid_dataset, self.batch_size, shuffle=True, num_workers=self.num_workers,
+                pin_memory=True, worker_init_fn=_worker_init_fn
             )
+        if self.unlabeled_dataset is not None:
+            self.unlabeled_loader = DataLoader(
+                self.unlabeled_dataset, batch_size=self.batch_size, shuffle=True,
+                num_workers=self.num_workers, pin_memory=True,
+                timeout=60 if self.num_workers > 0 else 0, worker_init_fn=_worker_init_fn
+            )
+
         self.best_val_loss = np.inf  # Best recorded validation loss
         self.best_tr_loss = np.inf
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
 
-    # TODO: Modularize, make some general parts reusable for other trainers.
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
         After each training epoch, validation performance is measured and
@@ -433,13 +509,27 @@ class Trainer:
     def _train_step(self, batch: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Core training step on self.device"""
         inp = batch['inp']
-        target = batch['target']
+        target = batch.get('target')
+        target_class = batch.get('class')
         # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
         dinp = inp.to(self.device, non_blocking=True)
-        dtarget = target.to(self.device, non_blocking=True)
+        dtarget = target.to(self.device, non_blocking=True) if target is not None else None
+        dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
         # forward pass
         dout = self.model(dinp)
-        dloss = self.criterion(dout, dtarget)
+        if dtarget_class is not None:
+            dloss = self.criterion(dout, dtarget, dtarget_class)
+        else:
+            dloss = self.criterion(dout, dtarget)
+
+        unlabeled = batch.get('unlabeled')
+        if unlabeled is not None:  # Add a simple consistency loss
+            u_inp = unlabeled['inp']
+            du_inp = u_inp.to(self.device, non_blocking=True)
+            du_loss = self.ss_criterion(du_inp)
+            dloss += du_loss
+            self.tb.add_scalar('stats/tr_uloss', float(du_loss), global_step=self.step)
+
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException
@@ -467,6 +557,24 @@ class Trainer:
         running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
         timer = Timer()
         batch_iter = tqdm(
+            self.train_loader,
+            'Training',
+            total=len(self.train_loader),
+            dynamic_ncols=True,
+            **self.tqdm_kwargs
+        )
+        unlabeled_iter = None if self.unlabeled_dataset is None else iter(self.unlabeled_loader)
+        for i, batch in enumerate(batch_iter):
+            if self.step in self.extra_save_steps:
+                self._save_model(f'_step{self.step}', verbose=True)
+
+            if unlabeled_iter is not None:
+                batch['unlabeled'] = next(unlabeled_iter)
+            dloss, dout = self._train_step(batch)
+
+        running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
+        timer = Timer()
+        batch_iter = tqdm(
             self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
         )
         for i, batch in enumerate(batch_iter):
@@ -478,9 +586,10 @@ class Trainer:
             target = batch['target']
             with torch.no_grad():
                 loss = float(dloss)
-                mean_target = float(target.to(torch.float32).mean())
-                stats['tr_loss'].append(loss)
+                target = batch.get('target')
+                mean_target = float(target.to(torch.float32).mean()) if target is not None else 0.
                 misc['mean_target'].append(mean_target)
+                stats['tr_loss'].append(loss)
                 batch_iter.set_description(f'Training (loss {loss:.4f})')
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
 
@@ -495,7 +604,11 @@ class Trainer:
                 # Last step in this epoch or in the whole training
                 # Preserve last training batch and network output for later visualization
                 images['inp'] = batch['inp'].numpy()
-                images['target'] = batch['target'].numpy()
+                images['fname'] = batch.get('fname')
+                if 'target' in batch:
+                    images['target'] = batch['target'].numpy()
+                if 'unlabeled' in batch:
+                    images['unlabeled'] = batch['unlabeled']
                 images['out'] = dout.detach().cpu().numpy()
                 self._put_current_attention_maps_into(images)
 
@@ -509,7 +622,7 @@ class Trainer:
         return stats, misc, images
 
     def _put_current_attention_maps_into(self, images):
-        if getattr(self.model, 'attention'):
+        if getattr(self.model, 'attention', None):
             for i in range(len(self.model.up_convs)):
                 att = self.model.up_convs[i].att[0][0].detach().cpu().numpy()
                 if att.ndim == 3:
@@ -583,13 +696,25 @@ class Trainer:
                 # TODO: Make bn_update configurable (esp. number of batches)
                 self.optimizer.update_swa()  # Put current model params into SWA buffer
                 self.optimizer.swap_swa_sgd()  # Perform SWA and write results into model params
-                max_bn_corr_batches = 10  # Batches to use to correct SWA batchnorm stats
-                # We're assuming here that len(self.train_loader), which is an upper bound for
-                #  len(swa_loader), is sufficient for a good stat estimation
-                swa_loader = islice(self.train_loader, max_bn_corr_batches)
-                # This may be expensive (comparable to validation computations)
-                SWA.bn_update(swa_loader, self.model, device=self.device)
-                self._save_model(suffix='_swa', verbose=False)
+                has_bn = any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm) for m in self.model.modules())
+                if has_bn:  # Perform batch norm correction
+                    try:
+                        max_bn_corr_batches = 10  # Batches to use to correct SWA batchnorm stats
+                        # We're assuming here that len(self.train_loader), which is an upper bound for
+                        #  len(swa_loader), is sufficient for a good stat estimation
+                        swa_loader = islice(self.train_loader, max_bn_corr_batches)
+                        # This may be expensive (comparable to validation computations)
+                        SWA.bn_update(swa_loader, self.model, device=self.device)
+                        self._save_model(suffix='_swa', verbose=False)
+                    except:
+                        logger.exception(
+                            'SWA helper bn_update has failed. SWA model will be saved with incorrect '
+                            'batchnorm statistics. Please make sure to manually correct the BN stats '
+                            'before deploying the model.'
+                        )
+                        self._save_model(suffix='_swa_todo_batchnorm_corr', verbose=False)
+                else:  # No batch norm -> save model directly
+                    self._save_model(suffix='_swa', verbose=False)
                 self.optimizer.swap_swa_sgd()  # Swap back model to the original state before SWA
 
     @torch.no_grad()
@@ -597,33 +722,64 @@ class Trainer:
         self.model.eval()  # Set dropout and batchnorm to eval mode
 
         val_loss = []
+        outs = []
+        targets = []
         stats = {name: [] for name in self.valid_metrics.keys()}
         batch_iter = tqdm(
-            enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
-            dynamic_ncols=True
+            enumerate(self.valid_loader),
+            'Validating',
+            total=len(self.valid_loader),
+            dynamic_ncols=True,
+            **self.tqdm_kwargs
         )
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
-            inp, target = batch['inp'], batch['target']
+            inp = batch['inp']
+            target = batch.get('target')
+            target_class = batch.get('class')
             dinp = inp.to(self.device, non_blocking=True)
-            dtarget = target.to(self.device, non_blocking=True)
+            dtarget = target.to(self.device, non_blocking=True) if target is not None else None
+            dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
             dout = self.model(dinp)
-            val_loss.append(self.criterion(dout, dtarget).item())
+            if dtarget is None:  # Use self-supervised unary loss function
+                val_loss.append(self.ss_criterion(dout).item())
+            elif dtarget_class is not None:
+                val_loss.append(self.criterion(dout, dtarget, dtarget_class).item())
+            else:
+                val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
-            for name, evaluator in self.valid_metrics.items():
-                stats[name].append(evaluator(target, out))
+            outs.append(out)
+            targets.append(target)
 
         images = {
             'inp': inp.numpy(),
             'out': out.numpy(),
-            'target': target.numpy()
+            'target': None if target is None else target.numpy(),
+            'fname': batch.get('fname'),
         }
         self._put_current_attention_maps_into(images)
 
         stats['val_loss'] = np.mean(val_loss)
         stats['val_loss_std'] = np.std(val_loss)
-        for name in self.valid_metrics.keys():
-            stats[name] = np.nanmean(stats[name])
+
+        for name, evaluator in self.valid_metrics.items():
+            mvals = [evaluator(target, out) for target, out in zip(targets, outs)]
+            if np.all(np.isnan(mvals)):
+                stats[name] = np.nan
+            else:
+                stats[name] = np.nanmean(mvals)
+
+        # # This code is currently commented out because it's quite slow. TODO: Speed up by computing softmax on GPU above
+        # # Plot per-class PR curves if a supported classification scenario is detected.
+        # if out.ndim == target.ndim + 1 and self.inference_kwargs.get('apply_softmax'):
+        #     softmax_outs = torch.stack(outs).softmax(2)  # Apply softmax in dim=2 because of additional stack dim
+        #     for c in range(out.shape[1]):
+        #         self.tb.add_pr_curve(
+        #             f'pr_c{c}',
+        #             labels=torch.stack(targets),
+        #             predictions=torch.stack([so[:, c] for so in softmax_outs]),
+        #             global_step=self.step
+        #         )
 
         self.model.train()  # Reset model to training mode
 
@@ -657,9 +813,8 @@ class Trainer:
           manually load them into a model.
         - ``model.pts`` contains the model in the ``torch.jit`` ScriptModule
           serialization format. If ``model`` is not already a ``ScriptModule``
-          and ``self.enable_save_trace`` is ``True``, a ScriptModule form of the
-          ``model`` will be created on demand by jit-tracing it with
-          ``self.example_input``.
+          and ``self.save_jit`` is not ``None``, a ScriptModule form of the
+          ``model`` will be created on demand.
 
         Args:
             suffix: If defined, this string will be added before the file
@@ -704,43 +859,58 @@ class Trainer:
         except:  # No valid scheduler in use
             lr_sched_state = None
 
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'lr_sched_state_dict': lr_sched_state,
+        info = {
             'global_step': self.step,
             'epoch': self.epoch,
             'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
+            'inference_kwargs': self.inference_kwargs,
+            'elektronn3.__version__': elektronn3.__version__,
+            'env_info': collect_env.get_pretty_env_info()
+        }
+
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'lr_sched_state_dict': lr_sched_state,
+            'info': info
         }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}')
+        pts_model_path = f'{model_path}s'
         try:
             # Try saving directly as an uncompiled nn.Module
             torch.save(model, model_path)
             log(f'Saved model as {model_path}')
-            if self.example_input is not None and self.enable_save_trace:
-                # Additionally trace and serialize the model in eval + train mode
-                model_path += 's'
-                traced = torch.jit.trace(model.eval(), self.example_input.to(self.device))
-                traced.save(model_path)
-                log(f'Saved jit-traced model as {model_path}')
-                # Uncomment these lines if separate traces for train/eval are required:
-                # traced_train = torch.jit.trace(model.train(), self.example_input.to(self.device))
-                # traced_train.save('train_' + model_path)
+            if self.save_jit == 'script':  # Compile directly for serialization
+                jitmodel = torch.jit.script(model)
+            elif self.save_jit == 'trace':  # Trace and serialize the model in eval mode
+                if self.example_input is None:
+                    raise ValueError('If save_jit="trace", example_input needs to be specified.')
+                with warnings.catch_warnings():
+                    # It's enough to be warned once during initial tracing
+                    warnings.filterwarnings("ignore", category=torch.jit.TracerWarning)
+                    jitmodel = torch.jit.trace(model.eval(), self.example_input.to(self.device))
+            if self.save_jit is not None:  # Save jit model, either from script or trace
+                jitmodel.save(pts_model_path)
+                log(f'Saved jitted model ({self.save_jit}) as {pts_model_path}')
         except (TypeError, PickleError) as exc:
             # If model is already a ScriptModule, it can't be saved with torch.save()
             # Use ScriptModule.save() instead in this case.
             # Using the file extension '.pts' to show it's a ScriptModule.
             if isinstance(model, torch.jit.ScriptModule):
                 model_path += 's'
-                model.save(model_path)
-                log(f'Saved jitted model as {model_path}')
+                model.save(pts_model_path)
+                log(f'Saved jitted model as {pts_model_path}')
             else:
                 raise exc
         finally:
             # Reset training state to the one it had before this function call,
             # because it could have changed with the model.eval() call above.
             model.training = model_trainmode
+        if os.path.isfile(pts_model_path):
+            with zipfile.ZipFile(pts_model_path, 'a', compression=zipfile.ZIP_DEFLATED) as zfile:
+                infostr = pprint.pformat(info, indent=2, width=120)
+                zfile.writestr('info.txt', infostr)
 
     def _log_basic(self, stats, misc):
         """Log to stdout and text log file"""
@@ -823,7 +993,6 @@ class Trainer:
             grad = param.grad if param.grad is not None else torch.tensor(0)
             self.tb.add_histogram(f'grad/{name}', grad, self.step)
 
-    # TODO: Use Predictor(..., transform=...) and remove normalization from preview batch?
     def _preview_inference(
             self,
             inp: np.ndarray,

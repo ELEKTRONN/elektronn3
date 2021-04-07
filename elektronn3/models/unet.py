@@ -16,6 +16,7 @@ This code is based on https://github.com/jaxony/unet-pytorch
 which implements (2D) U-Net with user-defined network depth
 and a few other improvements of the original architecture.
 Major differences of this version from Huang's code:
+
 - Operates on 3D image data (5D tensors) instead of 2D data
 - Uses 3D convolution, 3D pooling etc. by default
 - planar_blocks architecture parameter for mixed 2D/3D convnets
@@ -399,8 +400,10 @@ class UpConv(nn.Module):
 
 class ResizeConv(nn.Module):
     """Upsamples by 2x and applies a convolution.
+
     This is meant as a replacement for transposed convolution to avoid
     checkerboard artifacts. See
+
     - https://distill.pub/2016/deconv-checkerboard/
     - https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/issues/190
     """
@@ -438,6 +441,7 @@ class ResizeConv(nn.Module):
 
 class GridAttention(nn.Module):
     """Based on https://github.com/ozan-oktay/Attention-Gated-Networks
+
     Published in https://arxiv.org/abs/1804.03999"""
     def __init__(self, in_channels, gating_channels, inter_channels=None, dim=3, sub_sample_factor=2):
         super().__init__()
@@ -657,6 +661,7 @@ class UNet(nn.Module):
             but it delivers better results this way
             (see https://redd.it/67gonq).
             Choices:
+
             - 'group' for group normalization (G=8)
             - 'group<G>' for group normalization with <G> groups
               (e.g. 'group16') for G=16
@@ -716,9 +721,6 @@ class UNet(nn.Module):
                 and inference not on small patches, but on complete images in
                 a single step.
     """
-
-    __constants__ = ['down_convs', 'up_convs']
-
     def __init__(
             self,
             in_channels: int = 1,

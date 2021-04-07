@@ -22,8 +22,8 @@ For a roadmap of planned features, see the ["enhancement" issues on the tracker]
 # Requirements
 
 - Linux (support for Windows, MacOS and other systems is not planned)
-- Python 3.7 or later (3.6 may work, but it is not regularly tested)
-- PyTorch 1.2
+- Python 3.6 or later
+- PyTorch 1.3 or later (earlier versions may work, but are untested)
 - For other requirements see `requirements.txt`
 
 # Setup
@@ -67,9 +67,5 @@ Then you can view the visualizations at http://localhost:6006.
 # Contributors
 
 The **elektronn3** project is being developed by the
-[ELEKTRONN team](https://github.com/orgs/ELEKTRONN/people) at the
-Max Planck Institute of Neurobiology and is funded by
-[Winfried Denk's lab](http://www.neuro.mpg.de/denk).
-
-[Jörgen Kornfeld](http://www.neuro.mpg.de/person/43611/3242677)
-is academic advisor to this project.
+[ELEKTRONN team](https://github.com/orgs/ELEKTRONN/people).
+[Jörgen Kornfeld](https://twitter.com/jmrko) is academic advisor to this project.

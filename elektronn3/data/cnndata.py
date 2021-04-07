@@ -6,6 +6,7 @@
 
 __all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
 
+import glob
 import logging
 import os
 import sys
@@ -226,7 +227,7 @@ class PatchCreator(data.Dataset):
                     print(e)
                     logger.warning(
                         f'{fail_percentage}% of warping attempts are failing.\n'
-                        'Consider lowering lowering warp_kwargs[\'warp_amount\']).'
+                        'Consider lowering lowering your input patch shapes or warp_kwargs[\'warp_amount\']).'
                     )
                     self._failed_warp_warned = True
                 continue
@@ -442,18 +443,25 @@ class PatchCreator(data.Dataset):
 
         return inp_sources, target_sources
 
+    def set_offset(self, offset):
+        self.offset = np.array(offset)
+        self.target_patch_shape = self.patch_shape - self.offset * 2
 
 def get_preview_batch(
         h5data: Tuple[str, str],
         preview_shape: Optional[Tuple[int, ...]] = None,
         transform: Optional[Callable] = None,
-        in_memory: bool = False
+        in_memory: bool = False,
+        dim: Optional[float] = None,
 ) -> torch.Tensor:
     fname, key = h5data
     inp_h5 = h5py.File(fname, 'r')[key]
     if in_memory:
         inp_h5 = inp_h5.value
-    dim = len(preview_shape)  # 2D or 3D
+    if dim is None:
+        if preview_shape is None:
+            raise ValueError('At least one of preview_shape, dim must be defined.')
+        dim = len(preview_shape)  # 2D or 3D
     inp_shape = np.array(inp_h5.shape[-dim:])
     if preview_shape is None:  # Slice everything
         inp_lo = np.zeros_like(inp_shape)
@@ -475,7 +483,8 @@ def get_preview_batch(
     if inp_np.ndim == dim + 1:  # Should be dim + 2 for (N, C) dims
         inp_np = inp_np[:, None]  # Add missing C dim
     if transform is not None:
-        inp_np, _ = transform(inp_np, None)
+        for n in range(inp_np.shape[0]):  # N is usually 1, so this is only iterated once with n=0
+            inp_np[0], _ = transform(inp_np[0], None)
     inp = torch.from_numpy(inp_np)
     return inp
 
@@ -510,8 +519,8 @@ class SimpleNeuroData2d(data.Dataset):
             target_path = expanduser(f'~/neuro_data_cdhw/barrier_int16_{cube_id}.h5')
         self.inp_file = h5py.File(os.path.expanduser(inp_path), 'r')
         self.target_file = h5py.File(os.path.expanduser(target_path), 'r')
-        self.inp = self.inp_file[inp_key].value.astype(np.float32)
-        self.target = self.target_file[target_key].value.astype(np.int64)
+        self.inp = self.inp_file[inp_key][()].astype(np.float32)
+        self.target = self.target_file[target_key][()].astype(np.int64)
         self.target = self.target[0]  # Squeeze superfluous first dimension
         self.target = self.target[::pool[0], ::pool[1], ::pool[2]]  # Handle pooling (dirty hack TODO)
 
@@ -537,12 +546,11 @@ class SimpleNeuroData2d(data.Dataset):
         inp, target = self.transform(inp, target)
         inp = torch.as_tensor(inp)
         target = torch.as_tensor(target)
-        fname = str(index)
         sample = {
             'inp': inp,
             'target': target,
             'cube_meta': np.inf,
-            'fname': fname
+            'fname': str(index)
         }
         return sample
 
@@ -582,11 +590,46 @@ class Segmentation2d(data.Dataset):
         self.target_dtype = target_dtype
         self.epoch_multiplier = epoch_multiplier
 
+        def load_image(fname):
+            inp = imageio.imread(fname).astype(np.float32)
+            if inp.ndim == 2:
+                inp = inp[None]  # (H, W) -> (C=1, H, W)
+            elif inp.ndim == 3:
+                inp = inp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
+            else:
+                raise RuntimeError(f'Image {fname} has shape {inp.shape}, but ndim should be 2 or 3.')
+            return inp
+
         if self.in_memory:
-            self.inps = [
-                np.array(imageio.imread(fname)).astype(np.float32)[None]
-                for fname in self.inp_paths
-            ]
+            self.inputs = []
+            rgb_fnames = {}
+            gray_fnames = {}
+            for input_path in self.inp_paths:
+                if os.path.isdir(input_path):
+                    multi_input = []
+                    for channel_idx, input_file in enumerate(sorted(glob.glob(str(input_path) + '/*'))):
+                        inp = load_image(str(input_file))
+                        if inp.shape[0] == 1:
+                            gray_fnames[channel_idx] = input_file
+                        elif inp.shape[0] == 3:
+                            rgb_fnames[channel_idx] = input_file
+                        rgb_fname = rgb_fnames.get(channel_idx)
+                        if rgb_fname is not None and inp.shape[0] == 1:
+                            raise RuntimeError(f'GT input layer {channel_idx} has mixed multi-channel ({rgb_fname}) and single-channel images ({input_file}).')
+                        gray_fname = gray_fnames.get(channel_idx)
+                        if gray_fname is not None and inp.shape[0] == 3:
+                            raise RuntimeError(f'GT input layer {channel_idx} has mixed multi-channel ({input_file}) and single-channel images ({gray_fname}).')
+                        multi_input.append(inp)
+                    self.inputs.append(np.concatenate(multi_input))
+                else:
+                    inp = load_image(input_path)
+                    if inp.shape[0] == 1:
+                        gray_fnames[0] = input_path
+                    elif inp.shape[0] == 3:
+                        rgb_fnames[0] = input_path
+                    if len(rgb_fnames) > 0 and inp.shape[0] == 1 or len(gray_fnames) > 0 and inp.shape[0] == 3:
+                        raise RuntimeError(f'Mixed multi-channel ({rgb_fnames[0]}) and single-channel images ({gray_fnames[0]}) in gt.')
+                    self.inputs.append(inp)
             self.targets = [
                 np.array(imageio.imread(fname)).astype(np.int64)
                 for fname in self.target_paths
@@ -595,12 +638,17 @@ class Segmentation2d(data.Dataset):
     def __getitem__(self, index):
         index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         if self.in_memory:
-            inp = self.inps[index]
+            inp = self.inputs[index]
             target = self.targets[index]
         else:
-            inp = np.array(imageio.imread(self.inp_paths[index]), dtype=np.float32)
-            if inp.ndim == 2:  # (H, W)
-                inp = inp[None]  # (C=1, H, W)
+            fname = self.inp_paths[index]
+            inp = imageio.imread(fname).astype(np.float32)
+            if inp.ndim == 2:
+                inp = inp[None]  # (H, W) -> (C=1, H, W)
+            elif inp.ndim == 3:
+                inp = inp.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
+            else:
+                raise RuntimeError(f'Image {fname} has shape {inp.shape}, but ndim should be 2 or 3.')
             target = np.array(imageio.imread(self.target_paths[index]), dtype=np.int64)
         while True:  # Only makes sense if RandomCrop is used
             try:
@@ -610,12 +658,12 @@ class Segmentation2d(data.Dataset):
                 pass
         if self.offset is not None:
             off = self.offset
-            target = target[:, off[0]:-off[0], off[1]:-off[1]]
+            target = target[off[0]:-off[0], off[1]:-off[1]]
         sample = {
             'inp': torch.as_tensor(inp.astype(self.inp_dtype)),
             'target': torch.as_tensor(target.astype(self.target_dtype)),
             'cube_meta': np.inf,
-            'fname': str(index)
+            'fname': str(self.inp_paths[index])
         }
         return sample
 
@@ -643,7 +691,7 @@ class Reconstruction2d(data.Dataset):
         self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
-            self.inps = [
+            self.inputs = [
                 np.array(imageio.imread(fname)).astype(np.float32)[None]
                 for fname in self.inp_paths
             ]
@@ -651,7 +699,7 @@ class Reconstruction2d(data.Dataset):
     def __getitem__(self, index):
         index %= len(self.inp_paths)  # Wrap around to support epoch_multiplier
         if self.in_memory:
-            inp = self.inps[index]
+            inp = self.inputs[index]
         else:
             inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
             if inp.ndim == 2:  # (H, W)
@@ -667,7 +715,7 @@ class Reconstruction2d(data.Dataset):
             'inp': inp,
             'target': inp,
             'cube_meta': np.inf,
-            'fname': str(index)
+            'fname': str(self.inp_paths[index])
         }
         return sample
 
@@ -696,14 +744,14 @@ class TripletData2d(data.Dataset):
         self.epoch_multiplier = epoch_multiplier
 
         if self.in_memory:
-            self.inps = [
+            self.inputs = [
                 np.array(imageio.imread(fname)).astype(np.float32)[None]
                 for fname in self.inp_paths
             ]
 
     def _get(self, index):
         if self.in_memory:
-            inp = self.inps[index]
+            inp = self.inputs[index]
         else:
             inp = np.array(imageio.imread(self.inp_paths[index]), dtype=self.inp_dtype)
             if inp.ndim == 2:  # (H, W)

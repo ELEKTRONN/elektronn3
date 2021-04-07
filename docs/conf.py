@@ -20,8 +20,8 @@
 # -- Project information -----------------------------------------------------
 
 project = 'elektronn3'
-copyright = '2018, elektronn3 team'
-author = 'elektronn3 team'
+copyright = '2017 - now, ELEKTRONN team'
+author = 'ELEKTRONN team'
 
 # The short X.Y version
 version = ''

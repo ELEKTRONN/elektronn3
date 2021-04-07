@@ -1,7 +1,7 @@
 import os
+import versioneer
 from setuptools import setup, find_packages
 from distutils.extension import Extension
-from Cython.Distutils import build_ext
 import numpy as np
 
 # build knn extension for pointconvs (knn directory copied from https://github.com/aboulch/ConvPoint)
@@ -28,19 +28,18 @@ else:
         'numba',
         'ipython',
         'imageio',
-        'pillow',
         'colorlog',
         'tqdm',
         'scikit-learn',
         'scikit-image',
-        'tensorboard',
         'tensorboardX',
         'torchvision'
     ]
 
 setup(
     name='elektronn3',
-    version='0.0.0',
+    version=versioneer.get_version(),
+    cmdclass=versioneer.get_cmdclass(),
     description='Utilities for 3D CNNs in PyTorch',
     url='https://github.com/ELEKTRONN/elektronn3',
     author='ELEKTRONN team',
@@ -55,5 +54,4 @@ setup(
     packages=find_packages(exclude=['scripts']),
     install_requires=install_requires,
     ext_modules=ext_modules,
-    cmdclass={'build_ext': build_ext}
 )

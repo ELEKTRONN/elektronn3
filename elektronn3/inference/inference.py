@@ -16,6 +16,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
+from elektronn3.data import utils
+
 
 # TODO: It's confusing that tiled_apply expects out_shape to include the N dim, but
 #     Predictor has a parameter with the same name but which doesn't include N.
@@ -35,6 +37,8 @@ def _extend_nc(spatial_slice: Sequence[slice]) -> Tuple[slice, ...]:
     nonspatial_slice = [slice(None)] * 2
     return tuple(nonspatial_slice + list(spatial_slice))
 
+
+# TODO Fix and document out_shape change for argmax outputs
 
 def tiled_apply(
         func: Callable[[torch.Tensor], torch.Tensor],
@@ -103,20 +107,19 @@ def tiled_apply(
             later.
         verbose: If ``True``, a progress bar will be shown while iterating over
             the tiles.
-        argmax_with_threshold
 
     Returns:
         Output tensor, as a torch tensor of the same shape as the input tensor.
     """
     if not (inp.dim() - 2 == len(tile_shape) == len(overlap_shape)):
         raise ValueError(
-            f'tile shape (ndim={len(tile_shape)}) and overlap shape '
-            f'(ndim={len(overlap_shape)}) don\'t match input shape '
-            f'(ndim={inp.dim()}.'
+            f'ndims of tile shape ({len(tile_shape)}) and overlap shape '
+            f'({len(overlap_shape)}) don\'t match input shape ndim - 2'
+            f'({inp.dim() - 2}).'
         )
-    if not np.all(np.mod(inp.shape[2:], tile_shape) == 0):
+    if not np.all(np.mod(out_shape[2:], tile_shape) == 0):
         raise ValueError(
-            f'spatial inp shape {tuple(inp.shape[2:])} has to be divisible '
+            f'spatial out shape[2:] {tuple(out_shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
     if out_shape[1] > 255 and argmax_with_threshold is not None:
@@ -125,36 +128,36 @@ def tiled_apply(
             f'argmax_with_threshold with C > 255 is not supported due to uint8 storage.'
         )
 
-    if offset is None:
-        offset = np.zeros_like(tile_shape)
-    else:
+    if offset is not None:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
-    out_dtype = torch.uint8 if argmax_with_threshold is not None else inp.dtype
-    out = torch.empty(out_shape, dtype=out_dtype, device='cpu')
-    out_shape = np.array(out.shape)
+    out = None
+    out_shape = np.array(out_shape)
     tile_shape = np.array(tile_shape)
     overlap_shape = np.array(overlap_shape)
-    device = inp.device
 
-    # Create padded input with overlap
-    padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
-    inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
+    if not np.array_equal(out_shape[2:], inp_shape[2:]): # input is already padded
+        inp_padded = inp
+    else:
+        # Create padded input with overlap
+        padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
+        logger.info(f'additional input padding to {padded_shape}')
+        inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
 
-    padslice = _extend_nc(
-        [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
-    )
-    inp_padded[padslice] = inp
-    del inp
+        padslice = _extend_nc(
+            [slice(l, h) for l, h in zip(overlap_shape, padded_shape[2:] - overlap_shape)]
+        )
+        inp_padded[padslice] = inp
 
-    # Offset is subtracted here because otherwise, the final output tensor's
-    #  content will be shifted w.r.t. the input content.
-    crop_low_corner = overlap_shape.copy() - offset
-    crop_high_corner = tile_shape + overlap_shape - offset
-    # Used to crop the output tile to the relevant, unpadded region
-    #  that will be written to the final output
-    final_crop_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(crop_low_corner,
+        crop_low_corner = overlap_shape.copy()
+        crop_high_corner = tile_shape + overlap_shape
+        # Used to crop the output tile to the relevant, unpadded region
+        #  that will be written to the final output
+        final_crop_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(crop_low_corner,
                                                                  crop_high_corner)])
+    if offset is not None: # no cropping necessary for valid conv
+        final_crop_slice = None
+    del inp
 
     tiles = np.ceil(out_shape[2:] / tile_shape).astype(int)
     num_tiles = np.prod(tiles)
@@ -191,12 +194,14 @@ def tiled_apply(
         #  inference result will be stored)
         out_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(out_low_corner,
                                                                    out_high_corner)])
-        inp_tile = inp_padded[inp_slice].contiguous().to(device)
-        out_tile = func(inp_tile)
+        inp_tile = inp_padded[inp_slice].contiguous()
+        out_tile = func(inp_tile, final_crop_slice)
 
         # Slice the relevant tile_shape-sized region out of the model output
         #  so it can be written to the final output
-        out_tile = out_tile[final_crop_slice]
+        # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
+        if out is None:
+            out = torch.empty(out_shape.tolist(), dtype=out_tile.dtype)
         # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
         if argmax_with_threshold is not None:
             out[out_slice] = (out_tile > argmax_with_threshold).to(out_dtype).argmax(dim=1).to(out_dtype)
@@ -204,6 +209,19 @@ def tiled_apply(
             out[out_slice] = out_tile
 
     return out
+
+
+class Argmax(nn.Module):
+    def __init__(self, dim=1, unsqueeze=True):
+        super().__init__()
+        self.dim = dim
+        self.unsqueeze = unsqueeze
+
+    def forward(self, x):
+        argmax = torch.argmax(x, self.dim)
+        if self.unsqueeze:  # Restore C dim as a workaround for unified slicing pattern in tiled_apply()
+            argmax.unsqueeze_(1)
+        return argmax
 
 
 class FlipAugment:
@@ -315,11 +333,19 @@ class Predictor:
 
             >>> out_channels: int = ?  # E.g. for binary classification it's 2
             >>> out_shape = (out_channels, *inp.shape[2:])
+        out_dtype: torch dtype that the output will be cast to
         float16: If ``True``, deploy the model in float16 (half) precision.
         apply_softmax: If ``True``
             (default), a softmax operator is automatically appended to the
             model, in order to get probability tensors as inference outputs
             from networks that don't already apply softmax.
+        apply_argmax: If ``True``, the argmax of the model output is computed
+            and returned instead of the class score tensor.  This can be used
+            for classification if you are only interested in the final argmax
+            classification. This option can speed up predictions.
+            Note that since argmax is not influenced by softmax,
+            ``apply_softmax`` can be safely disabled if ``apply_argmax`` is
+            ``True``, even if the model was trained with a softmax loss.
         transform: Transformation function to be applied to inputs before
             performing inference. The primary use of this is for normalization.
             Make sure to use the same normalization parameters for inference as
@@ -329,7 +355,7 @@ class Predictor:
 
             >>> from elektronn3.data import transforms
             >>> # m, s are mean, std of the inputs the model was trained on
-            >>> transform = transforms.Normalize(mean=m, std=s, inplace=True)
+            >>> transform = transforms.Normalize(mean=m, std=s)
         augmentations: List of test-time augmentations or integer that
             specifies the number of different flips to be performed as test-
             time augmentations.
@@ -361,42 +387,26 @@ class Predictor:
             overlap_shape: Optional[Tuple[int, ...]] = None,
             offset: Optional[Tuple[int, ...]] = None,
             out_shape: Optional[Tuple[int, ...]] = None,
+            out_dtype: Optional[torch.dtype] = None,
             float16: bool = False,
             apply_softmax: bool = True,
             transform: Optional[Transform] = None,
             augmentations: Union[int, Optional[Sequence]] = None,
             strict_shapes: bool = False,
+            apply_argmax: bool = False,
             argmax_with_threshold: Optional[float] = None,
             verbose: bool = False,
-            report_inp_stats = False
+            report_inp_stats: bool = False
     ):
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            logger.info(f'Running on device {device}')
         elif isinstance(device, str):
             device = torch.device(device)
         self.device = device
         self.batch_size = batch_size
-        if tile_shape is not None:
-            tile_shape = np.array(tile_shape)
-        self.tile_shape = tile_shape
-        if (overlap_shape is not None or np.any(overlap_shape)) and (offset is not None or np.any(offset)):
-            raise ValueError(
-                f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
-                'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
-                'or offset (if the output is smaller).'
-            )
-        if overlap_shape is not None:
-            overlap_shape = np.array(overlap_shape)
-        if offset is not None:
-            offset = np.array(offset)
-            # Set overlap to offset shape because IMO that's the only reasonable choice.
-            overlap_shape = offset
-        self.overlap_shape = overlap_shape
-        self.offset = offset
 
-        if out_shape is not None:
-            out_shape = np.array(out_shape)
-        self.out_shape = out_shape
+        self.out_dtype = out_dtype
         self.float16 = float16
         if float16 and not isinstance(model, str):
             raise NotImplementedError(
@@ -409,18 +419,18 @@ class Predictor:
             augmentations = DEFAULT_AUGMENTATIONS_3D[:augmentations]
         self.augmentations = augmentations
         self.strict_shapes = strict_shapes
+        self.apply_argmax = apply_argmax
         self.argmax_with_threshold = argmax_with_threshold
         self.verbose = verbose
         self.report_inp_stats = report_inp_stats
         if isinstance(model, str):
             if os.path.isfile(model):
-                # TorchScript serialization can be identified by checking if
-                #  it's a zip file. Pickled Python models are not zip files.
-                #  See https://github.com/pytorch/pytorch/pull/15578/files
-                if zipfile.is_zipfile(model):
+                if model.endswith('.pts'):
                     model = torch.jit.load(model, map_location=device)
-                else:
+                elif model.endswith('.pt'):
                     model = torch.load(model, map_location=device)
+                else:
+                    raise ValueError(f'{model} has an unkown file extension. Supported are .pt and .pts')
             else:
                 raise ValueError(f'Model path {model} not found.')
         self.model = model
@@ -436,37 +446,87 @@ class Predictor:
                 ' a state_dict object (dict) or None.')
         if state_dict is not None:
             set_state_dict(model, state_dict)
-        if apply_softmax:
+        if not apply_softmax and augmentations is not None:
+            raise ValueError('When augmentations are enabled, apply_softmax cannot be False.')
+        if apply_softmax or augmentations is not None:
             self.model = nn.Sequential(self.model, nn.Softmax(1))
         if float16:
             self.model.half()  # This is destructive. float32 params are lost!
-        if self.tile_shape is None and self.overlap_shape is None:
-            #  have no spatial dimensions, so tiling doesn't make sense here.
-            self.enable_tiling = False
-        else:
-            self.enable_tiling = True
+        self.apply_argmax_after_tta = False
+        if apply_argmax or argmax_with_threshold is not None:
+            self.apply_argmax_after_tta = augmentations is not None
+            if not self.apply_argmax_after_tta: # if augmentations are enabled, argmax is applied after augmentations, see _predict
+                argmax_layers = [Argmax(dim=1, unsqueeze=True)]
+                if argmax_with_threshold:
+                    argmax_layers = [nn.Threshold(argmax_with_threshold, 0)] + argmax_layers
+                self.model = nn.Sequential(self.model, *argmax_layers)
+            if self.out_dtype is None:
+                self.out_dtype = torch.uint8
+        self._warn_about_shapes = True
         self.model.eval()
 
-    @torch.no_grad()
-    def _predict(self, dinp: torch.Tensor) -> torch.Tensor:
-        dout = self.model(dinp)
-        if not self.augmentations:
-            return dout
+        def is_set(array: Tuple[int, ...]):
+            return array is not None and np.any(array)
 
-        # Else, apply test-time augmentations and take average
-        # Directly transferring to cpu after each augmented forward pass to save GPU memory
-        # TODO: Investigate if optionally keeping tensors on GPU makes sense for better speed.
-        inp = dinp.cpu()
-        out = dout.cpu()
-        outs = [out]
-        for aug in self.augmentations:
-            inp_aug = aug.forward(inp)
-            out_aug = self.model(inp_aug.to(self.device)).cpu()
-            out = aug.backward(out_aug)
-            outs.append(out)
-        outs = torch.stack(outs)
-        out = torch.mean(outs, dim=0)
-        return out
+        if is_set(overlap_shape) and is_set(offset):
+            raise ValueError(
+                f'overlap_shape={overlap_shape} and offet={offset} are both specified, but this is not supported.\n'
+                'Either specify overlap_shape (if the spatial shape of inputs and outputs are the same)\n'
+                'or offset (if the output is smaller).'
+            )
+
+        if not is_set(tile_shape): # no tiling
+            assert not (is_set(out_shape) or is_set(overlap_shape) or is_set(offset)), 'If tile_shape is not set, out_shape, overlap_shape and offset should not be set either.'
+            self.enable_tiling = False
+        else:
+            assert is_set(out_shape), 'If tile_shape is set, out_shape is required to be set, too.'
+            self.enable_tiling = True
+            if offset is None:
+                offset = utils.calculate_offset(self.model)
+            if np.count_nonzero(offset) == 0: # no valid conv → disable offset
+                offset = None
+            else:
+                offset = np.array(offset)
+                # Set overlap to offset shape because IMO that's the only reasonable choice.
+                overlap_shape = offset
+                out_shape = np.array([*out_shape[:-len(offset)], *(out_shape[-len(offset):] - 2 * offset)])
+                logger.info(f'Adjusted out_shape: {out_shape}')
+        self.offset = offset
+
+        self.overlap_shape = np.array(overlap_shape) if overlap_shape is not None else None
+        self.tile_shape = np.array(tile_shape) if tile_shape is not None else None
+        self.out_shape = np.array(out_shape) if out_shape is not None else None
+
+    @torch.no_grad()
+    def _predict(self, dinp: torch.Tensor, crop_slice=None) -> torch.Tensor:
+        dinp = dinp.to(self.device, dtype=self.dtype)
+        dout = self.model(dinp)
+        if crop_slice is not None:
+            dout = dout[crop_slice]
+
+        # Else, apply test-time augmentations and take the mean value.
+        # Augmentations are applied directly on the compute device and
+        #  intermediate results are stored on-device, so this can increase
+        #  GPU memory usage!
+        if self.augmentations is not None:
+            douts = [dout]
+            for aug in self.augmentations:
+                dinp_aug = aug.forward(dinp)
+                dout_aug = self.model(dinp_aug.to(self.device))
+                dout = aug.backward(dout_aug)
+                if crop_slice:
+                    dout = dout[crop_slice]
+                douts.append(dout)
+            douts = torch.stack(douts)
+            dout = torch.mean(douts, dim=0)
+
+        # if no augmentations, argmax was already applied by the model
+        if self.apply_argmax_after_tta:
+            if self.argmax_with_threshold:
+                dout[dout <= self.argmax_with_threshold] = 0
+            dout = dout.argmax(dim=1).to(self.out_dtype)
+        dout = dout.to(self.out_dtype)
+        return dout
 
     def _tiled_predict(
             self,
@@ -534,8 +594,12 @@ class Predictor:
             except:
                 print('input dist', utils.calculate_means(inp), utils.calculate_stds(inp))
         if self.transform is not None:
+            if isinstance(inp, torch.Tensor):
+                inp = inp.numpy()  # transforms currently only work with numpy ndarrays as in/output
+            transformed = np.empty_like(inp)
             for i in range(inp.shape[0]):  # Apply transform for each sample of the batch separately
-                inp[i], _ = self.transform(inp[i], None)  # target=None because we don't have any here
+                transformed[i], _ = self.transform(inp[i], None)  # target=None because we don't have any here
+            inp = transformed
         if self.verbose:
             start = time.time()
         # Check/change out_shape for divisibility by tile_shape
@@ -545,15 +609,16 @@ class Predictor:
             relevant_slice = None
             out_shape = self.out_shape
         inp = torch.as_tensor(inp, dtype=self.dtype).contiguous()
-        if self.device.type == 'cuda':
-            inp.pin_memory()
-        inp = inp.to(self.device, non_blocking=True)
         inp_batch_size = inp.shape[0]
         spatial_shape = np.array(inp.shape[2:])
         # Lazily figure out these Predictor options based on the input it
         #  receives if they are not already set.
         # Not sure if that's a good idea because these are object-changing
         #  side-effects in the otherwise pure predict() function.
+        if self.out_dtype is None:
+            self.out_dtype = torch.uint8 if self.argmax_with_threshold is not None else inp.dtype
+        if out_shape[0] > 255 and self.out_dtype == torch.uint8:
+            raise ValueError(f'C = out_shape[0] = {out_shape[0]}, but out_dtype torch.uint8 can only hold values up to 255.')
         if self.tile_shape is None:
             self.tile_shape = spatial_shape
         if self.overlap_shape is None:
@@ -574,9 +639,10 @@ class Predictor:
         out = out.cpu() if relevant_slice is None else out[relevant_slice].cpu()
         if self.verbose:
             dtime = time.time() - start
-            speed = inp.numel() / dtime / 1e6
-            # TODO: Report speed in terms of output, not input (This is not as easy as replacing
-            #       inp by out because out may contain padding that we don't want to count)
+            amount = out.numel()
+            if np.array_equal(out_shape[2:], inp.shape[2:]): # calculate the amount of valid data produced
+                amount = np.prod([*out.shape[:-3], *(out.shape[-3:] - 2 * self.overlap_shape)])
+            speed = amount / dtime / 1e6
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')
         return out
 
@@ -588,22 +654,17 @@ class Predictor:
                     'Make sure that out_shape is divisible by tile_shape or '
                     'relax this constraint by setting strict_shapes=False.'
                 )
-            elif np.any(inp.shape[2:] != self.out_shape[1:]):
-                raise NotImplementedError(
-                    'Automatic padding for out_shape that is not divisible '
-                    'by tile_shape is not (yet) implemented. Please change '
-                    'your input shape or tile_shape accordingly.'
-                )
             else:
-                orig_shape = inp.shape
-                padded_shape = np.array(inp.shape)
-                padded_shape[2:] = np.ceil(inp.shape[2:] / self.tile_shape) * self.tile_shape
-                padded_inp = np.zeros(padded_shape)
+                padded_out_shape = np.array(self.out_shape)
+                padded_out_shape[1:] = np.ceil(self.out_shape[1:] / self.tile_shape) * self.tile_shape
+                offset = self.offset if self.offset is not None else np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
+                padded_inp_shape = (*inp.shape[:2], *padded_out_shape[1:] + 2 * offset)
+                padded_inp = np.zeros(padded_inp_shape)
                 # Define the relevant region (that is: without the padding that was just added)
-                relevant_slice = _extend_nc([slice(0, d) for d in orig_shape[2:]])
-                padded_inp[relevant_slice] = inp
-                padded_out_shape = (self.out_shape[0], *padded_shape[2:])
-                if np.any(padded_out_shape != self.out_shape):
+                relevant_slice_inp = _extend_nc([slice(0, d) for d in inp.shape[2:]])
+                relevant_slice_out = _extend_nc([slice(0, d) for d in self.out_shape[1:]])
+                padded_inp[relevant_slice_inp] = inp
+                if self._warn_about_shapes and np.any(padded_out_shape != self.out_shape):
                     sh_diff = np.subtract(padded_out_shape, self.out_shape)
                     # Only nonzero elements are multiplied, otherwise it will be 0.
                     wasted_pix = np.prod(sh_diff[sh_diff != 0])
@@ -617,14 +678,15 @@ class Predictor:
                         # f'At least {wasted_percentage:.2f}% of total compute will be '
                         # f'wasted by this padding.'
                     )
+                    self._warn_about_shapes = False
                     # TODO: Calculate exact compute waste by looking at increased tile overlaps
                     #  (the current estimation omits the (potentially high-impact) added per-tile
                     #  padding/overlaps via overlap_shape.
         else:
             padded_inp = inp
             padded_out_shape = self.out_shape
-            relevant_slice = None
-        return padded_inp, padded_out_shape, relevant_slice
+            relevant_slice_out = None
+        return padded_inp, padded_out_shape, relevant_slice_out
 
     def predict_proba(self, inp):
         logger.warning('Predictor.predict_proba(inp) is deprecated. Please use Predictor.predict(inp) instead.')

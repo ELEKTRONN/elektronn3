@@ -1,9 +1,10 @@
 # These are default plotting handlers that work in some common training
 #  scenarios, but won't work in every case:
 
+import logging
 import os
 
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional, Callable, Sequence
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -13,9 +14,11 @@ import torch
 from torch.nn import functional as F
 
 from elektronn3.data.utils import squash01
-
+from elektronn3.data.transforms import RemapTargetIDs
 
 E3_CMAP: str = os.getenv('E3_CMAP')
+
+logger = logging.getLogger('elektronn3log')
 
 
 def get_cmap(out_channels: int):
@@ -40,9 +43,10 @@ def plot_image(
         overlay: Optional[np.ndarray] = None,
         overlay_alpha=0.5,
         cmap=None,
-        out_channels=None,
         colorbar=True,
-        filename=''
+        filename=None,
+        vmin=None,
+        vmax=None
 ) -> matplotlib.figure.Figure:
     """Plots a 2D image to a malplotlib figure.
 
@@ -51,37 +55,25 @@ def plot_image(
     specify the global number of possible classes in ``out_channels``."""
 
     # Determine colormap and set discrete color values if needed.
-    vmin, vmax = None, None
     ticks = None
     ticklabels = None
-    if cmap is None and out_channels is not None:
-        # Assume label matrix with qualitative classes, no meaningful order
-        if cmap is not None:
-            raise ValueError('If out_channels is not None, manually setting cmap is not supported.')
+    cmap_name = cmap if isinstance(cmap, str) else cmap.name
+    if cmap_name in {E3_CMAP, 'tab10', 'tab20'}: # qualitative cmap
+        ticks = np.linspace(0.5, vmax - 0.5, vmax) # 0.5 for centered ticks
+        ticklabels = np.arange(vmax)
 
-        if out_channels > 20:
-            raise NotImplementedError('out_channels > 20 is not supported for plotting.')
-        cmap = get_cmap(out_channels)
-
-        ticks = np.linspace(0.5, out_channels - 0.5, out_channels) # 0.5 for centered ticks
-        ticklabels = np.arange(out_channels)
-    if out_channels is not None:  # For label matrices
-        # Prevent colormap normalization. If vmax is not set, the colormap
-        #  is dynamically rescaled to fit between the minimum and maximum
-        #  values of the image to be plotted. This could lead to misleading
-        #  visualizations if the maximum value of the array to be plotted
-        #  is less than the global maximum of classes.
-        vmin = 0
-        vmax = out_channels
-
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 10))
     if overlay is None:
-        aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax)
+        aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='none')
     else:
         ax.imshow(image, cmap='gray')
         masked_overlay = np.ma.masked_where(overlay == 0, overlay)
-        aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha)
-    ax.set_title(filename)
+        aximg = ax.imshow(masked_overlay, cmap=cmap, vmin=vmin, vmax=vmax, alpha=overlay_alpha, interpolation='none')
+    if filename is not None:
+        max_filename_length = 50  # Truncate long file names from the left
+        if len(filename) > max_filename_length:
+            filename = f'...{filename[-max_filename_length:]}'
+        ax.set_title(filename)
     if colorbar:
         bar = fig.colorbar(aximg, ticks=ticks)
         if ticklabels is not None:
@@ -127,6 +119,43 @@ def _get_batch2img_function(
         raise ValueError('Only 4D and 5D tensors are supported.')
 
 
+def write_to_kzip(trainer: 'Trainer', pred_batch: np.ndarray) -> None:
+    from knossos_utils import KnossosDataset
+    ks = trainer.knossos_preview_config
+    if isinstance(ks['dataset'], str):
+        dataset_path = ks['dataset']
+    else:
+        dataset_path = ks['dataset'][0]
+    ds = KnossosDataset(dataset_path)
+    seg = pred_batch[0].swapaxes(0, 2)  # (N, D, H, W) -> (W, H, D)
+
+    # Set movement are in k.zip
+    area_min = ks['offset']
+    area_sz = ks['size']
+    anno_str = f"""<?xml version="1.0" encoding="UTF-8"?>
+<things>
+    <parameters>
+        <MovementArea min.x="{area_min[0]}" min.y="{area_min[1]}" min.z="{area_min[2]}" size.x="{area_sz[0]}" size.y="{area_sz[1]}" size.z="{area_sz[2]}"/>
+    </parameters>
+    <comments/>
+    <branchpoints/>
+</things>"""
+
+    kzip_path = f'{trainer.save_path}/preview_{trainer.step}.k.zip'
+    logger.info(f'Writing preview inference to {kzip_path}')
+    ds.save_to_kzip(
+        data=seg,
+        data_mag=ks.get('mag', 1),
+        kzip_path=kzip_path,
+        offset=ks['offset'],
+        mags=ks.get('target_mags', [1, 2]),
+        gen_mergelist=False,
+        upsample=False,
+        fast_resampling=False,
+        annotation_str=anno_str
+    )
+
+
 # TODO: Support regression scenario
 def _tb_log_preview(
         trainer: 'Trainer',  # For some reason Trainer can't be imported
@@ -142,62 +171,58 @@ def _tb_log_preview(
     inp_batch = inp_batch.numpy()
     if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(out_batch, 1).numpy()
+    else:
+        out_batch = out_batch.numpy()
 
     batch2img = _get_batch2img_function(out_batch, z_plane)
-
-    inp_sh = np.array(inp_batch.shape[2:])
-    out_sh = np.array(out_batch.shape[2:])
-    # TODO: This does not fire yet, because out_batch is always of the same
-    #       spatial shape as the input if it comes out of
-    #       elektronn3.inference.Predictor...
-    #       Update: Padding is now handled in Predictor, so the code below may be obsolete.
-    if (out_batch.shape[2:] != inp_batch.shape[2:]) \
-            and not (out_batch.ndim == 2):
-        # Zero-pad output and target to match input shape
-        # Create a central slice with the size of the output
-        lo = (inp_sh - out_sh) // 2
-        hi = inp_sh - lo
-        slc = tuple([slice(None)] * 2 + [slice(l, h) for l, h in zip(lo, hi)])
-
-        padded_out_batch = np.zeros(
-            (inp_batch.shape[0], out_batch.shape[1], *inp_batch.shape[2:]),
-            dtype=out_batch.dtype
-        )
-        padded_out_batch[slc] = out_batch
-        out_batch = padded_out_batch
 
     if inp_batch.ndim == 5 and trainer.enable_videos:
         # 5D tensors -> 3D images -> We can make 2D videos out of them
         # See comments in the 5D section in _tb_log_sample_images
         inp_video = squash01(inp_batch)
+        # (N, C, T=D, H, W) -> (N, T=D, C, H, W) because of add_video API
+        inp_video = np.swapaxes(inp_video, 1, 2)
         trainer.tb.add_video(
             f'{group}_vid/inp', inp_video, global_step=trainer.step
         )
         for c in range(out_batch.shape[1]):
+            outc_video = squash01(out_batch[:, c][None])  # Slice C, but keep dimensions intact
+            # (N, C=1, T=D, H, W) -> (N, T=D, C=1, H, W)
+            outc_video = np.moveaxis(outc_video, 1, 2)
             trainer.tb.add_video(
                 f'{group}_vid/out{c}',
-                squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
+                outc_video,
                 global_step=trainer.step
             )
 
     out_slice = batch2img(out_batch)
     pred_slice = out_slice.argmax(0)
 
+    if trainer.knossos_preview_config is not None:
+        pred_batch = out_batch.argmax(1)
+        remap_ids = trainer.knossos_preview_config.get('remap_ids')
+        if remap_ids is not None:
+            remap = RemapTargetIDs(remap_ids, reverse=True)
+            _, pred_batch = remap(None, pred_batch)
+
+        write_to_kzip(trainer, pred_batch)
+
     for c in range(out_slice.shape[0]):
         trainer.tb.add_figure(
-            f'{group}/c{c}',
+            f'{group}/out{c}',
             plot_image(out_slice[c], cmap='gray'),
             trainer.step
         )
+    class_cmap = get_cmap(trainer.max_plot_id)
     trainer.tb.add_figure(
         f'{group}/pred',
-        plot_image(pred_slice, out_channels=trainer.out_channels),
+        plot_image(pred_slice, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap),
         trainer.step
     )
     inp_slice = batch2img(inp_batch)[0]
     trainer.tb.add_figure(
         f'{group}/pred_overlay',
-        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels),
+        plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap),
         global_step=trainer.step
     )
 
@@ -229,31 +254,47 @@ def _tb_log_sample_images(
     """
     # Always only use the first element of the batch dimension
     inp_batch = images['inp'][:1]
-    target_batch = images['target'][:1]
+    target_batch = images.get('target')
+    if target_batch is not None:
+        target_batch = target_batch[:1]
     out_batch = images['out'][:1]
-    name = images.get('fname', '')
+
+    name = images.get('fname')
+    if name is not None:
+        name = name[0]
+
 
     if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
+    inp_slice = batch2img_inp(images['inp'])
 
-    inp_slice = batch2img_inp(images['inp'])[0]
+    uinp_batch = images.get('unlabeled')
+    if uinp_batch is not None:
+        trainer.tb.add_figure(
+            f'{group}/unlabeled_inp',
+            plot_image(batch2img_inp(uinp_batch['inp'].cpu().numpy())[0], cmap='gray'),
+            global_step=trainer.step
+        )
 
     # TODO: Support one-hot targets
     # TODO: Support multi-label targets
+    # TODO: Output vis missing if target_batch is None
     # Check if the network is being trained for classification with class index target tensors
-    is_classification = target_batch.ndim == out_batch.ndim - 1
-    # If it's not classification, we assume a regression scenario
-    is_regression = np.all(target_batch.shape == out_batch.shape)
-    # If not exactly one of the scenarios is detected, we can't handle it
-    assert is_regression != is_classification
+    if target_batch is not None:
+        is_classification = target_batch.ndim == out_batch.ndim - 1
+        class_cmap = get_cmap(trainer.max_plot_id)
+        # If it's not classification, we assume a regression scenario
+        is_regression = np.all(target_batch.shape == out_batch.shape)
+        # If not exactly one of the scenarios is detected, we can't handle it
+        assert is_regression != is_classification
 
-    if is_classification:
-        # In classification scenarios, targets have one dim less than network
-        #  outputs, so if we want to use the same batch2img function for
-        #  targets, we have to add an empty channel axis to it after the N dimension
-        target_batch = target_batch[:, None]
+        if is_classification:
+            # In classification scenarios, targets have one dim less than network
+            #  outputs, so if we want to use the same batch2img function for
+            #  targets, we have to add an empty channel axis to it after the N dimension
+            target_batch = target_batch[:, None]
 
     inp_sh = np.array(inp_batch.shape[2:])
     out_sh = np.array(out_batch.shape[2:])
@@ -272,68 +313,89 @@ def _tb_log_sample_images(
         out_batch = padded_out_batch
 
         # Assume that target has the same shape as the output and pad it, too
-        padded_target_batch = np.zeros(inp_batch.shape, dtype=target_batch.dtype)
-        padded_target_batch[slc] = target_batch
-        target_batch = padded_target_batch
+        if target_batch is not None:
+            padded_target_batch = np.zeros((*target_batch.shape[:2], *inp_batch.shape[2:]), dtype=target_batch.dtype)
+            padded_target_batch[slc] = target_batch
+            target_batch = padded_target_batch
 
     target_cmap = E3_CMAP
     batch2img = _get_batch2img_function(out_batch, z_plane)
-    target_slice = batch2img(target_batch)
+    if target_batch is not None:
+        target_slice = batch2img(target_batch)
     out_slice = batch2img(out_batch)
-    if is_classification:
-        target_slice = target_slice.squeeze(0)  # Squeeze empty axis that was added above
-    elif target_slice.shape[0] == 3:  # Assume RGB values
-        # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
-        target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
-        out_slice = np.moveaxis(out_slice, 0, -1)
-        target_cmap = None
-    elif target_slice.shape[0] == 1:
-        target_slice = target_slice[0]
-        out_slice = out_slice[0]
-        target_cmap = 'gray'
-    else:
-        raise RuntimeError(
-            f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
-        )
+    if target_batch is not None:
+        if is_classification:
+            target_slice = target_slice.squeeze(0)  # Squeeze empty axis that was added above
+        elif target_slice.shape[0] == 3:  # Assume RGB values
+            # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
+            target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
+            out_slice = np.moveaxis(out_slice, 0, -1)
+            target_cmap = None
+        elif target_slice.shape[0] == 2:
+            pass
+        elif target_slice.shape[0] == 1:
+            # target_slice = target_slice[0]
+            target_cmap = 'gray'
+        else:
+            raise RuntimeError(
+                f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
+            )
 
     if inp_batch.ndim == 5 and trainer.enable_videos:
         # 5D tensors -> 3D images -> We can make 2D videos out of them
         # We re-interpret the D dimension as the temporal dimension T of the video
-        #  -> (N, C, T, H, W)
+        #  -> (N, T, C, H, W)
         # Inputs and outputs need to be squashed to the (0, 1) intensity range
         #  for video rendering, otherwise they will appear as random noise.
-        # Since tensorboardX's add_video only supports (N, C, T, H, W) tensors,
+        # Since tensorboardX's add_video only supports (N, T, C, H, W) tensors,
         #  we have to add a fake C dimension to the (N, D, H, W) target tensors
         #  and replace the C dimension of output tensors by empty C dimensions
         #  to visualize each channel separately.
         inp_video = squash01(inp_batch)
-        target_video = target_batch
-        if target_video.ndim == 4:
-            # TODO: This fails with 2D multi-channel targets. Handle these reliably
-            target_video = target_video[:, None]
+        # (N, C, T=D, H, W) -> (N, T=D, C, H, W) because of add_video API
+        inp_video = np.swapaxes(inp_video, 1, 2)
         trainer.tb.add_video(
             f'{group}_vid/inp', inp_video, global_step=trainer.step
         )
-        trainer.tb.add_video(
-            f'{group}_vid/target', target_video, global_step=trainer.step
-        )
+        if target_batch is not None:
+            target_video = target_batch
+            if target_video.ndim == 4:
+                # TODO: This fails with 2D multi-channel targets. Handle these reliably
+                target_video = target_video[:, None]
+            target_video = np.swapaxes(target_video, 1, 2)
+            trainer.tb.add_video(
+                f'{group}_vid/target', target_video, global_step=trainer.step
+            )
         for c in range(out_batch.shape[1]):
+            outc_video = squash01(out_batch[:, c][None])  # Slice C, but keep dimensions intact
+            # (N, C=1, T=D, H, W) -> (N, T=D, C=1, H, W)
+            outc_video = np.moveaxis(outc_video, 1, 2)
             trainer.tb.add_video(
                 f'{group}_vid/out{c}',
-                squash01(out_batch[:, c][None]),  # Slice C, but keep dimensions intact
+                outc_video,
                 global_step=trainer.step
             )
+        # TODO: Add output and target overlay videos (not straightforward
+        #       because the 2D overlay code currently uses matplotlib)
 
-    trainer.tb.add_figure(
-        f'{group}/inp',
-        plot_image(inp_slice, cmap='gray', filename=name),
-        global_step=trainer.step
-    )
-    trainer.tb.add_figure(
-        f'{group}/target',
-        plot_image(target_slice, out_channels=trainer.out_channels, filename=name),
-        global_step=trainer.step
-    )
+    for channel in range(inp_slice.shape[0]):
+        trainer.tb.add_figure(
+            f'{group}/inp{channel}',
+            plot_image(inp_slice[channel], cmap='gray', filename=name),
+            global_step=trainer.step
+        )
+
+    if target_batch is not None:
+        _out_channels = trainer.max_plot_id if is_classification else None
+        _cmap = class_cmap if is_classification else 'gray'
+        trainer.tb.add_figure(
+            f'{group}/target',
+            plot_image(
+                target_slice, vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
+                # vmin=0., vmax=1.
+            ),
+            global_step=trainer.step
+        )
 
     for key, img in images.items():
         if key.startswith('att'):
@@ -343,32 +405,67 @@ def _tb_log_sample_images(
                 global_step=trainer.step
             )
 
-    # Only make pred and overlay plots in classification scenarios
-    if is_classification:
-        # Plot each class probmap individually
-        for c in range(out_slice.shape[0]):
-            trainer.tb.add_figure(
-                f'{group}/c{c}',
-                plot_image(out_slice[c], cmap='gray', filename=name),
-                global_step=trainer.step
-            )
-
-        pred_slice = out_slice.argmax(0)
+    # Plot each output channel c individually as "out{c}"
+    for c in range(out_slice.shape[0]):
         trainer.tb.add_figure(
-            f'{group}/pred_slice',
-            plot_image(pred_slice, out_channels=trainer.out_channels, filename=name),
+            f'{group}/out{c}',
+            plot_image(
+                out_slice[c], cmap='gray', filename=name,
+                # vmin=0., vmax=1.
+            ),
             global_step=trainer.step
         )
-        if not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
+
+    # Only make pred and overlay plots in classification scenarios
+    if target_batch is not None:
+        if is_classification:
+            pred_slice = out_slice.argmax(0)
             trainer.tb.add_figure(
-                f'{group}/target_overlay',
-                plot_image(inp_slice, overlay=target_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
+                f'{group}/pred_slice',
+                plot_image(pred_slice, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
                 global_step=trainer.step
             )
+            if target_batch is not None and not target_batch.ndim == 2:  # TODO: Make this condition more reliable and document it
+                for c in range(inp_slice.shape[0]):
+                    trainer.tb.add_figure(
+                        f'{group}/target_overlay{c}',
+                        plot_image(inp_slice[c], overlay=target_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
+                        global_step=trainer.step
+                    )
+                    trainer.tb.add_figure(
+                        f'{group}/pred_overlay',
+                        plot_image(inp_slice[c], overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, vmin=0, vmax=trainer.max_plot_id, cmap=class_cmap, filename=name),
+                        global_step=trainer.step
+                    )
+
+
+def _tb_log_sample_images_all_img(
+        trainer: 'Trainer',
+        images: Dict[str, np.ndarray],
+        z_plane: Optional[int] = None,
+        group: str = 'sample'
+) -> None:
+    """Tensorboard plotting handler that plots all arrays in the ``images``
+    dict as 2D grayscale images. Multi-channel images are split along the
+    C dimension and plotted separately.
+    """
+    name = images.pop('fname', [None])[0]
+    # TODO: Clean up/remove the messy name handling. Figure out how to pass non-image data cleanly.
+
+    for key, img in images.items():
+        img = img[:1]  # Always only use the first element of the batch dimension
+        batch2img = _get_batch2img_function(img, z_plane)
+        img = batch2img(img)
+        if img.shape[0] == 1:
             trainer.tb.add_figure(
-                f'{group}/pred_overlay',
-                plot_image(inp_slice, overlay=pred_slice, overlay_alpha=trainer.overlay_alpha, out_channels=trainer.out_channels, filename=name),
+                f'{group}/{key}',
+                plot_image(img[0], cmap='gray', filename=name),
                 global_step=trainer.step
             )
-    elif is_regression:
-        trainer.tb.add_figure(f'{group}/out', plot_image(out_slice, cmap=target_cmap, filename=name), global_step=trainer.step)
+        else:
+            for c in range(img.shape[0]):
+                trainer.tb.add_figure(
+                    f'{group}/{key}{c}',
+                    plot_image(img[c], cmap='gray', filename=name),
+                    global_step=trainer.step
+                )

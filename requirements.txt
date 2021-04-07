@@ -1,22 +1,16 @@
-# python>=3.6
-
-torch
+torch>=1.5.0
 numpy
 scipy
 h5py
 matplotlib
-seaborn
 numba
-tbb
 scikit-learn
 scikit-image
 ipython
 tqdm
-pillow
 colorlog
 tensorboardX
 torchvision
 
 # Only required for running a tensorboard server:
-tensorboard>=1.13
-tensorflow>=1.13
+tensorboard>=2.1.1

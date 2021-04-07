@@ -297,7 +297,7 @@ def plot_hist(timeline, history, save_path, loss_smoothing_length=200,
             else:
                 bc_floor = bc_m - 2 * bc_s
             plt.ylim(loss_floor, loss_cap)
-            plt.xlim(bc_floor, bc_cap)
+            plt.xlim(bc_floor, bc_cap + 1e-10)
 
         plt.xlabel('Mean target of batch')
         plt.ylabel('Loss')

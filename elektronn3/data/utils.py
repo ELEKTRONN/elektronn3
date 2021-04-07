@@ -8,10 +8,11 @@
 import logging
 import os
 import signal
-from typing import Sequence, Tuple
+from typing import Dict, Sequence, Tuple
 
 import h5py
 import numpy as np
+import torch
 
 from elektronn3 import floatX
 from elektronn3.data.sources import DataSource
@@ -59,6 +60,45 @@ def calculate_stds(inputs: Sequence) -> Tuple[float]:
     return tuple(stds)
 
 
+def calculate_offset(model, tile_shape=None):
+    with torch.no_grad():
+        param = next(model.parameters())
+        if tile_shape:
+            example_inp = torch.randn(1, param.size()[1], *tile_shape, device=param.device, dtype=param.dtype)
+            example_out = model.eval().forward(example_inp)
+        else:
+            try: # default for 3d UNet
+                example_inp = torch.randn(1, param.size()[1], 90, 90, 90, device=param.device, dtype=param.dtype)
+                example_out = model.eval().forward(example_inp)
+            except RuntimeError: # default for 2d UNet
+                example_inp = torch.randn(1, param.size()[1], 186, 186, device=param.device, dtype=param.dtype)
+                example_out = model.eval().forward(example_inp)
+    offset = np.subtract(example_inp.shape[2:], example_out.shape[2:]) // 2
+    logger.info(f'Inferred target offset: {offset}.')
+    return offset
+
+
+def get_class_counts(targets: Sequence[np.ndarray]) -> Dict[int, str]:
+    """Get a dict that maps each target class to its number of labeled pixels/voxels"""
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
+    total = targets.size
+    classes, counts = np.unique(targets, return_counts=True)
+    cc = {cl: f'{co} ({co / total * 100:.2f}%)' for cl, co in zip(classes, counts)}
+    return cc
+
+
+def get_nonzero_label_ratio(targets: Sequence[np.ndarray]) -> float:
+    targets = np.concatenate([
+        _to_full_numpy(target).flatten()  # Flatten every dim except C
+        for target in targets
+    ])  # Necessary if shapes don't match
+    num_nonzero = np.count_nonzero(targets)
+    return num_nonzero / targets.size
+
+
 def calculate_class_weights(
         targets: Sequence[np.ndarray],
         mode='inverse'
@@ -89,16 +129,6 @@ def calculate_class_weights(
             for c in classes
         ], dtype=np.float32)
         class_weights = (targets.size / (num_labeled + eps)).astype(np.float32)
-        return class_weights
-
-    def __norpf_inverse(targets):
-        classes = np.arange(0, targets.max() + 1)
-        # Count total number of labeled elements per class
-        num_labeled = np.array([
-            np.sum(np.equal(targets, c))
-            for c in classes
-        ], dtype=np.float32)
-        class_weights = (num_labeled / targets.size).astype(np.float32)
         return class_weights
 
     def __norpf_inverse(targets):
