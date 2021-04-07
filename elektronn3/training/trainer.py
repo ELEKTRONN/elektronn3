@@ -6,7 +6,6 @@
 import datetime
 import pprint
 from collections import deque
-import ipdb
 
 import gc
 import logging
