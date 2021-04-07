@@ -40,7 +40,6 @@ from torch.utils import collect_env
 from elektronn3.inference import Predictor
 from elektronn3 import __file__ as arch_src
 
-from morphx.data.chunkhandler import ChunkHandler
 from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import clouds
@@ -255,7 +254,7 @@ class Trainer3dTriplet:
             device: torch.device,
             save_root: str,
             train_dataset: torch.utils.data.Dataset,
-            valid_dataset: Optional[ChunkHandler] = None,
+            valid_dataset: torch.utils.data.Dataset = None,
             pred_mapper: Optional[PredictionMapper] = None,
             val_freq: int = 1,
             valid_metrics: Optional[Dict] = None,

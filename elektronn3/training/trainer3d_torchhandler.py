@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import warnings
+import sys
 from itertools import islice
 from math import nan
 from pickle import PickleError
@@ -41,8 +42,12 @@ from morphx.postprocessing.mapping import PredictionMapper
 from morphx.classes.pointcloud import PointCloud
 from morphx.processing import basics
 
-from neuronx.pipeline.evaluate import predict_and_evaluate
-from neuronx.pipeline.analyse import merge_reports, generate_class_diagrams
+try:
+    from neuronx.pipeline.evaluate import predict_and_evaluate
+    from neuronx.pipeline.analyse import merge_reports, generate_class_diagrams
+except ImportError as e:
+    if "pytest" not in sys.modules:
+        raise ImportError from e
 
 logger = logging.getLogger('elektronn3log')
 
