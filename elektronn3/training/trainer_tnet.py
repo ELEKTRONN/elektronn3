@@ -55,7 +55,8 @@ class TripletNetTrainer(Trainer):
         self.latent_distr = latent_distr
 
     # overwrite train and validate method
-    def run(self, max_steps: int = 1) -> None:
+    def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
+        # TODO: add max_runtime handling (see trainer.py)
         """Train the network for ``max_steps`` steps.
 
         After each training epoch, validation performance is measured and
