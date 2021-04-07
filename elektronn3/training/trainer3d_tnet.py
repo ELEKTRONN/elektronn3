@@ -281,7 +281,8 @@ class Trainer3dTriplet:
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
             alpha=1e-6,
-            dataloader_kwargs: Optional[dict] = None
+            dataloader_kwargs: Optional[dict] = None,
+            tqdm_kwargs: Optional[dict] = None,
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -333,6 +334,7 @@ class Trainer3dTriplet:
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
         self.alpha = alpha
+        self.tqdm_kwargs = {'disable': True} if tqdm_kwargs is None else tqdm_kwargs
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -468,7 +470,8 @@ class Trainer3dTriplet:
                                                                             'loss_orig']}
 
         timer = Timer()
-        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
+        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader),
+                          **self.tqdm_kwargs)
         for i, batch in batch_iter:
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
 

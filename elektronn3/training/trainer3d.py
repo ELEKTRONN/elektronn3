@@ -259,6 +259,7 @@ class Trainer3d:
             mixed_precision: bool = False,
             dataloader_kwargs: Optional[dict] = None,
             nbatch_avg: int = 10,
+            tqdm_kwargs: Optional[dict] = None,
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -310,6 +311,7 @@ class Trainer3d:
         self.sample_plotting_handler = sample_plotting_handler
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
+        self.tqdm_kwargs = {'disable': True} if tqdm_kwargs is None else tqdm_kwargs
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -450,8 +452,8 @@ class Trainer3d:
         misc: Dict[str, Union[float, List[float]]] = {misc: [] for misc in ['mean_target']}
 
         timer = Timer()
-        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader))
-        batch_num = 0
+        batch_iter = tqdm(enumerate(self.train_loader), 'Training', total=len(self.train_loader),
+                          **self.tqdm_kwargs)
         for i, batch in batch_iter:
             pts = batch['pts']
             features = batch['features']
