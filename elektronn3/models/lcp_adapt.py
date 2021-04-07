@@ -5,7 +5,7 @@
 # Authors: Philipp Schubert, Jonathan Klimesch
 
 """
-This is an implementation is based on LightConvPoint from Alexandre Boulch et al. (https://github.com/valeoai/LightConvPoint,
+This is an implementation based on LightConvPoint from Alexandre Boulch et al. (https://github.com/valeoai/LightConvPoint,
 https://github.com/aboulch/ConvPoint).
 """
 
@@ -25,7 +25,7 @@ class ConvAdaptSeg(nn.Module):
                  kernel_num,
                  architecture,
                  activation,
-                 normalization,
+                 norm,
                  track_running_stats=False
                  ):
         """Adaptable ConvPoint segmentation network.
@@ -68,9 +68,9 @@ class ConvAdaptSeg(nn.Module):
 
         for layer in self.architecture:
             # set Normalization
-            if normalization.lower() == 'bn':
+            if norm.lower() == 'bn':
                 normalization = nn.BatchNorm1d(layer['oc'] * kernel_num, track_running_stats=track_running_stats)
-            elif normalization == 'gn':
+            elif norm.lower() == 'gn':
                 normalization = nn.GroupNorm(layer['oc'] * kernel_num // 2, layer['oc'] * kernel_num)
             else:
                 raise NotImplementedError

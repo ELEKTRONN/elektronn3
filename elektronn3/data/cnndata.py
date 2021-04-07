@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
-# Authors: Martin Drawitsch, Philipp Schubert
+# Authors: Martin Drawitsch, Philipp Schubert, Jonathan Klimesch
 
 __all__ = ['PatchCreator', 'SimpleNeuroData2d', 'Segmentation2d', 'Reconstruction2d']
 
@@ -11,15 +11,14 @@ import logging
 import os
 import sys
 import traceback
-from os.path import expanduser
-from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
-
 import h5py
 import imageio
 import numpy as np
 import torch
-from torch.utils import data
 
+from os.path import expanduser
+from typing import Tuple, Dict, Optional, Union, Sequence, Any, List, Callable
+from torch.utils import data
 from elektronn3.data import coord_transforms, transforms
 from elektronn3.data.sources import DataSource, HDF5DataSource, slice_3d
 

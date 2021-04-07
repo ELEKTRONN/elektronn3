@@ -16,47 +16,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
-from typing import Tuple
-try:
-    import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighbors
-except ImportError:
-    import elektronn3.models.knn.nearest_neighbors as nearest_neighbors
+import elektronn3.models.knn.lib.python.nearest_neighbors as nearest_neighbors
 from abc import ABC
-
-
-try:
-    from torch_geometric.nn import XConv, fps, global_mean_pool
-except ImportError as e:
-    # print('XConv layer not available.', e)
-    pass
-try:
-    from pytorch3d.ops import knn
-    @torch.jit.script
-    def indices_conv_reduction_pt(input_pts: torch.Tensor, K: int, npts: int):
-        device = input_pts.device
-        # TODO: use a better heuristic
-        rand_ixs = torch.randint(input_pts.size(1), (input_pts.size(0), npts, 1), dtype=torch.long, device=device)
-        next_pts_ = torch.gather(input_pts, 1, rand_ixs.expand(-1, -1, 3)).to(device)
-        _, indices, _ = knn.knn_points(next_pts_, input_pts, K=K)
-        return indices, next_pts_
-
-
-    @torch.jit.script
-    def indices_conv_pt(input_pts, K):
-        _, indices, _ = knn.knn_points(input_pts, input_pts, K=K)
-        return indices, input_pts
-
-
-    @torch.jit.script
-    def indices_deconv_pt(input_pts, next_pts, K):
-        _, indices, _ = knn.knn_points(next_pts, input_pts, K=K)
-        return indices, next_pts
-except ImportError as e:
-    # print('pytorch3d.ops not available.', e)
-    pass
+from typing import Tuple, List
 
 
 # STATIC HELPER FUNCTIONS #
+
 def swish(x):
     """https://arxiv.org/pdf/1710.05941.pdf"""
     return x * torch.sigmoid(x)
@@ -70,36 +36,23 @@ def apply_bn(x, bn):
     return bn(x.transpose(1, 2)).transpose(1, 2).contiguous()
 
 
-def indices_conv_reduction(input_pts, K, npts):
-    indices, queries = \
-        nearest_neighbors.knn_batch_distance_pick(input_pts.cpu().detach().numpy(), npts, K, omp=True)
-    indices = torch.from_numpy(indices).long()
-    queries = torch.from_numpy(queries).float()
-    if input_pts.is_cuda:
-        indices = indices.to(input_pts.device)
-        queries = queries.to(input_pts.device)
-
-    return indices, queries
-
-
-def indices_conv_reduction_big(input_pts: torch.Tensor, output_pts_num: int, neighbor_num: int, padding: int = None,
-                               centroids: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-        Reduction function used by PtConvBig using possible centroid reductions and padding. This was still
-        experimental and will be updated by proper versions in the future.
+def indices_conv_reduction(input_pts: torch.Tensor, output_pts_num: int, neighbor_num: int, padding: int = None,
+                           centroids: bool = False) \
+        -> Tuple[torch.Tensor, torch.Tensor]:
+    """ This function picks output_pts_num random points from input_pts and returns these points (queries) and
+        their neighbor_num nearest neighbors from input_pts (indices).
     """
     input_pts_np = input_pts.cpu().detach().numpy()
     if padding is not None:
-        # use only non-padded points for reduction
         output_pts = np.ones((len(input_pts_np), output_pts_num, 3))*padding
         for ix, batch in enumerate(input_pts_np):
             filtered_pts = batch[batch < padding].reshape(-1, 3)
             output_pts[ix, :len(filtered_pts)] = \
                 filtered_pts[np.random.choice(len(filtered_pts), min(len(filtered_pts), output_pts_num), replace=False)]
+
         indices = nearest_neighbors.knn_batch(input_pts_np, output_pts, neighbor_num, omp=True)
     else:
-        indices, output_pts = nearest_neighbors.knn_batch_distance_pick(input_pts_np, output_pts_num, neighbor_num,
-                                                                        omp=True)
+        indices, output_pts = nearest_neighbors.knn_batch_distance_pick(input_pts_np, output_pts_num, neighbor_num, omp=True)
 
     if centroids:
         # calculate centroid of each neighborhood as new output point
@@ -115,22 +68,25 @@ def indices_conv_reduction_big(input_pts: torch.Tensor, output_pts_num: int, nei
     return indices, output_pts
 
 
-def indices_conv(input_pts, K):
-    indices = \
-        nearest_neighbors.knn_batch(input_pts.cpu().detach().numpy(), input_pts.cpu().detach().numpy(), K, omp=True)
+def indices_conv(input_pts: torch.Tensor, neighbor_num: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    """ Returns the indices of neighbor_num nearest neighbors for each point in input_pts. """
+    indices = nearest_neighbors.knn_batch(input_pts.cpu().detach().numpy(),
+                                          input_pts.cpu().detach().numpy(), neighbor_num, omp=True)
     indices = torch.from_numpy(indices).long()
     if input_pts.is_cuda:
         indices = indices.to(input_pts.device)
     return indices, input_pts
 
 
-def indices_deconv(input_pts, next_pts, K):
-    indices = \
-        nearest_neighbors.knn_batch(input_pts.cpu().detach().numpy(), next_pts.cpu().detach().numpy(), K, omp=True)
+def indices_deconv(input_pts: torch.Tensor, output_pts: torch.Tensor, neighbor_num: int) \
+        -> Tuple[torch.Tensor, torch.Tensor]:
+    """ Returns the indices of neighbor_num nearest neighbors for each point in output_pts. """
+    indices = nearest_neighbors.knn_batch(input_pts.cpu().detach().numpy(),
+                                          output_pts.cpu().detach().numpy(), neighbor_num, omp=True)
     indices = torch.from_numpy(indices).long()
     if input_pts.is_cuda:
         indices = indices.to(input_pts.device)
-    return indices, next_pts
+    return indices, output_pts
 
 
 # LAYER DEFINITIONS #
@@ -143,8 +99,22 @@ class LayerBase(nn.Module, ABC):
 
 
 class PtConv(LayerBase):
-    def __init__(self, input_features, output_features, n_centers, dim,
-                 act=None, use_bias=True):
+    def __init__(self, in_feats: int = 64, out_feats: int = 64, kernel_size: int = 16, dim: int = 3,
+                 act: str = None, use_bias: bool = True, padding: int = None, nn_center: bool = True,
+                 centroids: bool = False):
+        """
+        Args:
+            in_feats: Number of input channels (e.g. with RGB this would be 3)
+            out_feats: Number of convolutional kernels used in this layer. It defines the output
+                feature dimension, i.e. the size of y.
+            kernel_size: Number of elements per convolutional kernel.
+            dim: The dimensions of the problem. For 3D point clouds this is set to 3.
+            act: String identifier of activation function.
+            use_bias: Flag for using bias.
+            padding: Flag for adding points to ensure constant number of points per sample.
+            nn_center: Center neighborhoods before distance calculations.
+            centroids: Reduce point cloud to centroids of neighborhoods.
+        """
         if act in [None, 'relu']:
             self.act = F.relu_
         elif act == 'swish':
@@ -156,123 +126,6 @@ class PtConv(LayerBase):
         else:
             raise ValueError
         super(PtConv, self).__init__()
-
-        # Weight
-        self.weight = \
-            nn.Parameter(torch.Tensor(input_features, n_centers, output_features), requires_grad=True)
-        bound = math.sqrt(3.0) * math.sqrt(2.0 / (input_features + output_features))
-        self.weight.data.uniform_(-bound, bound)
-
-        # bias
-        self.use_bias = use_bias
-        if use_bias:
-            self.bias = nn.Parameter(torch.Tensor(output_features), requires_grad=True)
-            self.bias.data.uniform_(0, 0)
-
-        # centers
-        center_data = np.zeros((dim, n_centers))
-        for i in range(n_centers):
-            coord = np.random.rand(dim)*2 - 1
-            while (coord**2).sum() > 1:
-                coord = np.random.rand(dim)*2 - 1
-            center_data[:, i] = coord
-        self.centers = nn.Parameter(torch.from_numpy(center_data).float(), requires_grad=True)
-
-        # MLP
-        self.l1 = nn.Linear(dim*n_centers, 2*n_centers)
-        self.l2 = nn.Linear(2*n_centers, n_centers)
-        self.l3 = nn.Linear(n_centers, n_centers)
-
-    def forward(self, inp, points, K, next_pts=None, normalize=False, indices_=None,
-                return_indices=False, dilation=1):
-        if indices_ is None:
-            if isinstance(next_pts, int) and points.size(1) != next_pts:
-                # convolution with reduction
-                indices, next_pts_ = indices_conv_reduction(points, K * dilation, next_pts)
-            elif (next_pts is None) or (isinstance(next_pts, int) and points.size(1) == next_pts):
-                # convolution without reduction
-                indices, next_pts_ = indices_conv(points, K * dilation)
-            else:
-                # convolution with up sampling or projection on given points
-                indices, next_pts_ = indices_deconv(points, next_pts, K * dilation)
-
-            if next_pts is None or isinstance(next_pts, int):
-                next_pts = next_pts_
-
-            if return_indices:
-                indices_ = indices
-        else:
-            indices = indices_
-
-        batch_size = inp.size(0)
-        n_pts = inp.size(1)
-
-        if dilation > 1:
-            indices = indices[:, :, torch.randperm(indices.size(2))]
-            indices = indices[:, :, :K]
-
-        # compute indices for indexing points
-        add_indices = torch.arange(batch_size).type(indices.type()).to(indices.device) * n_pts
-        indices = indices + add_indices.view(-1, 1, 1)
-
-        # get the features and point cooridnates associated with the indices
-        features = inp.view(-1, inp.size(2))[indices]
-        pts = points.view(-1, points.size(2))[indices]
-
-        # center the neighborhoods
-        pts = pts - next_pts.unsqueeze(2)
-
-        # normalize to unit ball, or not
-        if normalize:
-            maxi = torch.sqrt((pts.detach()**2).sum(3).max(2)[0])  # detach is a modificaiton
-            maxi[maxi == 0] = 1
-            pts = pts / maxi.view(maxi.size()+(1, 1,))
-
-        # compute the distances
-        dists = pts.view(pts.size()+(1,)) - self.centers
-        dists = dists.view(dists.size(0), dists.size(1), dists.size(2), -1)
-        dists = self.act(self.l1(dists))
-        dists = self.act(self.l2(dists))
-        dists = self.act(self.l3(dists))
-
-        # compute features
-        fs = features.size()
-        features = features.transpose(2, 3)
-        features = features.view(-1, features.size(2), features.size(3))
-        dists = dists.view(-1, dists.size(2), dists.size(3))
-
-        features = torch.bmm(features, dists)
-
-        features = features.view(fs[0], fs[1], -1)
-
-        features = torch.matmul(features, self.weight.view(-1, self.weight.size(2)))
-        features = features / fs[2]
-
-        # add a bias
-        if self.use_bias:
-            features = features + self.bias
-
-        if return_indices:
-            return features, next_pts, indices_
-        else:
-            return features, next_pts
-
-
-class PtConvBig(LayerBase):
-    def __init__(self, in_feats: int = 64, out_feats: int = 64, kernel_size: int = 16, dim: int = 3,
-                 act: str = None, use_bias: bool = True, padding: int = None, nn_center: bool = True,
-                 centroids: bool = False):
-        if act in [None, 'relu']:
-            self.act = F.relu_
-        elif act == 'swish':
-            self.act = swish
-        elif type(act) == str:
-            self.act = getattr(F, act)
-        elif callable(act):
-            self.act = act
-        else:
-            raise ValueError
-        super(PtConvBig, self).__init__()
 
         # Kernel depth equals number of input features. Thus, the number of needed weights is
         # Input_Channels x Kernel number x Kernel elements. These weights get initialized randomly.
@@ -307,10 +160,21 @@ class PtConvBig(LayerBase):
 
     def forward(self, features, input_pts, neighbor_num, output_pts=None, normalize=False,
                 indices_=None, return_indices=False, dilation=1):
+        """
+        Args:
+            features: Batch of features.
+            input_pts: Batch of points.
+            neighbor_num: Size of neighborhood.
+            output_pts: Number of output points.
+            normalize: Normalization to unit sphere.
+            indices_: neighbor indices.
+            return_indices: Flag for returning the neighbor indices.
+            dilation: factor for dilated convolutions
+        """
         if indices_ is None:
             if isinstance(output_pts, int) and input_pts.size(1) != output_pts:
-                indices, next_pts_ = indices_conv_reduction_big(input_pts, output_pts, neighbor_num * dilation,
-                                                                self.padding, self.centroids)
+                indices, next_pts_ = indices_conv_reduction(input_pts, output_pts, neighbor_num * dilation, self.padding,
+                                                            self.centroids)
             elif (output_pts is None) or (isinstance(output_pts, int) and input_pts.size(1) == output_pts):
                 indices, next_pts_ = indices_conv(input_pts, neighbor_num * dilation)
             else:
@@ -390,6 +254,7 @@ class PtConvBig(LayerBase):
 ################################
 # SMALL SEGMENTATION NETWORK
 ################################
+
 class SegSmall(nn.Module):
     def __init__(self, input_channels, output_channels, dimension=3, dropout=0,
                  act=None, use_bias=True, track_running_stats=False, use_norm=False):
@@ -524,6 +389,7 @@ class SegSmall(nn.Module):
 # BIG SEGMENTATION NETWORK
 ################################
 
+
 class SegBig(nn.Module):
     def __init__(self, input_channels, output_channels, trs=False, dimension=3, dropout=0, use_bias=False,
                  norm_type='bn', use_norm=True, kernel_size: int = 16, neighbor_nums=None,
@@ -537,34 +403,40 @@ class SegBig(nn.Module):
         self.first_layer = first_layer
         self.normalize = normalize
 
-        self.cv0 = PtConvBig(input_channels, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
-        self.cv1 = PtConvBig(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
-        self.cv2 = PtConvBig(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
-        self.cv3 = PtConvBig(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
-        self.cv4 = PtConvBig(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
-        self.cv5 = PtConvBig(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
-        self.cv6 = PtConvBig(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                             nn_center=nn_center, centroids=centroids)
+        # 64 convolutional kernels
+        self.cv0 = PtConv(input_channels, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv1 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv2 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv3 = PtConv(pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
 
-        self.cv5d = PtConvBig(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                              nn_center=nn_center, centroids=centroids)
-        self.cv4d = PtConvBig(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                              nn_center=nn_center, centroids=centroids)
-        self.cv3d = PtConvBig(4 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                              nn_center=nn_center, centroids=centroids)
-        self.cv2d = PtConvBig(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                              nn_center=nn_center, centroids=centroids)
-        self.cv1d = PtConvBig(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                              nn_center=nn_center, centroids=centroids)
-        self.cv0d = PtConvBig(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
-                              nn_center=nn_center, centroids=centroids)
+        # 128 convolutional kernels
+        self.cv4 = PtConv(pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv5 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv6 = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                          nn_center=nn_center, centroids=centroids)
+        self.cv5d = PtConv(2 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        # Inputs get concatenated with previous inputs
+        self.cv4d = PtConv(4 * pl, 2 * pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
 
+        # 64 Convolutional kernels + Concatenated inputs
+        self.cv3d = PtConv(4 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        self.cv2d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        self.cv1d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+        self.cv0d = PtConv(2 * pl, pl, n_centers, dimension, use_bias=use_bias, padding=padding,
+                           nn_center=nn_center, centroids=centroids)
+
+        # Fully connected layer
         self.fcout = nn.Linear(pl + pl, output_channels)
 
         if not use_norm:
@@ -617,6 +489,12 @@ class SegBig(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, input_pts, return_features=False):
+        """
+        Args:
+            x: Batch of features
+            input_pts: Batch of points
+            return_features: Flag for returning calculated features.
+        """
         if self.neighbor_nums is None:
             self.neighbor_nums = [16, 16, 16, 16, 8, 8, 4, 4, 4, 4, 8, 8, 8]
         if self.reductions is None:
@@ -676,6 +554,111 @@ class SegBig(nn.Module):
             return xout, x0d
         else:
             return xout
+
+################################
+# ADAPTABLE SEGMENTATION NETWORK
+################################
+
+
+class SegAdapt(nn.Module):
+    def __init__(self, input_channels, output_channels, architecture: List[tuple] = None, trs: bool = False,
+                 dim: int = 3, dropout: int = 0, use_bias: bool = False, norm_type: str = 'gn',
+                 kernel_size: int = 16, padding: int = None, nn_center: bool = True, centroids: bool = False,
+                 kernel_num: int = 64, normalize: bool = False, act: str = None):
+        super(SegAdapt, self).__init__()
+
+        # define standard architecture
+        if architecture is None:
+            # (in_feats factor, out_feats factor, reduction, neighbor_num)
+            architecture = [(-1, 1, None, 32), (1, 1, 2048, 32), (1, 1, 1024, 32), (1, 1, 256, 16), (1, 2, 64, 8),
+                            (2, 2, 16, 8), (2, 2, 8, 4), (2, 2, 'd', 8), (4, 2, 'd', 8), (4, 1, 'd', 8),
+                            (2, 1, 'd', 16), (2, 1, 'd', 16), (2, 1, 'd', 16), ('drop', dropout), ('fcout', 2)]
+
+        # define activation function
+        if act in [None, 'relu']:
+            self.act = nn.ReLU(inplace=True)
+        elif act == 'swish':
+            self.act = swish
+        elif type(act) == str:
+            self.act = getattr(F, act)
+        elif callable(act):
+            self.act = act
+        else:
+            raise ValueError
+
+        self.normalize = normalize
+        self.reductions = []
+        self.neighbor_nums = []
+        self.layers = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        for layer in architecture:
+            if layer[0] == 'fcout':
+                self.layers.append(nn.Linear(layer[1] * kernel_num, output_channels))
+                continue
+            if layer[0] == 'drop':
+                self.layers.append(nn.Dropout(layer[1]))
+                continue
+            in_feats = kernel_num
+            if layer[0] == -1:
+                in_feats = input_channels
+                layer = (1, layer[1], layer[2], layer[3])
+            self.layers.append(PtConv(in_feats=layer[0] * in_feats, out_feats=layer[1] * kernel_num,
+                                      kernel_size=kernel_size, dim=dim, use_bias=use_bias, padding=padding,
+                                      nn_center=nn_center, centroids=centroids))
+            self.reductions.append(layer[2])
+            self.neighbor_nums.append(layer[3])
+            if norm_type.lower() == 'none':
+                self.norms.append(nn.Identity())
+            elif norm_type.lower() == 'bn':
+                self.norms.append(nn.BatchNorm1d(layer[1] * kernel_num, track_running_stats=trs))
+            elif norm_type == 'gn':
+                self.norms.append(nn.GroupNorm(layer[1] * kernel_num // 2, layer[1]*kernel_num))
+
+    def forward(self, x, input_pts, return_features=False):
+        """
+        Args:
+            x: Batch of features
+            input_pts: Batch of points
+            return_features: Flag for returning calculated features.
+        """
+        in_feats = x
+        in_pts = input_pts
+        feats = []
+        pts = []
+        dropout_cache = None
+        for ix, layer in enumerate(self.layers):
+            if type(layer) == nn.Dropout:
+                dropout_cache = in_feats
+                in_feats = layer(in_feats)
+                continue
+            if type(layer) == nn.Linear:
+                xout = layer(in_feats)
+                if return_features:
+                    if dropout_cache is not None:
+                        in_feats = dropout_cache
+                    return xout, in_feats
+                else:
+                    return xout
+            output_pts = self.reductions[ix]
+            if self.reductions[ix] == 'd':
+                output_pts = pts.pop()
+            elif ix != 0:
+                pts.append(in_pts)
+                feats.append(in_feats)
+            out_feats, out_pts = layer(in_feats, in_pts, self.neighbor_nums[ix], output_pts=output_pts,
+                                       normalize=self.normalize)
+            out_feats = self.act(apply_bn(out_feats, self.norms[ix]))
+            if self.reductions[ix] == 'd':
+                in_feats = torch.cat([out_feats, feats.pop()], dim=2)
+                in_pts = output_pts
+            else:
+                in_feats = out_feats
+                in_pts = out_pts
+
+
+################################
+# CLASSIFICATION NETWORKS
+################################
 
 
 class ModelNet40(nn.Module):
