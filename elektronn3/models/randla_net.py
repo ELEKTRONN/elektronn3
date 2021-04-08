@@ -183,6 +183,7 @@ class LocalFeatureAggregation(nn.Module):
 class RandLANet(nn.Module):
     def __init__(self, d_in, num_classes, num_neighbors=16, decimation=4, device=None):
         super(RandLANet, self).__init__()
+        d_in += 3
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
@@ -229,18 +230,22 @@ class RandLANet(nn.Module):
 
         self = self.to(device)
 
-    def forward(self, input):
+    def forward(self, input, features):
         r"""
             Forward pass
             Parameters
             ----------
-            input: torch.Tensor, shape (B, N, d_in)
+            input: torch.Tensor, shape (B, N, 3)
                 input points
+
+            features: torch.Tensor, shape (B, N, d_in)
+
             Returns
             -------
             torch.Tensor, shape (B, N, C)
                 segmentation scores for each point
         """
+        input = torch.cat((input, features), 2)
         N = input.size(1)
         d = self.decimation
 
