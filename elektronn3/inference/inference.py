@@ -642,7 +642,10 @@ class Predictor:
             else:
                 padded_out_shape = np.array(self.out_shape)
                 padded_out_shape[1:] = np.ceil(self.out_shape[1:] / self.tile_shape) * self.tile_shape
-                offset = self.offset if self.offset is not None else np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
+                if self.offset is None:
+                    offset = np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
+                else:
+                    offset = np.array(self.offset)
                 padded_inp_shape = (*inp.shape[:2], *padded_out_shape[1:] + 2 * offset)
                 padded_inp = np.zeros(padded_inp_shape)
                 # Define the relevant region (that is: without the padding that was just added)
