@@ -4,7 +4,6 @@ adopted from https://github.com/aRI0U/RandLA-Net-pytorch
 paper: https://arxiv.org/abs/1911.11236
 """
 
-
 import time
 
 import torch
@@ -45,9 +44,11 @@ class SharedMLP(nn.Module):
     def forward(self, input):
         r"""
             Forward pass of the network
+
             Parameters
             ----------
             input: torch.Tensor, shape (B, d_in, N, K)
+
             Returns
             -------
             torch.Tensor, shape (B, d_out, N, K)
@@ -72,13 +73,15 @@ class LocalSpatialEncoding(nn.Module):
     def forward(self, coords, features, knn_output):
         r"""
             Forward pass
+
             Parameters
             ----------
             coords: torch.Tensor, shape (B, N, 3)
                 coordinates of the point cloud
             features: torch.Tensor, shape (B, d, N, 1)
                 features of the point cloud
-            neighbors: tuple
+            knn_output: tuple
+
             Returns
             -------
             torch.Tensor, shape (B, 2*d, N, K)
@@ -86,13 +89,9 @@ class LocalSpatialEncoding(nn.Module):
         # finding neighboring points
         idx, dist = knn_output
         B, N, K = idx.size()
-        # idx(B, N, K), coords(B, N, 3)
-        # neighbors[b, i, n, k] = coords[b, idx[b, n, k], i] = extended_coords[b, i, extended_idx[b, i, n, k], k]
         extended_idx = idx.unsqueeze(1).expand(B, 3, N, K)
-        extended_coords = coords.transpose(-2,-1).unsqueeze(-1).expand(B, 3, N, K)
-        neighbors = torch.gather(extended_coords, 2, extended_idx) # shape (B, 3, N, K)
-        # if USE_CUDA:
-        #     neighbors = neighbors.cuda()
+        extended_coords = coords.transpose(-2, -1).unsqueeze(-1).expand(B, 3, N, K)
+        neighbors = torch.gather(extended_coords, 2, extended_idx)  # shape (B, 3, N, K)
 
         # relative point position encoding
         concat = torch.cat((
@@ -120,9 +119,11 @@ class AttentivePooling(nn.Module):
     def forward(self, x):
         r"""
             Forward pass
+
             Parameters
             ----------
             x: torch.Tensor, shape (B, d_in, N, K)
+
             Returns
             -------
             torch.Tensor, shape (B, d_out, N, 1)
@@ -157,12 +158,14 @@ class LocalFeatureAggregation(nn.Module):
     def forward(self, coords, features):
         r"""
             Forward pass
+
             Parameters
             ----------
             coords: torch.Tensor, shape (B, N, 3)
                 coordinates of the point cloud
             features: torch.Tensor, shape (B, d_in, N, 1)
                 features of the point cloud
+
             Returns
             -------
             torch.Tensor, shape (B, 2*d_out, N, 1)
@@ -181,16 +184,17 @@ class LocalFeatureAggregation(nn.Module):
 
 
 class RandLANet(nn.Module):
-    def __init__(self, d_in, num_classes, num_neighbors=16, decimation=4, device=None):
+    def __init__(self, dim_feature, num_classes, num_neighbors=16, sub_sampling_ratio=4, device=None,
+                 dropout_p=0.1):
         super(RandLANet, self).__init__()
-        d_in += 3
+        dim_feature += 3
         if device is None:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = device
         self.num_neighbors = num_neighbors
-        self.decimation = decimation
+        self.decimation = sub_sampling_ratio
 
-        self.fc_start = nn.Linear(d_in, 8)
+        self.fc_start = nn.Linear(dim_feature, 8)
         self.bn_start = nn.Sequential(
             nn.BatchNorm2d(8, eps=1e-6, momentum=0.99),
             nn.LeakyReLU(0.2)
@@ -223,7 +227,7 @@ class RandLANet(nn.Module):
         self.fc_end = nn.Sequential(
             SharedMLP(8, 64, bn=True, activation_fn=nn.ReLU()),
             SharedMLP(64, 32, bn=True, activation_fn=nn.ReLU()),
-            nn.Dropout(),
+            nn.Dropout(dropout_p),
             SharedMLP(32, num_classes)
         )
         self.device = device
@@ -233,6 +237,7 @@ class RandLANet(nn.Module):
     def forward(self, input, features):
         r"""
             Forward pass
+
             Parameters
             ----------
             input: torch.Tensor, shape (B, N, 3)
@@ -254,21 +259,19 @@ class RandLANet(nn.Module):
         x = self.bn_start(x) # shape (B, d, N, 1)
 
         decimation_ratio = 1
-
         # <<<<<<<<<< ENCODER
         x_stack = []
 
         permutation = torch.randperm(N)
-        coords = coords[:,permutation]
-        x = x[:,:,permutation]
+        coords = coords[:, permutation]
+        x = x[:, :, permutation]
 
         for lfa in self.encoder:
             # at iteration i, x.shape = (B, N//(d**i), d_in)
-            x = lfa(coords[:,:N//decimation_ratio], x)
+            x = lfa(coords[:, :N // decimation_ratio], x)
             x_stack.append(x.clone())
             decimation_ratio *= d
-            x = x[:,:,:N//decimation_ratio]
-
+            x = x[:, :, :N // decimation_ratio]
 
         # # >>>>>>>>>> ENCODER
 
@@ -277,10 +280,10 @@ class RandLANet(nn.Module):
         # <<<<<<<<<< DECODER
         for mlp in self.decoder:
             neighbors, _ = knn(
-                coords[:,:N//decimation_ratio].cpu().contiguous(), # original set
-                coords[:,:d*N//decimation_ratio].cpu().contiguous(), # upsampled set
+                coords[:, :N // decimation_ratio].cpu().contiguous(),  # original set
+                coords[:, :d * N // decimation_ratio].cpu().contiguous(),  # upsampled set
                 1
-            ) # shape (B, N, 1)
+            )  # shape (B, N, 1)
             neighbors = neighbors.to(self.device)
 
             extended_neighbors = neighbors.unsqueeze(1).expand(-1, x.size(1), -1, 1)
@@ -295,7 +298,7 @@ class RandLANet(nn.Module):
 
         # >>>>>>>>>> DECODER
         # inverse permutation
-        x = x[:,:,torch.argsort(permutation)]
+        x = x[:, :, torch.argsort(permutation)]
 
         scores = self.fc_end(x)
 
@@ -303,18 +306,104 @@ class RandLANet(nn.Module):
         return scores.squeeze(-1).transpose(2, 1)
 
 
-if __name__ == '__main__':
-    import time
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+class RandLANetClassification(nn.Module):
+    def __init__(self, d_in, num_classes, num_neighbors=16, decimation=4, device=None,
+                 dropout_p=0.1):
+        super(RandLANetClassification, self).__init__()
+        d_in += 3
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device
+        self.num_neighbors = num_neighbors
+        self.decimation = decimation
 
-    d_in = 7
-    cloud = 1000*torch.randn(1, 2**16, d_in).to(device)
-    model = RandLANet(d_in, 6, 16, 4, device)
-    # model.load_state_dict(torch.load('checkpoints/checkpoint_100.pth'))
+        self.fc_start = nn.Linear(d_in, 8)
+        self.bn_start = nn.Sequential(
+            nn.BatchNorm2d(8, eps=1e-6, momentum=0.99),
+            nn.LeakyReLU(0.2)
+        )
+
+        # encoding layers
+        self.encoder = nn.ModuleList([
+            LocalFeatureAggregation(8, 16, num_neighbors, self.device),
+            LocalFeatureAggregation(32, 32, num_neighbors, self.device),
+            LocalFeatureAggregation(64, 64, num_neighbors, self.device),
+            LocalFeatureAggregation(128, 128, num_neighbors, self.device)
+        ])
+
+        # reduce point predictions
+        self.reducer = AttentivePooling(256, 512)
+
+        # final classification
+        self.fc_end = nn.Sequential(
+            nn.Linear(512, 128),
+            nn.BatchNorm1d(128, eps=1e-6, momentum=0.99),
+            nn.ReLU(),
+            nn.Dropout(dropout_p),
+            nn.Linear(128, 32),
+            nn.BatchNorm1d(32, eps=1e-6, momentum=0.99),
+            nn.ReLU(),
+            nn.Dropout(dropout_p),
+            nn.Linear(32, num_classes)
+        )
+        self.device = device
+
+        self = self.to(device)
+
+    def forward(self, input, features):
+        r"""
+            Forward pass
+
+            Parameters
+            ----------
+            input: torch.Tensor, shape (B, N, 3)
+                input points
+
+            features: torch.Tensor, shape (B, N, d_in)
+
+            Returns
+            -------
+            torch.Tensor, shape (B, N, C)
+                segmentation scores for each point
+        """
+        input = torch.cat((input, features), 2)
+        N = input.size(1)
+        d = self.decimation
+
+        coords = input[..., :3].clone().cpu()
+        x = self.fc_start(input).transpose(-2, -1).unsqueeze(-1)
+        x = self.bn_start(x)  # shape (B, d, N, 1)
+
+        decimation_ratio = 1
+
+        # <<<<<<<<<< ENCODER
+
+        for lfa in self.encoder:
+            # at iteration i, x.shape = (B, N//(d**i), d_in)
+            permutation = torch.randperm(N//decimation_ratio)
+            x = lfa(coords[:, permutation], x[:, :, permutation])
+            decimation_ratio *= d
+
+        # # >>>>>>>>>> ENCODER
+        # input shape x: (B, d, N, 1); permute to (B, d, 1, N); reduce to (B, 2*d, 1, 1); final shape; (B, 2d)
+        x = self.reducer(x.permute(0, 1, 3, 2)).squeeze(-1).squeeze(-1)
+        scores = self.fc_end(x)
+
+        # shape: (B, N, C)
+        return scores
+
+
+if __name__ == '__main__':
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    bs = 5
+    d_in = 4
+    cloud = 1000*torch.randn(bs, 2**15, 3).to(device)
+    feats = 1000*torch.randn(bs, 2**15, d_in).to(device)
+    model = RandLANetClassification(d_in, 10, 16, 4, device)
     model.eval()
 
     t0 = time.time()
-    pred = model(cloud)
-    t1 = time.time()
-    # print(pred)
-    print(t1-t0)
+    for _ in range(10):
+        pred = model(cloud, feats)
+    dt = time.time() - t0
+    print(f'Time per sample: {(dt / bs / 10):.2f} s')

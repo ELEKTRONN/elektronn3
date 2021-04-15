@@ -537,7 +537,6 @@ class Trainer3d:
         current_palette = sns.color_palette('bright', n_feats)
         feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
         if pts is not None:
-
             cols = torch.zeros(pts.size(), dtype=torch.long)
             for ii in range(n_feats):
                 cols[features[..., ii] == 1] = feat_cols[ii]

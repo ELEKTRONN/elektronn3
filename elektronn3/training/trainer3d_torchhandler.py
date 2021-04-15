@@ -28,6 +28,7 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
+import seaborn as sns
 
 from elektronn3.training import handlers
 from elektronn3.training.swa import SWA
@@ -430,7 +431,7 @@ class Trainer3dTorchHandler:
                 if self.v_path is None:
                     stats['val_loss'] = nan
                 else:
-                    if self.epoch == 1 or self.epoch % self.val_freq == 0:
+                    if self.epoch % self.val_freq == 0:
                         self._validate(self.epoch)
                     stats['val_loss'] = nan
 
@@ -517,7 +518,6 @@ class Trainer3dTorchHandler:
             dtarget_mask = dtarget[dl_mask]
             if len(dout_mask) == 0:
                 continue
-
             dloss = self.criterion(dout_mask, dtarget_mask)
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
@@ -545,7 +545,7 @@ class Trainer3dTorchHandler:
                     batch_num += 1
 
                 loss = float(dloss)
-                mean_target = float(target.to(torch.float32).mean())
+                mean_target = float(target[l_mask].to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
                 misc['mean_target'].append(mean_target)
                 self._tracker.update_timeline([self._timer.t_passed, loss, mean_target])
@@ -574,9 +574,41 @@ class Trainer3dTorchHandler:
             if self.epoch > self.stop_epoch:
                 logger.info(f'max_epoch ({self.stop_epoch}) exceeded. Terminating...')
                 self.terminate = True
-
             if self.terminate:
                 break
+
+        if self.tb is not None:
+            features = dfeats.detach().cpu()
+            out = dout.detach().cpu()
+            n_classes = out.size(-1) + 1  # one class for ignore
+            target = dtarget.detach().cpu()
+            # set cell organelle labels as ignore class
+            target[~dl_mask.detach().cpu()] = n_classes - 1
+            pts = dinp.detach().cpu()
+            current_palette = sns.color_palette('bright', n_classes)
+            target_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in
+                           range(n_classes)}
+            n_feats = features.size(-1)
+            current_palette = sns.color_palette('bright', n_feats)
+            feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in
+                         range(n_feats)}
+            # input points (feature colors)
+            cols = torch.zeros(pts.size(), dtype=torch.long)
+            for ii in range(n_feats):
+                cols[features[..., ii] == 1] = feat_cols[ii]
+            self.tb.add_mesh('tr_inp', pts, cols, global_step=self.step)
+
+            # input points (target colors)
+
+            cols = torch.zeros(pts.size(), dtype=torch.long)
+            for ii in range(n_classes):
+                cols[target.squeeze(-1) == ii] = target_cols[ii]
+            self.tb.add_mesh('tr_target', pts, cols, global_step=self.step)
+            cols = torch.zeros(pts.size(), dtype=torch.long)
+            out = torch.argmax(out, -1)
+            for ii in range(n_classes):
+                cols[out == ii] = target_cols[ii]
+            self.tb.add_mesh('tr_pred', pts, cols, global_step=self.step)
 
         stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
