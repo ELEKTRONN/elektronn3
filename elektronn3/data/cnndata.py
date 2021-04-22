@@ -147,6 +147,7 @@ class PatchCreator(data.Dataset):
             cube_prios: Optional[Sequence[float]] = None,
             aniso_factor: int = 2,
             target_discrete_ix: Optional[List[int]] = None,
+            input_discrete_ix: Optional[List[int]] = None,
             target_dtype: np.dtype = np.int64,
             train: bool = True,
             warp_prob: Union[bool, float] = False,
@@ -178,6 +179,7 @@ class PatchCreator(data.Dataset):
         self.cube_prios = cube_prios
         self.aniso_factor = aniso_factor
         self.target_discrete_ix = target_discrete_ix
+        self.input_discrete_ix = input_discrete_ix
         self.epoch_size = epoch_size
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
         self.in_memory = in_memory
@@ -348,7 +350,8 @@ class PatchCreator(data.Dataset):
             M=M,
             target_src=target_src,
             target_patch_shape=target_patch_shape,
-            target_discrete_ix=self.target_discrete_ix
+            target_discrete_ix=self.target_discrete_ix,
+            input_discrete_ix=self.input_discrete_ix
         )
 
         return inp, target

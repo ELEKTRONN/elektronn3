@@ -305,6 +305,7 @@ def warp_slice(
         target_src: Optional[DataSource] = None,
         target_patch_shape: Optional[Union[Tuple[int], np.ndarray]] = None,
         target_discrete_ix: Optional[Sequence[int]] = None,
+        input_discrete_ix: Optional[Sequence[int]] = None,
         debug: bool = False
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     """
@@ -453,8 +454,13 @@ def warp_slice(
     if debug and np.any((src_coords - lo).min(2).min(1).min(0) < 0):
         raise WarpingSanityError(f'src_coords check failed (negative indices).\n{(src_coords - lo).min(2).min(1).min(0)}')
 
-    for k in range(n_f):
-        map_coordinates_linear(img_cut[k], src_coords, lo, inp[k])
+    if input_discrete_ix is None:
+        input_discrete_ix = [False for i in range(img_cut.shape[0])]
+    else:
+        input_discrete_ix = [i in input_discrete_ix for i in range(img_cut.shape[0])]
+
+    for k, discr in enumerate(input_discrete_ix):
+        (map_coordinates_nearest if discr else map_coordinates_linear)(img_cut[k], src_coords, lo, inp[k])
 
     # Slice and interpolate target
     if target_src is not None:

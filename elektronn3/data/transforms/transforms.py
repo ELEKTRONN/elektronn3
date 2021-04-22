@@ -359,11 +359,13 @@ class Normalize:
             self,
             mean: Union[Sequence[float], float],
             std: Union[Sequence[float], float],
-            inplace: bool = False
+            inplace: bool = False,
+            channels: Sequence[int] = None
     ):
         self.mean = np.array(mean)
         self.std = np.array(std)
         self.inplace = inplace
+        self.channels = channels
         # Unsqueeze first dimensions if mean and scalar are passed as scalars
         if self.mean.ndim == 0:
             self.mean = self.mean[None]
@@ -379,10 +381,11 @@ class Normalize:
             normalized = inp  # Refer to the same memory space
         else:
             normalized = inp.copy()
-        if not inp.shape[0] == self.mean.shape[0] == self.std.shape[0]:
+        channels = [range(inp.shape[0]) if self.channels is None else self.channels]
+        if not len(channels) == self.mean.shape[0] == self.std.shape[0]:
             raise ValueError(f'mean ({self.mean.shape[0]}) and std ({self.std.shape[0]}) must have the same length as the C '
                              f'axis (number of channels) of the input ({inp.shape[0]}).')
-        for c in range(inp.shape[0]):
+        for c in channels:
             normalized[c] = (inp[c] - self.mean[c]) / self.std[c]
         return normalized, target
 
