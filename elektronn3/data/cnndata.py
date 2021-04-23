@@ -95,13 +95,17 @@ class PatchCreator(data.Dataset):
             if your data set has half resolution in the depth dimension,
             set ``aniso_factor=2``. If all dimensions have the same
             resolution, set ``aniso_factor=1``.
-        target_discrete_ix: List of target channels that contain discrete values.
-            By default (``None``), every channel is is seen as discrete (this is
-            generally the case for classification tasks).
+        input_discrete_ix: List of input channels that contain discrete values.
+            By default (``None``), no channel is seen as discrete (generally
+            inputs are real world images).
             This information is used to decide what kind of interpolation should
-            be used for reading target data:
+            be used for reading input data:
             - discrete targets are obtained by nearest-neighbor interpolation
             - non-discrete (continuous) targets are linearly interpolated.
+        target_discrete_ix: List of target channels that contain discrete values.
+            By default (``None``), every channel is seen as discrete (this is
+            generally the case for classification tasks).
+            See input_discrete_ix for the effect on target interpolation.
         target_dtype: dtype that target tensors should be cast to.
         train: Determines if samples come from training or validation
             data.

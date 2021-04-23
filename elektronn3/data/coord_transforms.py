@@ -346,6 +346,11 @@ def warp_slice(
         be used for reading target data:
         - discrete targets are obtained by nearest-neighbor interpolation
         - non-discrete (continuous) targets are linearly interpolated.
+    input_discrete_ix
+        List of input channels that contain discrete values.
+        By default (``None``), no channel is seen as discrete (generally
+        inputs are real world images).
+        See target_discrete_ix for the effect on input interpolation.
     debug: If ``True`` (default), enable additional sanity checks to catch
         warping issues early.
 

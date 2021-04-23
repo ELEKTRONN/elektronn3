@@ -354,13 +354,21 @@ class Normalize:
             channel or a single float value (only for single-channel data).
         inplace: Apply in-place (works faster, needs less memory but overwrites
             inputs).
+        channels: If ``channels`` is ``None``, the change is applied to
+            all channels of the input tensor.
+            If ``channels`` is a ``Sequence[int]``, change is only applied
+            to the specified channels.
+            E.g. with mean [a, b], std [x, y] and channels [0, 2],
+            following normalizations will be allied:
+            - channel 0 with mean a and std x
+            - channel 2 with mean b and std y
     """
     def __init__(
             self,
             mean: Union[Sequence[float], float],
             std: Union[Sequence[float], float],
             inplace: bool = False,
-            channels: Sequence[int] = None
+            channels: Optional[Sequence[int]] = None
     ):
         self.mean = np.array(mean)
         self.std = np.array(std)
