@@ -42,7 +42,7 @@ import torch
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 from torch.nn import functional as F
-import criss_cross
+from elektronn3.modules.criss_cross import RCCAModule
 
 def get_conv(dim=3):
     """Chooses an implementation for a convolution layer."""
@@ -544,37 +544,6 @@ class DummyAttention(nn.Module):
         return x, None
 
 
-
-class RCCAModule(nn.Module):
-    def __init__(self, in_channels, out_channels, num_classes, recurrence):
-        super(RCCAModule, self).__init__()
-        inter_channels = in_channels // 4
-
-        self.conva = nn.Sequential(nn.Conv3d(in_channels, inter_channels, 2, padding=1, bias=False),
-                                   InPlaceABNSync(inter_channels))
-        self.cca = criss_cross.CrissCrossAttention(inter_channels)
-        self.convb = nn.Sequential(nn.Conv3d(inter_channels, inter_channels, 2, padding=1, bias=False),
-                                   InPlaceABNSync(inter_channels))
-
-        self.bottleneck = nn.Sequential(
-            nn.Conv3d(in_channels+inter_channels, out_channels, kernel_size=3, padding=1, dilation=1, bias=False),
-            InPlaceABNSync(out_channels),
-            nn.Dropout3d(0.1),
-            nn.Conv3d(512, num_classes, kernel_size=1, stride=1, padding=0, bias=True)
-            )
-        self.recurrence = recurrence
-
-    def forward(self, x, recurrence=self.recurrence):
-        output = self.conva(x)
-        for i in range(recurrence):
-            output = self.cca(output)
-        output = self.convb(output)
-        print(output.size())
-
-        #output = self.bottleneck(torch.cat([x, output], 1))
-        return output
-
-
 # TODO: Pre-calculate output sizes when using valid convolutions
 class UNet(nn.Module):
     """Modified version of U-Net, adapted for 3D biomedical image segmentation
@@ -938,8 +907,8 @@ class UNet(nn.Module):
         if self.criss_cross_recurrence > 0:
             in_channels = x.size()[1]
             out_channels = x.size()[1]
-            self.RCCA = RCCAModule(in_channels = in_channels, out_channels = in_channels,
-                                   num_classes=2, recurrence = self.criss_cross_recurrence)
+            self.RCCA = RCCAModule(in_channels = in_channels, out_channels = out_channels,
+                                   recurrence = self.criss_cross_recurrence)
 
 
         # Decoding by UpConv and merging with saved outputs of encoder

@@ -4,7 +4,8 @@ Xinggang Wang, Yunchao Wei, Lichao Huang, Humphrey Shi,
 Wenyu Liu and Thomas S. Huang (2018)
 (https://arxiv.org/pdf/1811.11721.pdf).
 The code is taken from the PurePython branch"""
-
+import torch
+from torch import nn
 
 def INF3D(B, H, W, D):
     return -torch.diag(torch.tensor(float("inf")).repeat(H), 0).unsqueeze(0).repeat(B * W * D, 1, 1)
@@ -13,12 +14,12 @@ def INF3D(B, H, W, D):
 class CrissCrossAttention3D(nn.Module):
     """ Criss-Cross Attention Module 3D version, inspired by the 2d version"""
 
-    def __init__(self, in_dim, verbose=True):
+    def __init__(self, in_dim, verbose=False):
         super(CrissCrossAttention3D, self).__init__()
         self.query_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
         self.key_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
         self.value_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
-        self.softmax = Softmax(dim=4)
+        self.softmax = nn.Softmax(dim=4)
         self.INF = INF3D
         self.gamma = nn.Parameter(torch.zeros(1))
         self.verbose = verbose
@@ -96,71 +97,28 @@ class CrissCrossAttention3D(nn.Module):
 
 
 
-class Bottleneck(nn.Module):
-    expansion = 4
-    def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None, fist_dilation=1, multi_grid=1):
-        super(Bottleneck, self).__init__()
-        self.conv1 = nn.Conv3d(inplanes, planes, kernel_size=1, bias=False)
-        self.bn1 = BatchNorm3d(planes)
-        self.conv2 = nn.Conv3d(planes, planes, kernel_size=3, stride=stride,
-                               padding=dilation*multi_grid, dilation=dilation*multi_grid, bias=False)
-        self.bn2 = BatchNorm3d(planes)
-        self.conv3 = nn.Conv3d(planes, planes * 4, kernel_size=1, bias=False)
-        self.bn3 = BatchNorm3d(planes * 4)
-        self.relu = nn.ReLU(inplace=False)
-        self.relu_inplace = nn.ReLU(inplace=True)
-        self.downsample = downsample
-        self.dilation = dilation
-        self.stride = stride
-
-    def forward(self, x):
-        residual = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.relu(out)
-
-        out = self.conv3(out)
-        out = self.bn3(out)
-
-        if self.downsample is not None:
-            residual = self.downsample(x)
-
-        out = out + residual
-        out = self.relu_inplace(out)
-
-        return out
-
-
-
 class RCCAModule(nn.Module):
-    def __init__(self, in_channels, out_channels, num_classes, recurrence):
+    def __init__(self, in_channels, out_channels, recurrence):
         super(RCCAModule, self).__init__()
         inter_channels = in_channels // 4
 
-        self.conva = nn.Sequential(nn.Conv3d(in_channels, inter_channels, 3, padding=1, bias=False),
-                                   InPlaceABNSync(inter_channels))
-        self.cca = CrissCrossAttention(inter_channels)
-        self.convb = nn.Sequential(nn.Conv3d(inter_channels, inter_channels, 3, padding=1, bias=False),
-                                   InPlaceABNSync(inter_channels))
+        self.conva = nn.Sequential(nn.Conv3d(in_channels, inter_channels, 3, padding=1, bias=False))#,
+                                   #InPlaceABNSync(inter_channels))
+        self.cca = CrissCrossAttention3D(inter_channels)
+        self.convb = nn.Sequential(nn.Conv3d(inter_channels, inter_channels, 3, padding=1, bias=False))#,
+                                   #InPlaceABNSync(inter_channels))
 
-        self.bottleneck = nn.Sequential(
-            nn.Conv3d(in_channels+inter_channels, out_channels, kernel_size=3, padding=1, dilation=1, bias=False),
-            InPlaceABNSync(out_channels),
-            nn.Dropout3d(0.1),
-            nn.Conv3d(512, num_classes, kernel_size=1, stride=1, padding=0, bias=True)
-            )
+        self.bottleneck_merge = nn.Conv3d(inter_channels+in_channels, out_channels, 1)
+
         self.recurrence = recurrence
 
-    def forward(self, x, recurrence=self.recurrence):
+    def forward(self, x):
         output = self.conva(x)
-        for i in range(recurrence):
+        for i in range(self.recurrence):
             output = self.cca(output)
         output = self.convb(output)
 
-        output = self.bottleneck(torch.cat([x, output], 1))
+        #output = self.bottleneck(torch.cat([x, output], 1))
+        output = torch.cat([x,output],1)
+        output = self.bottleneck_merge(output)
         return output
