@@ -53,6 +53,10 @@ parser.add_argument(
 parser.add_argument('-i', '--ipython', action='store_true',
     help='Drop into IPython shell on errors or keyboard interrupts.'
 )
+
+parser.add_argument('-cc', '--criss-cross-recurrence', type = int, default=0,
+    help='Number of Criss-Cross attention blocks applied after the last down_convolution'
+)
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
@@ -61,6 +65,7 @@ torch.manual_seed(random_seed)
 np.random.seed(random_seed)
 random.seed(random_seed)
 deterministic = args.deterministic
+criss_cross_recurrence = args.criss:criss_cross_recurrence
 if deterministic:
     torch.backends.cudnn.deterministic = True
 else:
@@ -99,6 +104,7 @@ model = UNet(
     planar_blocks=(0,),
     activation='relu',
     normalization='batch',
+    criss_cross_recurrence=criss_cross_recurrence
     # conv_mode='valid',
     # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
