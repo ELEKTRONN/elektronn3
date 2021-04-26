@@ -65,7 +65,7 @@ torch.manual_seed(random_seed)
 np.random.seed(random_seed)
 random.seed(random_seed)
 deterministic = args.deterministic
-criss_cross_recurrence = args.criss:criss_cross_recurrence
+criss_cross_recurrence = args.criss_cross_recurrence
 if deterministic:
     torch.backends.cudnn.deterministic = True
 else:
