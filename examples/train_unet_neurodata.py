@@ -17,6 +17,7 @@ from torch import optim
 import numpy as np
 
 parser = argparse.ArgumentParser(description='Train a network.')
+parser.add_argument('--working-dir','-wd ', default=None, type=str,help='Set working directory')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
@@ -60,6 +61,7 @@ parser.add_argument('-cc', '--criss-cross-recurrence', type = int, default=0,
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
+wd = args.working_dir
 random_seed = args.seed
 torch.manual_seed(random_seed)
 np.random.seed(random_seed)
@@ -122,7 +124,11 @@ elif args.jit == 'train':
 
 
 # USER PATHS
-save_root = os.path.expanduser('~/e3training/')
+if wd is not None:
+    save_root = os.path.expanduser('~/e3training/')
+else:
+    save_root = wd
+
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'

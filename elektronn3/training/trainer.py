@@ -285,7 +285,6 @@ class Trainer:
             preview_plotting_handler: Optional[Callable] = None,
             mixed_precision: bool = False,
             tqdm_kwargs: Optional[Dict] = None,
-            criss_cross_recurrence: int = 0
     ):
 
         inference_kwargs = {} if inference_kwargs is None else inference_kwargs
@@ -448,7 +447,6 @@ class Trainer:
         self.best_tr_loss = np.inf
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
-        self.criss_cross_recurrence = criss_cross_recurrence
 
     def run(self, max_steps: int = 1, max_runtime=3600 * 24 * 7) -> None:
         """Train the network for ``max_steps`` steps.
