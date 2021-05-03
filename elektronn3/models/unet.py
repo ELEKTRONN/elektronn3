@@ -190,6 +190,8 @@ def get_activation(activation):
             return nn.PReLU(num_parameters=1)
         elif activation == 'rrelu':
             return nn.RReLU()
+        elif activation == 'silu':
+            return nn.SiLU()
         elif activation == 'lin':
             return nn.Identity()
     else:
@@ -670,6 +672,7 @@ class UNet(nn.Module):
             Choices (see https://arxiv.org/abs/1505.00853 for details):
 
             - 'relu' (default)
+            - 'silu': Sigmoid Linear Unit (SiLU, aka Swish)
             - 'leaky': Leaky ReLU (slope 0.1)
             - 'prelu': Parametrized ReLU. Best for training accuracy, but
               tends to increase overfitting.
