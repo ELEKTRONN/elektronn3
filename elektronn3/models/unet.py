@@ -196,6 +196,120 @@ def get_activation(activation):
         # Deep copy is necessary in case of paremtrized activations
         return copy.deepcopy(activation)
 
+class CrissCrossAttention3D(nn.Module):
+    """ Criss-Cross Attention Module 3D version, inspired by the 2d version
+    from the paper CCNet: Criss-Cross Attention for Semantic Segmentation by Huang et al. (2018),  https://arxiv.org/abs/1811.11721
+    See the pure_python branch from the associated github repository https://github.com/speedinghzl/CCNet"""
+
+    def __init__(self, in_dim, verbose=False):
+        super(CrissCrossAttention3D, self).__init__()
+        self.query_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
+        self.key_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
+        self.value_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
+        self.softmax = nn.Softmax(dim=4)
+        self.gamma = nn.Parameter(torch.zeros(1))
+        self.verbose = verbose
+
+    def forward(self, x):
+        m_batchsize, _, height, width, depth = x.size()
+        proj_query = self.query_conv(x)
+        # bchw > bwch, b*w*d-c-h > b*w*d-h-c
+        proj_query_H = proj_query.permute(0, 3, 4, 1, 2).contiguous().view(m_batchsize * width * depth, -1,
+                                                                           height).permute(0, 2, 1)
+        # bchw > bhcw, b*h*d-c-w > b*h*d-w-c
+        proj_query_W = proj_query.permute(0, 2, 4, 1, 3).contiguous().view(m_batchsize * height * depth, -1,
+                                                                           width).permute(0, 2, 1)
+        # bchwd > bwch, b*h*w-c-d > b*h*w-d-c
+        proj_query_D = proj_query.permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * height * width, -1,
+                                                                           depth).permute(0, 2, 1)
+
+        if self.verbose: print('q', proj_query)
+        if self.verbose: print('qh', proj_query_H)
+        if self.verbose: print('qw', proj_query_W)
+        if self.verbose: print('qd', proj_query_D)
+
+        proj_key = self.key_conv(x)
+
+        # bchw > bwch, b*w*d-c-h
+        proj_key_H = proj_key.permute(0, 3, 4, 1, 2).contiguous().view(m_batchsize * width * depth, -1, height)
+        # bchw > bhcw, b*h*d-c-w
+        proj_key_W = proj_key.permute(0, 2, 4, 1, 3).contiguous().view(m_batchsize * height * depth, -1, width)
+        proj_key_D = proj_key.permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * height * width, -1, depth)
+
+        if self.verbose: print('k', proj_key)
+        if self.verbose: print('kh', proj_key_H)
+        if self.verbose: print('kw', proj_key_W)
+        if self.verbose: print('kd', proj_key_D)
+
+        proj_value = self.value_conv(x)
+        proj_value_H = proj_value.permute(0, 3, 4, 1, 2).contiguous().view(m_batchsize * width * depth, -1, height)
+        proj_value_W = proj_value.permute(0, 2, 4, 1, 3).contiguous().view(m_batchsize * height * depth, -1, width)
+        proj_value_D = proj_value.permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * height * width, -1, depth)
+
+        # batch matrix-matrix
+        #see pure_python branch of the above cited github repo, replacement of INF3D class for compile-reasons
+        inf = -torch.diag(torch.tensor(float("inf")).repeat(height), 0).unsqueeze(0).repeat(m_batchsize * width * depth, 1, 1).cuda()
+        if self.verbose: print('inf', inf)
+        energy_H = torch.bmm(proj_query_H, proj_key_H) + inf  # bwd-h-c, bwd-c-h > bwd-h-h
+        energy_H = energy_H.view(m_batchsize, width, depth, height, height).permute(0, 3, 1, 2, 4)  # bhwdh
+        if self.verbose: print('eh', energy_H)
+
+        #  b*h*d-w-c, b*h*d-c-w > b*h*d-w-w
+        energy_W = torch.bmm(proj_query_W, proj_key_W).view(m_batchsize, height, depth, width, width).permute(0, 1, 3,
+                                                                                                              2, 4)  #
+        if self.verbose: print('ew', energy_W)
+
+        energy_D = torch.bmm(proj_query_D, proj_key_D).view(m_batchsize, height, width, depth, depth)
+        if self.verbose: print('ew', energy_W)
+
+        concate = self.softmax(torch.cat([energy_H, energy_W, energy_D], 4))  # bhwd*(h+w+d)
+        if self.verbose: print('eall', concate)
+        # bhw(H+W) > bhwH, bwhH;
+        att_H = concate[:, :, :, :, 0:height].permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * width * depth,
+                                                                                       height, height)
+        att_W = concate[:, :, :, :, height:height + width].permute(0, 1, 4, 2, 3).contiguous().view(
+            m_batchsize * height * depth, width, width)
+        att_D = concate[:, :, :, :, height + width:].contiguous().view(m_batchsize * height * width, depth, depth)
+
+        if self.verbose: print('atth', att_H); print('attw', att_W);print('attd', att_D)
+
+        # p-c-h, p-h-h > p-c-h
+        out_H = torch.bmm(proj_value_H, att_H.permute(0, 2, 1)).view(m_batchsize, width, depth, -1, height).permute(0,3,4,1,2)
+        out_W = torch.bmm(proj_value_W, att_W.permute(0, 2, 1)).view(m_batchsize, height, depth, -1, width).permute(0,3,1,4,2)
+        out_D = torch.bmm(proj_value_D, att_D.permute(0, 2, 1)).view(m_batchsize, height, width, -1, depth).permute(0,3,1,2,4)
+
+        if self.verbose: print('outh', out_H); print('outw', out_W); print('outd', out_D)
+        # print(out_H.size(),out_W.size())
+        return self.gamma * (out_H + out_W + out_D) + x
+
+
+
+class RCCAModule(nn.Module):
+    def __init__(self, in_channels, out_channels, recurrence):
+        super(RCCAModule, self).__init__()
+        inter_channels = max(1,in_channels // 4)
+
+        self.conva = nn.Conv3d(in_channels, inter_channels, 3, padding=1, bias=False)#,
+                                   #InPlaceABNSync(inter_channels))
+        self.cca = CrissCrossAttention3D(inter_channels)
+        self.convb = nn.Conv3d(inter_channels, inter_channels, 3, padding=1, bias=False)#,
+                                   #InPlaceABNSync(inter_channels))
+
+        self.bottleneck_merge = nn.Conv3d(inter_channels+in_channels, out_channels, 1)
+
+        self.recurrence = recurrence
+
+    def forward(self, x):
+        output = self.conva(x)
+        for i in range(self.recurrence):
+            output = self.cca(output)
+        output = self.convb(output)
+
+        #output = self.bottleneck(torch.cat([x, output], 1))
+        output = torch.cat([x,output],1)
+        output = self.bottleneck_merge(output)
+        return output
+
 
 class DownConv(nn.Module):
     """
@@ -203,7 +317,7 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
+                 normalization=None, full_norm=True, dim=3, conv_mode='same', rcca=0):
         super().__init__()
 
         self.in_channels = in_channels
@@ -211,6 +325,12 @@ class DownConv(nn.Module):
         self.pooling = pooling
         self.normalization = normalization
         self.dim = dim
+        self.rcca = rcca
+        if rcca > 0:
+            self.recurrence=rcca
+            self.RCCA = RCCAModule(self.out_channels, self.out_channels, self.rcca)
+        else:
+            self.RCCA = torch.nn.Identity()
         padding = 1 if 'same' in conv_mode else 0
 
         self.conv1 = conv3(
@@ -239,6 +359,7 @@ class DownConv(nn.Module):
             self.norm0 = nn.Identity()
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
+
     def forward(self, x):
         y = self.conv1(x)
         y = self.norm0(y)
@@ -246,6 +367,7 @@ class DownConv(nn.Module):
         y = self.conv2(y)
         y = self.norm1(y)
         y = self.act2(y)
+        y = self.RCCA(y)
         before_pool = y
         y = self.pool(y)
         return y, before_pool
@@ -544,119 +666,6 @@ class DummyAttention(nn.Module):
         return x, None
 
 
-class CrissCrossAttention3D(nn.Module):
-    """ Criss-Cross Attention Module 3D version, inspired by the 2d version
-    from the paper CCNet: Criss-Cross Attention for Semantic Segmentation by Huang et al. (2018),  https://arxiv.org/abs/1811.11721
-    See the pure_python branch from the associated github repository https://github.com/speedinghzl/CCNet"""
-
-    def __init__(self, in_dim, verbose=False):
-        super(CrissCrossAttention3D, self).__init__()
-        self.query_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
-        self.key_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
-        self.value_conv = nn.Conv3d(in_channels=in_dim, out_channels=in_dim, kernel_size=1)
-        self.softmax = nn.Softmax(dim=4)
-        self.gamma = nn.Parameter(torch.zeros(1))
-        self.verbose = verbose
-
-    def forward(self, x):
-        m_batchsize, _, height, width, depth = x.size()
-        proj_query = self.query_conv(x)
-        # bchw > bwch, b*w*d-c-h > b*w*d-h-c
-        proj_query_H = proj_query.permute(0, 3, 4, 1, 2).contiguous().view(m_batchsize * width * depth, -1,
-                                                                           height).permute(0, 2, 1)
-        # bchw > bhcw, b*h*d-c-w > b*h*d-w-c
-        proj_query_W = proj_query.permute(0, 2, 4, 1, 3).contiguous().view(m_batchsize * height * depth, -1,
-                                                                           width).permute(0, 2, 1)
-        # bchwd > bwch, b*h*w-c-d > b*h*w-d-c
-        proj_query_D = proj_query.permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * height * width, -1,
-                                                                           depth).permute(0, 2, 1)
-
-        if self.verbose: print('q', proj_query)
-        if self.verbose: print('qh', proj_query_H)
-        if self.verbose: print('qw', proj_query_W)
-        if self.verbose: print('qd', proj_query_D)
-
-        proj_key = self.key_conv(x)
-
-        # bchw > bwch, b*w*d-c-h
-        proj_key_H = proj_key.permute(0, 3, 4, 1, 2).contiguous().view(m_batchsize * width * depth, -1, height)
-        # bchw > bhcw, b*h*d-c-w
-        proj_key_W = proj_key.permute(0, 2, 4, 1, 3).contiguous().view(m_batchsize * height * depth, -1, width)
-        proj_key_D = proj_key.permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * height * width, -1, depth)
-
-        if self.verbose: print('k', proj_key)
-        if self.verbose: print('kh', proj_key_H)
-        if self.verbose: print('kw', proj_key_W)
-        if self.verbose: print('kd', proj_key_D)
-
-        proj_value = self.value_conv(x)
-        proj_value_H = proj_value.permute(0, 3, 4, 1, 2).contiguous().view(m_batchsize * width * depth, -1, height)
-        proj_value_W = proj_value.permute(0, 2, 4, 1, 3).contiguous().view(m_batchsize * height * depth, -1, width)
-        proj_value_D = proj_value.permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * height * width, -1, depth)
-
-        # batch matrix-matrix
-        #see pure_python branch of the above cited github repo, replacement of INF3D class for compile-reasons
-        inf = -torch.diag(torch.tensor(float("inf")).repeat(height), 0).unsqueeze(0).repeat(m_batchsize * width * depth, 1, 1).cuda()
-        if self.verbose: print('inf', inf)
-        energy_H = torch.bmm(proj_query_H, proj_key_H) + inf  # bwd-h-c, bwd-c-h > bwd-h-h
-        energy_H = energy_H.view(m_batchsize, width, depth, height, height).permute(0, 3, 1, 2, 4)  # bhwdh
-        if self.verbose: print('eh', energy_H)
-
-        #  b*h*d-w-c, b*h*d-c-w > b*h*d-w-w
-        energy_W = torch.bmm(proj_query_W, proj_key_W).view(m_batchsize, height, depth, width, width).permute(0, 1, 3,
-                                                                                                              2, 4)  #
-        if self.verbose: print('ew', energy_W)
-
-        energy_D = torch.bmm(proj_query_D, proj_key_D).view(m_batchsize, height, width, depth, depth)
-        if self.verbose: print('ew', energy_W)
-
-        concate = self.softmax(torch.cat([energy_H, energy_W, energy_D], 4))  # bhwd*(h+w+d)
-        if self.verbose: print('eall', concate)
-        # bhw(H+W) > bhwH, bwhH;
-        att_H = concate[:, :, :, :, 0:height].permute(0, 2, 3, 1, 4).contiguous().view(m_batchsize * width * depth,
-                                                                                       height, height)
-        att_W = concate[:, :, :, :, height:height + width].permute(0, 1, 4, 2, 3).contiguous().view(
-            m_batchsize * height * depth, width, width)
-        att_D = concate[:, :, :, :, height + width:].contiguous().view(m_batchsize * height * width, depth, depth)
-
-        if self.verbose: print('atth', att_H); print('attw', att_W);print('attd', att_D)
-
-        # p-c-h, p-h-h > p-c-h
-        out_H = torch.bmm(proj_value_H, att_H.permute(0, 2, 1)).view(m_batchsize, width, depth, -1, height).permute(0,3,4,1,2)
-        out_W = torch.bmm(proj_value_W, att_W.permute(0, 2, 1)).view(m_batchsize, height, depth, -1, width).permute(0,3,1,4,2)
-        out_D = torch.bmm(proj_value_D, att_D.permute(0, 2, 1)).view(m_batchsize, height, width, -1, depth).permute(0,3,1,2,4)
-
-        if self.verbose: print('outh', out_H); print('outw', out_W); print('outd', out_D)
-        # print(out_H.size(),out_W.size())
-        return self.gamma * (out_H + out_W + out_D) + x
-
-
-
-class RCCAModule(nn.Module):
-    def __init__(self, in_channels, out_channels, recurrence):
-        super(RCCAModule, self).__init__()
-        inter_channels = max(1,in_channels // 4)
-
-        self.conva = nn.Conv3d(in_channels, inter_channels, 3, padding=1, bias=False)#,
-                                   #InPlaceABNSync(inter_channels))
-        self.cca = CrissCrossAttention3D(inter_channels)
-        self.convb = nn.Conv3d(inter_channels, inter_channels, 3, padding=1, bias=False)#,
-                                   #InPlaceABNSync(inter_channels))
-
-        self.bottleneck_merge = nn.Conv3d(inter_channels+in_channels, out_channels, 1)
-
-        self.recurrence = recurrence
-
-    def forward(self, x):
-        output = self.conva(x)
-        for i in range(self.recurrence):
-            output = self.cca(output)
-        output = self.convb(output)
-
-        #output = self.bottleneck(torch.cat([x, output], 1))
-        output = torch.cat([x,output],1)
-        output = self.bottleneck_merge(output)
-        return output
 
 
 # TODO: Pre-calculate output sizes when using valid convolutions
@@ -880,7 +889,8 @@ class UNet(nn.Module):
             full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
-            criss_cross_recurrence: int = 0
+            criss_cross_recurrence_bottom: int = 0,
+            criss_cross_recurrence_downconv: int = 0
     ):
         super().__init__()
 
@@ -950,6 +960,8 @@ class UNet(nn.Module):
         self.planar_blocks = planar_blocks
 
         # create the encoder pathway and add to a list
+        self.criss_cross_recurrence_downconv = criss_cross_recurrence_downconv
+        print("cc recurrence down convolution blocks: ", self.criss_cross_recurrence_downconv)
         for i in range(n_blocks):
             ins = self.in_channels if i == 0 else outs
             outs = self.start_filts * (2**i)
@@ -966,6 +978,7 @@ class UNet(nn.Module):
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                rcca=self.criss_cross_recurrence_downconv
             )
             self.down_convs.append(down_conv)
 
@@ -995,10 +1008,13 @@ class UNet(nn.Module):
             self.up_convs.append(up_conv)
 
         #criss_cross_attention setup
-        self.criss_cross_recurrence = criss_cross_recurrence
-        print("cc recurrence: ", self.criss_cross_recurrence)
+        self.criss_cross_recurrence_bottom = criss_cross_recurrence_bottom
+        print("cc recurrence down convolution blocks: ", self.criss_cross_recurrence_bottom)
 
-        self.RCCA = RCCAModule(in_channels= self.down_conv_outs, out_channels=self.down_conv_outs, recurrence=self.criss_cross_recurrence)
+        if self.criss_cross_recurrence_bottom > 0:
+            self.RCCA = RCCAModule(in_channels= self.down_conv_outs, out_channels=self.down_conv_outs, recurrence=self.criss_cross_recurrence_bottom)
+        else:
+            self.RCCA = torch.nn.Identity()
 
         self.conv_final = conv1(outs, self.out_channels, dim=dim)
 
@@ -1025,11 +1041,8 @@ class UNet(nn.Module):
 
         #now include the recurrent criss_cross attention module after the last down-convolution block,
         #before the first up-conv block:
-        if self.criss_cross_recurrence > 0:
-            in_channels = x.size()[1]
-            out_channels = x.size()[1]
-	    
-            x = self.RCCA(x)
+
+        x = self.RCCA(x)
 
         # Decoding by UpConv and merging with saved outputs of encoder
         i = 0

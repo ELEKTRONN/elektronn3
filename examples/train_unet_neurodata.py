@@ -17,7 +17,6 @@ from torch import optim
 import numpy as np
 
 parser = argparse.ArgumentParser(description='Train a network.')
-parser.add_argument('--working-dir','-wd ', default=None, type=str,help='Set working directory')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument(
@@ -55,19 +54,24 @@ parser.add_argument('-i', '--ipython', action='store_true',
     help='Drop into IPython shell on errors or keyboard interrupts.'
 )
 
-parser.add_argument('-cc', '--criss-cross-recurrence', type = int, default=0,
+parser.add_argument('-ccb', '--criss-cross-recurrence-bottom', type = int, default=0,
     help='Number of Criss-Cross attention blocks applied after the last down_convolution'
+)
+
+parser.add_argument('-ccd', '--criss-cross-recurrence-downconv', type = int, default=0,
+    help='Number of Criss-Cross attention blocks applied in each down_conv_block before the pooling layer'
 )
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
-wd = args.working_dir
 random_seed = args.seed
 torch.manual_seed(random_seed)
 np.random.seed(random_seed)
 random.seed(random_seed)
 deterministic = args.deterministic
-criss_cross_recurrence = args.criss_cross_recurrence
+criss_cross_recurrence_bottom = args.criss_cross_recurrence_bottom
+criss_cross_recurrence_downconv = args.criss_cross_recurrence_downconv
+
 if deterministic:
     torch.backends.cudnn.deterministic = True
 else:
@@ -106,7 +110,8 @@ model = UNet(
     planar_blocks=(0,),
     activation='relu',
     normalization='batch',
-    criss_cross_recurrence=criss_cross_recurrence
+    criss_cross_recurrence_bottom=criss_cross_recurrence_bottom,
+    criss_cross_recurrence_downconv=criss_cross_recurrence_downconv
     # conv_mode='valid',
     # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
@@ -124,11 +129,8 @@ elif args.jit == 'train':
 
 
 # USER PATHS
-if wd is not None:
-    save_root = os.path.expanduser('~/e3training/')
-else:
-    save_root = wd
 
+save_root = os.path.expanduser('/wholebrain/scratch/fkies/e3training/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
@@ -313,7 +315,7 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batch_size=8,
+    batch_size=4,
     num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
