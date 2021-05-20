@@ -389,7 +389,7 @@ class Normalize:
             normalized = inp  # Refer to the same memory space
         else:
             normalized = inp.copy()
-        channels = [range(inp.shape[0]) if self.channels is None else self.channels]
+        channels = range(inp.shape[0]) if self.channels is None else self.channels
         if not len(channels) == self.mean.shape[0] == self.std.shape[0]:
             raise ValueError(f'mean ({self.mean.shape[0]}) and std ({self.std.shape[0]}) must have the same length as the C '
                              f'axis (number of channels) of the input ({inp.shape[0]}).')
