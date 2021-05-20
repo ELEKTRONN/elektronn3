@@ -581,7 +581,7 @@ class Segmentation2d(data.Dataset):
             inp_paths,
             target_paths,
             transform=transforms.Identity(),
-            offset=None,
+            offset: Sequence[int] = (0 ,0, 0),
             in_memory=True,
             inp_dtype=np.float32,
             target_dtype=np.int64,
@@ -663,7 +663,7 @@ class Segmentation2d(data.Dataset):
                 break
             except transforms._DropSample:
                 pass
-        if self.offset is not None:
+        if np.any(self.offset):
             off = self.offset
             target = target[off[0]:-off[0], off[1]:-off[1]]
         sample = {
