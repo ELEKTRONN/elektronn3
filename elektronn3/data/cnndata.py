@@ -449,8 +449,8 @@ class PatchCreator(data.Dataset):
         logger.info('')
 
         return inp_sources, target_sources
-    
-    def set_offset(self, offset):
+
+    def set_offset(self, offset: Sequence[int]) -> None:
         self.offset = np.array(offset)
         self.target_patch_shape = self.patch_shape - self.offset * 2
 
@@ -677,6 +677,8 @@ class Segmentation2d(data.Dataset):
     def __len__(self):
         return len(self.target_paths) * self.epoch_multiplier
 
+    def set_offset(self, offset: Sequence[int]) -> None:
+        self.offset = offset
 
 # TODO: Document
 class Reconstruction2d(data.Dataset):
