@@ -393,11 +393,11 @@ class Predictor:
 
         self.out_dtype = out_dtype
         self.float16 = float16
-        if float16 and not isinstance(model, str):
-            raise NotImplementedError(
-                'float16 inference is currently only supported for models '
-                'that are passed as file paths (strings).'
-            )
+        # if float16 and not isinstance(model, str):
+        #     raise NotImplementedError(
+        #         'float16 inference is currently only supported for models '
+        #         'that are passed as file paths (strings).'
+        #     )
         self.dtype = torch.float16 if float16 else torch.float32
         self.transform = transform
         if isinstance(augmentations, int):
