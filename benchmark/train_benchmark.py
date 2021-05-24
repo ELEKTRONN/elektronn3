@@ -311,9 +311,14 @@ if args.deterministic:
 # Archiving training script, src folder, env info
 Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
+import time
+start_training = time.time()
+
 # Start training
 trainer.run(max_steps=max_steps, max_runtime=max_runtime)
 
+training_time_minutes = (time.time() - start_training) / 60
+print(f'\n\nTotal training run time (minutes): {training_time_minutes:.2f}')
 
 # How to re-calculate mean, std and class_weights for other datasets:
 #  dataset_mean = utils.calculate_means(train_dataset.inputs)
