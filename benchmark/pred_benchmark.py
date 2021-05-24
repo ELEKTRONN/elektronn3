@@ -72,9 +72,6 @@ def benchmark(float16, jit):
     dt_total = time.time() - start_total
     dt_total_per_run = dt_total / n
     print(f'Average time ({n} runs) (sec): {dt_total_per_run:.2f}')
-    throughput = np.prod(sample_shape) / dt_total_per_run
-    mvox_per_s = throughput / 1e6
-    print(f'Average MVox/s: {mvox_per_s}')
     print('\n\n')
 
 
