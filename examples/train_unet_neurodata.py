@@ -19,6 +19,7 @@ import numpy as np
 parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
+parser.add_argument('--amp', action='store_true', help='Use automatic mixed precision')
 parser.add_argument(
     '-s', '--epoch-size', type=int, default=800,
     help='How many training samples to process between '
@@ -318,7 +319,7 @@ trainer = Trainer(
     out_channels=out_channels,
     ipython_shell=args.ipython,
     # extra_save_steps=range(0, max_steps, 10_000),
-    # mixed_precision=True,  # Enable to use Apex for mixed precision training
+    mixed_precision=args.amp,
 )
 
 if args.deterministic:

@@ -8,6 +8,7 @@ from typing import Callable
 
 import torch
 from torch import nn
+from torch.cuda import amp
 import numpy as np
 import itertools
 
@@ -135,18 +136,20 @@ class Noise2VoidTrainer(Trainer):
             dinp = torch.as_tensor(dinp).to(self.device).float()
 
         # forward pass
-        dout = self.model(dinp)
-        if dmask is None:
-            dloss = self.criterion(dout, dtarget)
-        else:
-            dloss = self.criterion(dout, dtarget, dmask)
+        with amp.autocast(enabled=self.mixed_precision):
+            dout = self.model(dinp)
+            if dmask is None:
+                dloss = self.criterion(dout, dtarget)
+            else:
+                dloss = self.criterion(dout, dtarget, dmask)
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException
         # update step
-        self.optimizer.zero_grad()
-        dloss.backward()
-        self.optimizer.step()
+        self.scaler.scale(dloss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.optimizer.zero_grad(set_to_none=True)
         return dloss, dout
 
     @torch.no_grad()
@@ -187,11 +190,12 @@ class Noise2VoidTrainer(Trainer):
                 dinp = torch.as_tensor(dinp).to(self.device).float()
 
             # forward pass
-            dout = self.model(dinp)
-            if dmask is None:
-                dloss = self.criterion(dout, dtarget)
-            else:
-                dloss = self.criterion(dout, dtarget, dmask)
+            with amp.autocast(enabled=self.mixed_precision):
+                dout = self.model(dinp)
+                if dmask is None:
+                    dloss = self.criterion(dout, dtarget)
+                else:
+                    dloss = self.criterion(dout, dtarget, dmask)
             val_loss.append(dloss.item())
             out = dout.detach().cpu()
             outs.append(out)

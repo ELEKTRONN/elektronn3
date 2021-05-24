@@ -28,7 +28,9 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
+from torch.cuda import amp
 from tqdm import tqdm
+
 
 import elektronn3
 from elektronn3.training import handlers
@@ -362,9 +364,7 @@ class Trainer:
                     hparams[k] = str(v)
         self.hparams = hparams
 
-        if self.mixed_precision:
-            from apex import amp
-            self.model, self.optimizer = amp.initialize(self.model, self.optimizer, opt_level='O1')
+        self.scaler = amp.GradScaler(enabled=self.mixed_precision)
 
         if exp_name is None:  # Auto-generate a name based on model name and ISO timestamp
             timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
@@ -516,31 +516,30 @@ class Trainer:
         dtarget = target.to(self.device, non_blocking=True) if target is not None else None
         dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
         # forward pass
-        dout = self.model(dinp)
-        if dtarget_class is not None:
-            dloss = self.criterion(dout, dtarget, dtarget_class)
-        else:
-            dloss = self.criterion(dout, dtarget)
+        with amp.autocast(enabled=self.mixed_precision):
+            dout = self.model(dinp)
+            if dtarget_class is not None:
+                dloss = self.criterion(dout, dtarget, dtarget_class)
+            else:
+                dloss = self.criterion(dout, dtarget)
 
         unlabeled = batch.get('unlabeled')
         if unlabeled is not None:  # Add a simple consistency loss
             u_inp = unlabeled['inp']
             du_inp = u_inp.to(self.device, non_blocking=True)
-            du_loss = self.ss_criterion(du_inp)
-            dloss += du_loss
+            with amp.autocast(enabled=self.mixed_precision):
+                du_loss = self.ss_criterion(du_inp)
+                dloss += du_loss
             self.tb.add_scalar('stats/tr_uloss', float(du_loss), global_step=self.step)
 
         if torch.isnan(dloss):
             logger.error('NaN loss detected! Aborting training.')
             raise NaNException
         # update step
-        self.optimizer.zero_grad()
-        if self.mixed_precision:
-            with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
-        else:
-            dloss.backward()
-        self.optimizer.step()
+        self.scaler.scale(dloss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.optimizer.zero_grad(set_to_none=True)
         return dloss, dout
 
     def _train(self, max_steps, max_runtime):
@@ -728,13 +727,14 @@ class Trainer:
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True) if target is not None else None
             dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
-            dout = self.model(dinp)
-            if dtarget is None:  # Use self-supervised unary loss function
-                val_loss.append(self.ss_criterion(dout).item())
-            elif dtarget_class is not None:
-                val_loss.append(self.criterion(dout, dtarget, dtarget_class).item())
-            else:
-                val_loss.append(self.criterion(dout, dtarget).item())
+            with amp.autocast(enabled=self.mixed_precision):
+                dout = self.model(dinp)
+                if dtarget is None:  # Use self-supervised unary loss function
+                    val_loss.append(self.ss_criterion(dout).item())
+                elif dtarget_class is not None:
+                    val_loss.append(self.criterion(dout, dtarget, dtarget_class).item())
+                else:
+                    val_loss.append(self.criterion(dout, dtarget).item())
             out = dout.detach().cpu()
             outs.append(out)
             targets.append(target)
@@ -861,6 +861,7 @@ class Trainer:
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'lr_sched_state_dict': lr_sched_state,
+            'scaler_state_dict': self.scaler.state_dict(),
             'info': info
         }, state_dict_path)
         log(f'Saved state_dict as {state_dict_path}')
