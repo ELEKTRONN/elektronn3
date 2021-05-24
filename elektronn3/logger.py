@@ -37,7 +37,10 @@ def logger_setup():
             datefmt='%Y-%m-%d %H:%M:%S')
         uu = uuid.uuid4()
         # Temporary log file path, to be changed later.
-        lfile_path = os.path.abspath(f'/tmp/{user_name}_{uu}_elektronn3.log')
+        if os.path.isdir(f'/ptmp/{user_name}'):
+            lfile_path = os.path.abspath(f'/ptmp/{user_name}/{uu}_elektronn3.log')
+        else:
+            lfile_path = os.path.abspath(f'/tmp/{user_name}_{uu}_elektronn3.log')
         lfile_level = logging.DEBUG
         lfile_handler = logging.FileHandler(lfile_path)
         lfile_handler.setLevel(lfile_level)
