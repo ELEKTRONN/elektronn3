@@ -318,6 +318,8 @@ start_training = time.time()
 trainer.run(max_steps=max_steps, max_runtime=max_runtime)
 
 training_time_minutes = (time.time() - start_training) / 60
+
+print(f'Training was done using mixed precision: {args.amp}')
 print(f'\n\nTotal training run time (minutes): {training_time_minutes:.2f}')
 
 # How to re-calculate mean, std and class_weights for other datasets:
