@@ -94,7 +94,7 @@ def benchmark(float16, jit):
         #     warmup=1,
         #     active=2,
         # ),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./profiler_tb_{experiment_name}'),
+        # on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./profiler_tb_{experiment_name}'),
     ) as prof:
         with torch.profiler.record_function(f'model_inference'):
             predictor.predict(x)
