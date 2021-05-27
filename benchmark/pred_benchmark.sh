@@ -1,11 +1,9 @@
 #!/bin/bash -l
 
-#SBATCH -o ./outputs/pred-out.%j
-#SBATCH -e ./outputs/pred-err.%j
+#SBATCH -o ./pred-out.%j
+#SBATCH -e ./pred-err.%j
 #SBATCH -D ./
 #SBATCH -J E3_PRED_GPU_TEST
-#SBATCH --constraint="gpu"
-#SBATCH --gres=gpu:v100:2
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
