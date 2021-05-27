@@ -20,6 +20,7 @@ parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument('--amp', action='store_true', help='Use automatic mixed precision')
+parser.add_argument('--dp', action='store_true', help='Enable data parallel training on all available GPUs')
 parser.add_argument(
     '-s', '--epoch-size', type=int, default=8000,
     help='How many training samples sto process between '
@@ -104,6 +105,10 @@ model = UNet(
     # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
 ).to(device)
+
+if args.dp:
+    model = nn.DataParallel(model)
+
 # Example for a model-compatible input.
 example_input = torch.ones(1, 1, 32, 64, 64)
 

@@ -16,7 +16,14 @@ module load anaconda/3/2020.02
 
 conda activate e3
 
+## Single GPU:
 # Train without mixed precision
-srun python3 ./train_benchmark.py
+srun python3 ./train_benchmark.py --jit=disabled
 # Train with mixed precision (hopefully using Tensor Cores)
-srun python3 ./train_benchmark.py --amp
+srun python3 ./train_benchmark.py --jit=disabled --amp
+
+## Multi GPU data parallel:
+# Train without mixed precision
+srun python3 ./train_benchmark.py --jit=disabled --dp
+# Train with mixed precision (hopefully using Tensor Cores)
+srun python3 ./train_benchmark.py --jit=disabled --dp --amp
