@@ -22,12 +22,12 @@ parser.add_argument('-n', '--exp-name', default=None, help='Manually set experim
 parser.add_argument('--amp', action='store_true', help='Use automatic mixed precision')
 parser.add_argument('--dp', action='store_true', help='Enable data parallel training on all available GPUs')
 parser.add_argument(
-    '-s', '--epoch-size', type=int, default=4000,
+    '-s', '--epoch-size', type=int, default=8000,
     help='How many training samples to process between '
          'validation/preview/extended-stat calculation phases.'
 )
 parser.add_argument(
-    '-m', '--max-steps', type=int, default=1000,
+    '-m', '--max-steps', type=int, default=2000,
     help='Maximum number of training steps to perform.'
 )
 parser.add_argument(
@@ -261,8 +261,8 @@ else:
         optimizer,
         base_lr=1e-6,
         max_lr=1e-3,
-        step_size_up=200,
-        step_size_down=800,
+        step_size_up=500,
+        step_size_down=1500,
         cycle_momentum=True if 'momentum' in optimizer.defaults else False
     )
     if optimizer_state_dict is not None:
