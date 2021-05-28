@@ -269,7 +269,7 @@ class Trainer3d:
                 'preview_tile_shape and preview_overlap_shape or preview_offset!'
             )
         if dataloader_kwargs is None:
-            dataloader_kwargs = dict()
+            dataloader_kwargs = dict(persistent_workers=True)  # do not shutdown workers at epoch end
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
@@ -373,13 +373,12 @@ class Trainer3d:
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=self.batchsize, shuffle=True,
             num_workers=self.num_workers, pin_memory=True,
-            timeout=960 if self.num_workers > 0 else 0,
-            worker_init_fn=_worker_init_fn, **dataloader_kwargs)
+            timeout=0, worker_init_fn=_worker_init_fn, **dataloader_kwargs)
 
         if valid_dataset is not None:
             self.valid_loader = DataLoader(
                 self.valid_dataset, batch_size=self.batchsize, shuffle=True,
-                timeout=960 if self.num_workers > 0 else 0, num_workers=self.num_workers,
+                timeout=0, num_workers=self.num_workers,
                 pin_memory=True, worker_init_fn=_worker_init_fn, **dataloader_kwargs)
 
         self.valid_metrics = {} if valid_metrics is None else valid_metrics
@@ -477,8 +476,8 @@ class Trainer3d:
                 dout = self.model(dfeats, dinp, dtarget_pts)
             out = dout.detach().cpu()
 
-            dout_flat = dout.view(-1, self.num_classes)
-            dtarget_flat = dtarget.view(-1)
+            dout_flat = dout.reshape(-1, self.num_classes)
+            dtarget_flat = dtarget.reshape(-1)
             dloss = self.criterion(dout_flat, dtarget_flat)
 
             if torch.isnan(dloss):
@@ -536,22 +535,26 @@ class Trainer3d:
         n_feats = features.size(-1)
         current_palette = sns.color_palette('bright', n_feats)
         feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
+        self.tb.add_text('tr_source', batch["extra"], global_step=self.step)
         if pts is not None:
             cols = torch.zeros(pts.size(), dtype=torch.long)
             for ii in range(n_feats):
                 cols[features[..., ii] == 1] = feat_cols[ii]
             self.tb.add_mesh('tr_inp', pts, cols, global_step=self.step)
-
         if dtarget_pts is not None:
-            cols = torch.zeros(target_pts.size(), dtype=torch.long)
+            pts = target_pts
+        if pts is not None:
+            cols = torch.zeros(pts.size(), dtype=torch.long)
             for ii in range(n_classes):
                 cols[target.squeeze(-1) == ii] = target_cols[ii]
-            self.tb.add_mesh('tr_target', target_pts, cols, global_step=self.step)
-            cols = torch.zeros(target_pts.size(), dtype=torch.long)
+            self.tb.add_mesh('tr_target', pts, cols, global_step=self.step)
+            cols = torch.zeros(pts.size(), dtype=torch.long)
             out = torch.argmax(out, -1)
+            # ignore class
+            out[target == (n_classes - 1)] = n_classes
             for ii in range(n_classes):
                 cols[out == ii] = target_cols[ii]
-            self.tb.add_mesh('tr_pred', target_pts, cols, global_step=self.step)
+            self.tb.add_mesh('tr_pred', pts, cols, global_step=self.step)
 
         stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
@@ -643,8 +646,8 @@ class Trainer3d:
                 else:
                     dout = self.model(dfeats, dinp, dtarget_pts)
                 out = dout.detach().cpu()
-                dout = dout.view(-1, self.num_classes)
-                dtarget = dtarget.view(-1)
+                dout = dout.reshape(-1, self.num_classes)
+                dtarget = dtarget.reshape(-1)
                 val_loss.append(self.criterion(dout, dtarget).item())
                 outs.append(dout.detach().cpu())
                 targets.append(dtarget.detach().cpu())
@@ -658,6 +661,7 @@ class Trainer3d:
             n_feats = features.size(-1)
             current_palette = sns.color_palette('bright', n_feats)
             feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
+            self.tb.add_text('val_source', batch["extra"], global_step=self.step)
             if pts is not None:
                 cols = torch.zeros(pts.size(), dtype=torch.long)
                 for ii in range(n_feats):
@@ -665,15 +669,19 @@ class Trainer3d:
                 self.tb.add_mesh('val_inp', pts, cols, global_step=self.step)
 
             if dtarget_pts is not None:
-                cols = torch.zeros(target_pts.size(), dtype=torch.long)
+                pts = target_pts
+            if pts is not None:
+                cols = torch.zeros(pts.size(), dtype=torch.long)
                 for ii in range(n_classes):
                     cols[target.squeeze(-1) == ii] = target_cols[ii]
-                self.tb.add_mesh('val_target', target_pts, cols, global_step=self.step)
-                cols = torch.zeros(target_pts.size(), dtype=torch.long)
+                self.tb.add_mesh('val_target', pts, cols, global_step=self.step)
+                cols = torch.zeros(pts.size(), dtype=torch.long)
                 out = torch.argmax(out, -1)
+                # ignore class
+                out[target == (n_classes - 1)] = n_classes
                 for ii in range(n_classes):
                     cols[out == ii] = target_cols[ii]
-                self.tb.add_mesh('val_pred', target_pts, cols, global_step=self.step)
+                self.tb.add_mesh('val_pred', pts, cols, global_step=self.step)
 
             stats['val_loss'] = np.mean(val_loss)
             stats['val_loss_std'] = np.std(val_loss)

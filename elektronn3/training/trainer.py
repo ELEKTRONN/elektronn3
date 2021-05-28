@@ -572,18 +572,6 @@ class Trainer:
                 batch['unlabeled'] = next(unlabeled_iter)
             dloss, dout = self._train_step(batch)
 
-        running_vx_size = 0  # Counts input sizes (number of pixels/voxels) of training batches
-        timer = Timer()
-        batch_iter = tqdm(
-            self.train_loader, 'Training', total=len(self.train_loader), dynamic_ncols=True
-        )
-        for i, batch in enumerate(batch_iter):
-            if self.step in self.extra_save_steps:
-                self._save_model(f'_step{self.step}', verbose=True)
-
-            dloss, dout = self._train_step(batch)
-
-            target = batch['target']
             with torch.no_grad():
                 loss = float(dloss)
                 target = batch.get('target')
