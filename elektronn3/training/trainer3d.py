@@ -543,6 +543,8 @@ class Trainer3d:
             self.tb.add_mesh('tr_inp', pts, cols, global_step=self.step)
         if dtarget_pts is not None:
             pts = target_pts
+        if len(target.shape) == 3:
+            target = target.squeeze(2)
         if pts is not None:
             cols = torch.zeros(pts.size(), dtype=torch.long)
             for ii in range(n_classes):
@@ -670,6 +672,8 @@ class Trainer3d:
 
             if dtarget_pts is not None:
                 pts = target_pts
+            if len(target.shape) == 3:
+                target = target.squeeze(2)
             if pts is not None:
                 cols = torch.zeros(pts.size(), dtype=torch.long)
                 for ii in range(n_classes):
