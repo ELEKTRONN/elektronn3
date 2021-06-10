@@ -14,4 +14,5 @@ module load anaconda/3/2020.02
 
 conda activate e3
 
+export CUDA_VISIBLE_DEVICES=0
 srun python3 ./pred_benchmark.py

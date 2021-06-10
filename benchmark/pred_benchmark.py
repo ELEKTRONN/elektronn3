@@ -1,9 +1,9 @@
+import os
 import time
 
 import torch
 import numpy as np
 
-from elektronn3.inference import Predictor
 from elektronn3.models.unet import UNet
 
 
@@ -11,101 +11,99 @@ torch.backends.cudnn.benchmark = True
 
 print(' == Setting up...')
 
-# float16 = False
-# jit = False
-sample_shape = (1, 1, 512, 512, 512)
-tile_shape = (128, 128, 128)
-overlap_shape = (0, 0, 0)
+jit = False
+
+# Determine input sizes for optimal VRAM usage
+cluster = os.getenv('CLUSTER', default='UNKNOWN')
+# These sizes work for wholebrain (16125MiB VRAM @ RTX 5000) and larger GPUs
+s2 = 512 + 128
+s3 = 64 + 16
+
+## Uncomment to get cluster-specific sizes
+# if cluster == 'WHOLEBRAIN':
+#     # wholebrain (16125MiB VRAM @ RTX 5000)
+#     s2 = 512 + 128
+#     s3 = 64 + 16
+# elif cluster == 'COBRA':
+#     # cobra (32510MiB VRAM @ V100)
+#     s2 = 512 + 256
+#     s3 = 64 + 32
+# elif cluster == 'RAVEN':
+#     # raven (40536MiB VRAM @ A100)
+#     s2 = 512 + 256
+#     s3 = 64 + 32
+# else:
+#     s2 = 512
+#     s3 = 64
+
+print(f'Running on {cluster}')
 
 
-def benchmark(float16, jit):
+inp_shape2 = (8, 1, s2, s2)
+inp_shape3 = (8, 1, s3, s3, s3)
 
+inp_shapes = [
+    inp_shape2,
+    inp_shape3,
+]
+
+def benchmark(float16, inp_shape):
+    torch.cuda.empty_cache()
+    dim = len(inp_shape) - 2
     device = torch.device('cuda')
-    n = 3  # Number of repetitions
+    n = 10  # Number of measured repetitions
     dtype = torch.float16 if float16 else torch.float32
     print(f'dtype: {dtype}')
-    print(f'jit: {jit}')
-    print(f'sample_shape, tile_shape, overlap_shape: {sample_shape, tile_shape, overlap_shape}')
+    print(f'dim: {dim}')
+    print(f'inp_shape: {inp_shape}')
     _float16_str = 'float16' if float16 else 'float32'
-    _jit_str = 'jit' if jit else 'nojit'
-    experiment_name = f'{_float16_str}_{_jit_str}'
+    experiment_name = f'{dim}d_{_float16_str}'
     print(f'Experiment name: {experiment_name}')
 
     model = UNet(
+        dim=dim,
         out_channels=2,
         n_blocks=4,
         start_filts=32,
-        planar_blocks=(0,),
         activation='relu',
         normalization='batch',
         # conv_mode='valid',
-    ).to(device)
+    ).to(device, dtype)
     if jit:
         model = torch.jit.script(model)
 
-    x = torch.ones(*sample_shape, dtype=dtype, device=device)
-    predictor = Predictor(
-        model,
-        # tile_shape=(64, 128, 128),
-        # overlap_shape=(32, 64, 64),
-        tile_shape=tile_shape,
-        overlap_shape=overlap_shape,
-        out_shape=(2, *x.shape[2:]),
-        verbose=False,
-        float16=float16
-    )
+    x_warmup = torch.randn(*inp_shape, dtype=dtype)
+
 
     print(' == Warming up...')
-    r = predictor.predict(x).cpu()
+    r = model(x_warmup.to(device)).cpu()
+    torch.cuda.synchronize()
     del r
+
+    torch.cuda.empty_cache()
+
+
+    # Generate random inputs of same shape for measurements
+    xm = [torch.randn(*inp_shape, dtype=dtype) for _ in range(n)]
 
     print(' == Start timing inference speed...')
     start_total = time.time()
 
-    for _ in range(n):
+    for i in range(n):
         startm = time.time()
-        predictor.predict(x)
+        model(xm[i].to(device)).cpu()
         torch.cuda.synchronize()
         dt = time.time() - startm
         print(f'Inference run time (sec): {dt:.2f}')
 
     dt_total = time.time() - start_total
     dt_total_per_run = dt_total / n
-    print(f'Average time ({n} runs) (sec): {dt_total_per_run:.2f}')
+    throughput = np.prod(inp_shape) / dt_total_per_run
+    mvoxs = throughput / 1e6
+    print(f'Average inference time ({n} runs) (sec): {dt_total_per_run:.2f}')
+    print(f'Average MVox/s: {mvoxs:.2f}')
     print('\n\n')
 
-
-    # def trace_handler(prof):
-    #     print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
-    #     prof.export_chrome_trace("./profiler_trace_" + str(prof.step_num) + ".json")
-    #     prof.tensorboard_trace_handler('./profiler_tb')
-
-
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        use_cuda=True,
-        # record_shapes=True,
-        # with_flops=True,
-        # schedule=torch.profiler.schedule(
-        #     wait=1,
-        #     warmup=1,
-        #     active=2,
-        # ),
-        # on_trace_ready=torch.profiler.tensorboard_trace_handler(f'./profiler_tb_{experiment_name}'),
-    ) as prof:
-        with torch.profiler.record_function(f'model_inference'):
-            predictor.predict(x)
-
-    print('torch.profiler results:\n')
-
-    print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
-    print()
-    # prof.export_chrome_trace(f"./profiler_trace.json_{experiment_name}")
-
-
-for _float16 in [False, True]:
-    for _jit in [False, True]:
-        benchmark(float16=_float16, jit=_jit)
+for _inp_shape in inp_shapes:
+    for _float16 in [False, True]:
+        benchmark(float16=_float16, inp_shape=_inp_shape)
