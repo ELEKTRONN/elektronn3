@@ -260,6 +260,7 @@ class Trainer3d:
             dataloader_kwargs: Optional[dict] = None,
             nbatch_avg: int = 10,
             tqdm_kwargs: Optional[dict] = None,
+            lcp_flag: bool = False,  # Light ConvPoint uses a different axis order.
     ):
         if preview_batch is not None and (
                 preview_tile_shape is None or (
@@ -312,6 +313,7 @@ class Trainer3d:
         self.preview_plotting_handler = preview_plotting_handler
         self.mixed_precision = mixed_precision
         self.tqdm_kwargs = {'disable': True} if tqdm_kwargs is None else tqdm_kwargs
+        self.lcp_flag = lcp_flag
 
         self._tracker = HistoryTracker()
         self._timer = Timer()
@@ -465,15 +467,24 @@ class Trainer3d:
 
             # Everything with a "d" prefix refers to tensors on self.device (i.e. probably on GPU)
             dinp = pts.to(self.device, non_blocking=True)
-
             dfeats = features.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True)
+
+            # --- LightConvPoint uses different ordering than ConvPoint
+            if self.lcp_flag:
+                dinp = dinp.transpose(1, 2)
+                dfeats = dfeats.transpose(1, 2)
 
             # some point conv models do not have the third call argument
             if dtarget_pts is None:
                 dout = self.model(dfeats, dinp)
             else:
                 dout = self.model(dfeats, dinp, dtarget_pts)
+
+            # --- LightConvPoint uses different ordering than ConvPoint
+            if self.lcp_flag:
+                dout = dout.transpose(1, 2)
+
             out = dout.detach().cpu()
 
             dout_flat = dout.reshape(-1, self.num_classes)
@@ -642,11 +653,22 @@ class Trainer3d:
                 dinp = pts.to(self.device, non_blocking=True)
                 dfeats = features.to(self.device, non_blocking=True)
                 dtarget = target.to(self.device, non_blocking=True)
+
+                # --- LightConvPoint uses different ordering than ConvPoint
+                if self.lcp_flag:
+                    dinp = dinp.transpose(1, 2)
+                    dfeats = dfeats.transpose(1, 2)
+
                 # some point conv models do not have the third call argument
                 if dtarget_pts is None:
                     dout = self.model(dfeats, dinp)
                 else:
                     dout = self.model(dfeats, dinp, dtarget_pts)
+
+                # --- LightConvPoint uses different ordering than ConvPoint
+                if self.lcp_flag:
+                    dout = dout.transpose(1, 2)
+
                 out = dout.detach().cpu()
                 dout = dout.reshape(-1, self.num_classes)
                 dtarget = dtarget.reshape(-1)
