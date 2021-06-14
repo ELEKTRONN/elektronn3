@@ -547,7 +547,7 @@ class Trainer3d:
         if pts is not None:
             cols = torch.zeros(pts[:1].size(), dtype=torch.long)
             for ii in range(n_feats):
-                cols[features[..., ii] == 1] = feat_cols[ii]
+                cols[features[:1, ..., ii] == 1] = feat_cols[ii]
             self.tb.add_mesh('tr_inp', pts[:1], cols, global_step=self.step)
         if dtarget_pts is not None:
             pts = target_pts
@@ -689,7 +689,7 @@ class Trainer3d:
             if pts is not None:
                 cols = torch.zeros(pts[:1].size(), dtype=torch.long)
                 for ii in range(n_feats):
-                    cols[features[..., ii] == 1] = feat_cols[ii]
+                    cols[features[:1, ..., ii] == 1] = feat_cols[ii]
                 self.tb.add_mesh('val_inp', pts[:1], cols, global_step=self.step)
 
             if dtarget_pts is not None:
