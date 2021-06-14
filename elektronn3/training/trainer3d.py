@@ -269,8 +269,6 @@ class Trainer3d:
                 'If preview_batch is set, you will also need to specify '
                 'preview_tile_shape and preview_overlap_shape or preview_offset!'
             )
-        if dataloader_kwargs is None:
-            dataloader_kwargs = dict(persistent_workers=True)  # do not shutdown workers at epoch end
         self.ignore_errors = ignore_errors
         self.ipython_shell = ipython_shell
         self.device = device
@@ -322,7 +320,6 @@ class Trainer3d:
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
-
         if self.mixed_precision:
             from apex import amp
             self.model, self.optimizer = amp.initialize(self.model, self.optimizer, opt_level='O1')
@@ -476,11 +473,11 @@ class Trainer3d:
                 dfeats = dfeats.transpose(1, 2)
 
             # some point conv models do not have the third call argument
+
             if dtarget_pts is None:
                 dout = self.model(dfeats, dinp)
             else:
                 dout = self.model(dfeats, dinp, dtarget_pts)
-
             # --- LightConvPoint uses different ordering than ConvPoint
             if self.lcp_flag:
                 dout = dout.transpose(1, 2)
@@ -518,7 +515,7 @@ class Trainer3d:
             # End of core training loop on self.device
 
             with torch.no_grad():
-                loss = float(dloss)
+                loss = float(dloss.detach().cpu())
                 mean_target = float(target.to(torch.float32).mean())
                 stats['tr_loss'].append(loss)
                 misc['mean_target'].append(mean_target)
@@ -540,32 +537,35 @@ class Trainer3d:
             if self.terminate:
                 break
 
-        n_classes = out.size(-1)
-        current_palette = sns.color_palette('bright', n_classes)
-        target_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_classes)}
+        current_palette = sns.color_palette('bright', self.num_classes)
+        target_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(
+            self.num_classes)}
         n_feats = features.size(-1)
         current_palette = sns.color_palette('bright', n_feats)
         feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
         self.tb.add_text('tr_source', batch["extra"], global_step=self.step)
         if pts is not None:
-            cols = torch.zeros(pts.size(), dtype=torch.long)
+            cols = torch.zeros(pts[:1].size(), dtype=torch.long)
             for ii in range(n_feats):
                 cols[features[..., ii] == 1] = feat_cols[ii]
-            self.tb.add_mesh('tr_inp', pts, cols, global_step=self.step)
+            self.tb.add_mesh('tr_inp', pts[:1], cols, global_step=self.step)
         if dtarget_pts is not None:
             pts = target_pts
         if len(target.shape) == 3:
             target = target.squeeze(2)
         if pts is not None:
+            # remove ignore class, only add first sample in batch
+            out = out[0][target[0] != self.num_classes][None, ]
+            pts = pts[0][target[0] != self.num_classes][None, ]
+            target = target[0][target[0] != self.num_classes][None, ]
+
             cols = torch.zeros(pts.size(), dtype=torch.long)
-            for ii in range(n_classes):
+            for ii in range(self.num_classes):
                 cols[target.squeeze(-1) == ii] = target_cols[ii]
             self.tb.add_mesh('tr_target', pts, cols, global_step=self.step)
             cols = torch.zeros(pts.size(), dtype=torch.long)
             out = torch.argmax(out, -1)
-            # ignore class
-            out[target == (n_classes - 1)] = n_classes
-            for ii in range(n_classes):
+            for ii in range(self.num_classes):
                 cols[out == ii] = target_cols[ii]
             self.tb.add_mesh('tr_pred', pts, cols, global_step=self.step)
 
@@ -687,24 +687,27 @@ class Trainer3d:
             feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
             self.tb.add_text('val_source', batch["extra"], global_step=self.step)
             if pts is not None:
-                cols = torch.zeros(pts.size(), dtype=torch.long)
+                cols = torch.zeros(pts[:1].size(), dtype=torch.long)
                 for ii in range(n_feats):
                     cols[features[..., ii] == 1] = feat_cols[ii]
-                self.tb.add_mesh('val_inp', pts, cols, global_step=self.step)
+                self.tb.add_mesh('val_inp', pts[:1], cols, global_step=self.step)
 
             if dtarget_pts is not None:
                 pts = target_pts
             if len(target.shape) == 3:
                 target = target.squeeze(2)
             if pts is not None:
+                # remove ignore class, only add first sample in batch
+                out = out[0][target[0] != self.num_classes][None,]
+                pts = pts[0][target[0] != self.num_classes][None,]
+                target = target[0][target[0] != self.num_classes][None,]
+
                 cols = torch.zeros(pts.size(), dtype=torch.long)
                 for ii in range(n_classes):
                     cols[target.squeeze(-1) == ii] = target_cols[ii]
                 self.tb.add_mesh('val_target', pts, cols, global_step=self.step)
                 cols = torch.zeros(pts.size(), dtype=torch.long)
                 out = torch.argmax(out, -1)
-                # ignore class
-                out[target == (n_classes - 1)] = n_classes
                 for ii in range(n_classes):
                     cols[out == ii] = target_cols[ii]
                 self.tb.add_mesh('val_pred', pts, cols, global_step=self.step)
