@@ -961,7 +961,7 @@ class UNet(nn.Module):
 
         # create the encoder pathway and add to a list
         self.criss_cross_recurrence_downconv = criss_cross_recurrence_downconv
-        print("cc recurrence down convolution blocks: ", self.criss_cross_recurrence_downconv)
+        print("cc recurrence down convolution blocks within each block: ", self.criss_cross_recurrence_downconv)
         for i in range(n_blocks):
             ins = self.in_channels if i == 0 else outs
             outs = self.start_filts * (2**i)
@@ -1009,7 +1009,7 @@ class UNet(nn.Module):
 
         #criss_cross_attention setup
         self.criss_cross_recurrence_bottom = criss_cross_recurrence_bottom
-        print("cc recurrence down convolution blocks: ", self.criss_cross_recurrence_bottom)
+        print("cc recurrence down convolution blocks after last down-convolution: ", self.criss_cross_recurrence_bottom)
 
         if self.criss_cross_recurrence_bottom > 0:
             self.RCCA = RCCAModule(in_channels= self.down_conv_outs, out_channels=self.down_conv_outs, recurrence=self.criss_cross_recurrence_bottom)

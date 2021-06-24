@@ -61,6 +61,10 @@ parser.add_argument('-ccb', '--criss-cross-recurrence-bottom', type = int, defau
 parser.add_argument('-ccd', '--criss-cross-recurrence-downconv', type = int, default=0,
     help='Number of Criss-Cross attention blocks applied in each down_conv_block before the pooling layer'
 )
+
+parser.add_argument('-bs', '--batch-size', type = int, default=4,
+    help='Batch size for the Trainer class'
+)
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
@@ -71,6 +75,7 @@ random.seed(random_seed)
 deterministic = args.deterministic
 criss_cross_recurrence_bottom = args.criss_cross_recurrence_bottom
 criss_cross_recurrence_downconv = args.criss_cross_recurrence_downconv
+batch_size = args.batch_size
 
 if deterministic:
     torch.backends.cudnn.deterministic = True
@@ -260,17 +265,16 @@ inference_kwargs = {
     'transform': valid_transform,
 }
 
-# optimizer = optim.SGD(
-#     model.parameters(),
-#     lr=0.1,  # Learning rate is set by the lr_sched below
-#     momentum=0.9,
-#     weight_decay=0.5e-4,
-# )
-optimizer = optim.AdamW(
-    model.parameters(),
-    lr=1e-3,  # Learning rate is set by the lr_sched below
-    weight_decay=0.5e-4,
+optimizer = optim.SGD(model.parameters(),
+     lr=0.1,  # Learning rate is set by the lr_sched below
+     momentum=0.9,
+     weight_decay=0.5e-4,
 )
+#optimizer = optim.AdamW(
+#    model.parameters(),
+#    lr=1e-3,  # Learning rate is set by the lr_sched below
+#    weight_decay=0.5e-4,
+#)
 optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
 
 # Set to True to perform Cyclical LR range test instead of normal training
@@ -284,10 +288,10 @@ if do_lr_range_test:
 else:
     lr_sched = torch.optim.lr_scheduler.CyclicLR(
         optimizer,
-        base_lr=1e-6,
-        max_lr=1e-3,
-        step_size_up=2000,
-        step_size_down=6000,
+        base_lr=0.001,
+        max_lr=0.1,
+        step_size_up=4000,
+        step_size_down=16000,
         cycle_momentum=True if 'momentum' in optimizer.defaults else False
     )
     if optimizer_state_dict is not None:
@@ -315,7 +319,7 @@ trainer = Trainer(
     device=device,
     train_dataset=train_dataset,
     valid_dataset=valid_dataset,
-    batch_size=4,
+    batch_size=batch_size,
     num_workers=2,
     save_root=save_root,
     exp_name=args.exp_name,
