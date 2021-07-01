@@ -47,7 +47,6 @@ def tiled_apply(
         overlap_shape: Sequence[int],
         offset: Optional[Sequence[int]],
         out_shape: Sequence[int],
-        argmax_with_threshold: Optional[float] = None,
         verbose: bool = False
 ) -> torch.Tensor:
     """Splits a tensor into overlapping tiles and applies a function on them independently.
@@ -122,12 +121,6 @@ def tiled_apply(
             f'spatial out shape[2:] {tuple(out_shape[2:])} has to be divisible '
             f'by tile_shape {tile_shape}.'
         )
-    if out_shape[1] > 255 and argmax_with_threshold is not None:
-        raise NotImplementedError(
-            f'C = out_shape[1] = {out_shape[1]}, but '
-            f'argmax_with_threshold with C > 255 is not supported due to uint8 storage.'
-        )
-
     if offset is not None:
         offset = np.array(offset)
     inp_shape = np.array(inp.shape)
@@ -153,8 +146,7 @@ def tiled_apply(
         crop_high_corner = tile_shape + overlap_shape
         # Used to crop the output tile to the relevant, unpadded region
         #  that will be written to the final output
-        final_crop_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(crop_low_corner,
-                                                                 crop_high_corner)])
+        final_crop_slice = _extend_nc([slice(l, h) for l, h in zip(crop_low_corner, crop_high_corner)])
     if offset is not None: # no cropping necessary for valid conv
         final_crop_slice = None
     del inp
@@ -188,12 +180,10 @@ def tiled_apply(
         assert np.all(np.less_equal(inp_high_corner, inp_padded.shape[2:])), inp_high_corner
         # Slice only the current tile region in ([D,] H, W) dims
         # Slice input with overlap
-        inp_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(inp_low_corner,
-                                                                   inp_high_corner)])
+        inp_slice = _extend_nc([slice(l, h) for l, h in zip(inp_low_corner, inp_high_corner)])
         # Output slice without overlap (this is the region where the current
         #  inference result will be stored)
-        out_slice = _extend_nc([slice(int(l), int(h)) for l, h in zip(out_low_corner,
-                                                                   out_high_corner)])
+        out_slice = _extend_nc([slice(l, h) for l, h in zip(out_low_corner, out_high_corner)])
         inp_tile = inp_padded[inp_slice].contiguous()
         out_tile = func(inp_tile, final_crop_slice)
 
@@ -202,11 +192,7 @@ def tiled_apply(
         # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
         if out is None:
             out = torch.empty(out_shape.tolist(), dtype=out_tile.dtype)
-        # Since out is a CPU tensor, out[out_slice] assignments below implicitly copy data to CPU
-        if argmax_with_threshold is not None:
-            out[out_slice] = (out_tile > argmax_with_threshold).to(out_dtype).argmax(dim=1).to(out_dtype)
-        else:
-            out[out_slice] = out_tile
+        out[out_slice] = out_tile
 
     return out
 
@@ -548,7 +534,6 @@ class Predictor:
                 overlap_shape=self.overlap_shape,
                 offset=self.offset,
                 out_shape=out_shape,
-                argmax_with_threshold=self.argmax_with_threshold,
                 verbose=self.verbose
             )
         # Otherwise: No tiling, apply model to the whole input in one step
@@ -657,7 +642,10 @@ class Predictor:
             else:
                 padded_out_shape = np.array(self.out_shape)
                 padded_out_shape[1:] = np.ceil(self.out_shape[1:] / self.tile_shape) * self.tile_shape
-                offset = self.offset if self.offset is not None else np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
+                if self.offset is None:
+                    offset = np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
+                else:
+                    offset = np.array(self.offset)
                 padded_inp_shape = (*inp.shape[:2], *padded_out_shape[1:] + 2 * offset)
                 padded_inp = np.zeros(padded_inp_shape)
                 # Define the relevant region (that is: without the padding that was just added)
