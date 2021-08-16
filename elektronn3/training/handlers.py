@@ -167,7 +167,7 @@ def _tb_log_preview(
     out_batch = trainer._preview_inference(
         inp=inp_batch,
         inference_kwargs=trainer.inference_kwargs,
-    )
+    ).to(torch.float32)
     inp_batch = inp_batch.numpy()
     if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(out_batch, 1).numpy()
@@ -265,7 +265,7 @@ def _tb_log_sample_images(
 
 
     if trainer.inference_kwargs['apply_softmax']:
-        out_batch = F.softmax(torch.as_tensor(out_batch), 1).numpy()
+        out_batch = F.softmax(torch.as_tensor(out_batch, dtype=torch.float32), 1).numpy()
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
     inp_slice = batch2img_inp(images['inp'])

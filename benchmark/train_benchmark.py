@@ -20,13 +20,14 @@ parser = argparse.ArgumentParser(description='Train a network.')
 parser.add_argument('--disable-cuda', action='store_true', help='Disable CUDA')
 parser.add_argument('-n', '--exp-name', default=None, help='Manually set experiment name')
 parser.add_argument('--amp', action='store_true', help='Use automatic mixed precision')
+parser.add_argument('--dp', action='store_true', help='Enable data parallel training on all available GPUs')
 parser.add_argument(
-    '-s', '--epoch-size', type=int, default=800,
+    '-s', '--epoch-size', type=int, default=8000,
     help='How many training samples to process between '
          'validation/preview/extended-stat calculation phases.'
 )
 parser.add_argument(
-    '-m', '--max-steps', type=int, default=500000,
+    '-m', '--max-steps', type=int, default=2000,
     help='Maximum number of training steps to perform.'
 )
 parser.add_argument(
@@ -104,6 +105,10 @@ model = UNet(
     # full_norm=False,  # Uncomment to restore old sparse normalization scheme
     # up_mode='resizeconv_nearest',  # Enable to avoid checkerboard artifacts
 ).to(device)
+
+if args.dp:
+    model = nn.DataParallel(model)
+
 # Example for a model-compatible input.
 example_input = torch.ones(1, 1, 32, 64, 64)
 
@@ -119,37 +124,20 @@ elif args.jit == 'train':
 # USER PATHS
 save_root = os.path.expanduser('~/e3training/')
 os.makedirs(save_root, exist_ok=True)
-if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
-    data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-    # data_root = '/wholebrain/u/mdraw/barrier_gt_phil_r2r_bn/'
-    # data_root = '/wholebrain/u/mdraw/barrier_gt_phil_n2v/'
-    data_root_lab = '/wholebrain/scratch/j0126/barrier_gt_phil/'
-    fnames = sorted([f for f in os.listdir(data_root) if f.endswith('.h5')])
-    input_h5data = [(os.path.join(data_root, f), 'raW') for f in fnames]
-    target_h5data = [(os.path.join(data_root_lab, f), 'labels') for f in fnames]
-    valid_indices = [1, 3, 5, 7]
+data_root = os.path.expanduser('~/neuro_data_cdhw/')
+input_h5data = [
+    (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
+    for i in range(3)
+]
+target_h5data = [
+    (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
+    for i in range(3)
+]
+valid_indices = [2]
 
-    # These statistics are computed from the training dataset.
-    # Remember to re-compute and change them when switching the dataset.
-    dataset_mean = (0.6170815,)
-    dataset_std = (0.15687169,)
-    # Class weights for imbalanced dataset
-    class_weights = torch.tensor([0.2808, 0.7192]).to(device)
-else:  # Use publicly available neuro_data_cdhw dataset
-    data_root = os.path.expanduser('~/neuro_data_cdhw/')
-    input_h5data = [
-        (os.path.join(data_root, f'raw_{i}.h5'), 'raw')
-        for i in range(3)
-    ]
-    target_h5data = [
-        (os.path.join(data_root, f'barrier_int16_{i}.h5'), 'lab')
-        for i in range(3)
-    ]
-    valid_indices = [2]
-
-    dataset_mean = (155.291411,)
-    dataset_std = (42.599973,)
-    class_weights = torch.tensor([0.2653, 0.7347]).to(device)
+dataset_mean = (155.291411,)
+dataset_std = (42.599973,)
+class_weights = torch.tensor([0.2653, 0.7347]).to(device)
 
 
 max_steps = args.max_steps
@@ -273,8 +261,8 @@ else:
         optimizer,
         base_lr=1e-6,
         max_lr=1e-3,
-        step_size_up=2000,
-        step_size_down=6000,
+        step_size_up=500,
+        step_size_down=1500,
         cycle_momentum=True if 'momentum' in optimizer.defaults else False
     )
     if optimizer_state_dict is not None:
@@ -319,7 +307,7 @@ trainer = Trainer(
     out_channels=out_channels,
     ipython_shell=args.ipython,
     # extra_save_steps=range(0, max_steps, 10_000),
-    mixed_precision=args.amp,
+    mixed_precision=args.amp,  # Enable to use AMP
 )
 
 if args.deterministic:
@@ -328,9 +316,16 @@ if args.deterministic:
 # Archiving training script, src folder, env info
 Backup(script_path=__file__,save_path=trainer.save_path).archive_backup()
 
+import time
+start_training = time.time()
+
 # Start training
 trainer.run(max_steps=max_steps, max_runtime=max_runtime)
 
+training_time_minutes = (time.time() - start_training) / 60
+
+print(f'Training was done using mixed precision: {args.amp}')
+print(f'\n\nTotal training run time (minutes): {training_time_minutes:.2f}')
 
 # How to re-calculate mean, std and class_weights for other datasets:
 #  dataset_mean = utils.calculate_means(train_dataset.inputs)

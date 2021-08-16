@@ -30,7 +30,7 @@ dependencies:
   - scikit-image >=0.15
   - scipy >=1.3
   - tensorboardx >=2.0
-  - pytorch >=1.5  # pytorch-cpu also works, but it's not recommended.
+  - pytorch >=1.6  # pytorch-cpu also works, but it's not recommended.
 
   # Only required for running a tensorboard server:
   - tensorboard >=2.1.1
