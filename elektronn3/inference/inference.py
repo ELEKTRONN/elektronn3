@@ -3,6 +3,7 @@
 # Copyright (c) 2017 - now
 # Max Planck Institute of Neurobiology, Munich, Germany
 # Authors: Philipp Schubert, Martin Drawitsch
+import copy
 import itertools
 import logging
 import os
@@ -394,11 +395,12 @@ class Predictor:
 
         self.out_dtype = out_dtype
         self.float16 = float16
-        # if float16 and not isinstance(model, str):
-        #     raise NotImplementedError(
-        #         'float16 inference is currently only supported for models '
-        #         'that are passed as file paths (strings).'
-        #     )
+        if float16 and not isinstance(model, str) and not next(model.parameters()).dtype == torch.float16:
+            # If the model is passed as an object and not already in float16,
+            # we need to deepcopy it because model casting to float16 is only
+            # supported in-place - thus we would downcast it irreversibly also
+            # in the calling scope.
+            model = copy.deepcopy(model)
         self.dtype = torch.float16 if float16 else torch.float32
         self.transform = transform
         if isinstance(augmentations, int):
