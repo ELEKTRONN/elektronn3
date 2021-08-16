@@ -134,6 +134,7 @@ def tiled_apply(
     else:
         # Create padded input with overlap
         padded_shape = inp_shape + np.array((0, 0, *overlap_shape * 2))
+        logger.info(f'additional input padding to {padded_shape}')
         inp_padded = torch.zeros(tuple(padded_shape), dtype=inp.dtype)
 
         padslice = _extend_nc(
@@ -466,6 +467,16 @@ class Predictor:
         else:
             assert is_set(out_shape), 'If tile_shape is set, out_shape is required to be set, too.'
             self.enable_tiling = True
+            if offset is None:
+                offset = utils.calculate_offset(self.model)
+            if np.count_nonzero(offset) == 0: # no valid conv → disable offset
+                offset = None
+            else:
+                offset = np.array(offset)
+                # Set overlap to offset shape because IMO that's the only reasonable choice.
+                overlap_shape = offset
+                out_shape = np.array([*out_shape[:-len(offset)], *(out_shape[-len(offset):] - 2 * offset)])
+                logger.info(f'Adjusted out_shape: {out_shape}')
         self.offset = offset
 
         self.overlap_shape = np.array(overlap_shape) if overlap_shape is not None else None
