@@ -1,0 +1,7 @@
+Konzept: LSD-transfomration des Targets implementieren um dann ein UNET darauf zu trainieren
+1. LSD-transformator w√hlen
+2. Implementierung ausarbeiten
+    a. Welcher Datentyp w√re eine LSD?
+    b. Welcher Datentyp hat eine Segmentation/Target?
+    c. Welcher Datensatz ist √berhaupt gefragt?
+    d. Wie kann man aus dem Datentyp den LSD erstellen?
