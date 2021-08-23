@@ -127,23 +127,6 @@ class DistanceTransformTarget:
         return inp, dist
         
 class LSDTarget:
-    """Converts discrete binary label target tensors to their (signed)
-    euclidean distance transform (EDT) representation.
-    
-    Based on the method proposed in https://arxiv.org/abs/1805.02718.
-    
-    Args:
-    scale: Scalar value to divide distances before applying normalization
-    normalize_fn: Function to apply to distance map for normalization.
-    inverted: Invert target labels before computing transform if ``True``.
-         This means the distance map will show the distance to the nearest
-         foreground pixel at each background pixel location (which is the
-         opposite behavior of standard distance transform).
-    signed: Compute signed distance transform (SEDT), where foreground
-        regions are not 0 but the negative distance to the nearest
-        foreground border.
-    vector: Return distance vector map instead of scalars.
-    """
     def __init__(
         self,
         scale: Optional[float] = 50.,

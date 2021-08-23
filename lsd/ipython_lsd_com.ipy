@@ -1,0 +1,86 @@
+# coding: utf-8
+%load testing_lsd.py
+# %load testing_lsd.py
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy as sp
+from scipy import ndimage as im
+
+one = np.array([[0,0,0,0],
+                [0,0,1,1],
+                [0,0,1,1],
+                [1,0,0,0]])
+
+
+two = np.array([[1,1,0,0],
+                [0,1,1,0],
+                [0,1,1,0],
+                [1,0,0,0]])
+
+
+three = np.array([[0,0,0,0],
+                [1,0,0,1],
+                [1,0,0,1],
+                [1,0,0,0]])
+
+#################################################################
+#### Centers of Mass ############################################
+
+array = np.stack((one, two, three), axis=0)
+print("Input Array shape: {}".format(array.shape))
+
+labels = im.label(array)[0]
+print("labels: {}".format(labels))
+print(np.nonzero(np.unique(labels)))
+
+com = np.array(im.measurements.center_of_mass(array, labels,np.unique(labels)[1:]))
+print("Center of masses type: {}".format(type(com)))
+print("Centers of mass: \n{}".format(com))
+
+com_lsd = np.zeros(((3,)+array.shape))
+print("Shape of the LSD vector-field: {}".format(com_lsd.shape))
+#################################################################
+#################################################################
+%save?
+com_lsd.shape
+com
+np.nonzero(labels)
+array[np.nonzero(labels)]
+array
+for instance in np.unique(labels)[1:]:
+    indices_perlabel = np.where(labels==instance)
+    print(indices_perlabel)
+    
+for instance in np.unique(labels)[1:]:
+    indices_perlabel = np.where(labels==instance)
+    print(indices_perlabel)
+    print(array[indices_perlabel])
+    print(labels[indices_perlabel])
+    
+com
+shape = array.shape
+shape
+coords = np.mgrid[:shape[0], :shape[1], :shape[2]]
+coords
+inds = im.distance_transform_edt(array, return_distances=False, return_indices=True).astype(coords.dtype)
+inds
+dist = inds-coords
+dist
+dist.shape
+inds
+inds.dtype
+inds.shape
+coords.size
+coords.shape
+coords
+coords[:,0,0,0]
+coords[:,0,0,1]
+coords[:,0,0,2]
+coords[:,0,0,3]
+coords[:,1,0,3]
+#coords has in its first axis the vector of coordinates and the last 3 dimension indicate the input array
+#we don't need the inds tensor
+com_lsd.shape
+# %load testing_lsd.py
+%save?
+%save -r ipython_lsd_com
