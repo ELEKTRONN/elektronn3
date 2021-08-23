@@ -473,7 +473,6 @@ class Trainer3d:
                 dfeats = dfeats.transpose(1, 2)
 
             # some point conv models do not have the third call argument
-
             if dtarget_pts is None:
                 dout = self.model(dfeats, dinp)
             else:
@@ -637,7 +636,7 @@ class Trainer3d:
             stats = {name: [] for name in self.valid_metrics.keys()}
             batch_iter = tqdm(
                 enumerate(self.valid_loader), 'Validating', total=len(self.valid_loader),
-                dynamic_ncols=True
+                dynamic_ncols=True, **self.tqdm_kwargs
             )
             outs = []
             targets = []
@@ -723,7 +722,8 @@ class Trainer3d:
 
         for hc in self.valid_dataset.hc_names:
             merged = None
-            for batch in tqdm(range(math.ceil(self.valid_dataset.get_hybrid_length(hc) / self.batchsize)), 'Validate'):
+            for batch in tqdm(range(math.ceil(self.valid_dataset.get_hybrid_length(hc) / self.batchsize)), 'Validate',
+                              **self.tqdm_kwargs):
                 pts = torch.zeros((self.batchsize, self.valid_dataset.sample_num, 3))
                 feats = torch.ones((self.batchsize, self.valid_dataset.sample_num, 1))
                 centroids = torch.ones((self.batchsize, 3))

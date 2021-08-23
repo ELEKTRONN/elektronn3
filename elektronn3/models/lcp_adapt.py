@@ -26,7 +26,7 @@ class ConvAdaptSeg(nn.Module):
                  architecture,
                  activation,
                  norm,
-                 track_running_stats=False
+                 track_running_stats=False,
                  ):
         """Adaptable ConvPoint segmentation network.
 
@@ -89,7 +89,7 @@ class ConvAdaptSeg(nn.Module):
                     ConvNet(layer['ic'] * kernel_num, layer['oc'] * kernel_num, layer['ks']),
                     search,
                     activation=activation(),
-                    normalization=normalization
+                    normalization=normalization,
                 )
                 self.layers.append(cv)
 
