@@ -557,16 +557,16 @@ class Trainer3d:
             out = out[0][target[0] != self.num_classes][None, ]
             pts = pts[0][target[0] != self.num_classes][None, ]
             target = target[0][target[0] != self.num_classes][None, ]
-
-            cols = torch.zeros(pts.size(), dtype=torch.long)
-            for ii in range(self.num_classes):
-                cols[target.squeeze(-1) == ii] = target_cols[ii]
-            self.tb.add_mesh('tr_target', pts, cols, global_step=self.step)
-            cols = torch.zeros(pts.size(), dtype=torch.long)
-            out = torch.argmax(out, -1)
-            for ii in range(self.num_classes):
-                cols[out == ii] = target_cols[ii]
-            self.tb.add_mesh('tr_pred', pts, cols, global_step=self.step)
+            if out.nelement() > 0:
+                cols = torch.zeros(pts.size(), dtype=torch.long)
+                for ii in range(self.num_classes):
+                    cols[target.squeeze(-1) == ii] = target_cols[ii]
+                self.tb.add_mesh('tr_target', pts, cols, global_step=self.step)
+                cols = torch.zeros(pts.size(), dtype=torch.long)
+                out = torch.argmax(out, -1)
+                for ii in range(self.num_classes):
+                    cols[out == ii] = target_cols[ii]
+                self.tb.add_mesh('tr_pred', pts, cols, global_step=self.step)
 
         stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
@@ -700,16 +700,16 @@ class Trainer3d:
                 out = out[0][target[0] != self.num_classes][None,]
                 pts = pts[0][target[0] != self.num_classes][None,]
                 target = target[0][target[0] != self.num_classes][None,]
-
-                cols = torch.zeros(pts.size(), dtype=torch.long)
-                for ii in range(n_classes):
-                    cols[target.squeeze(-1) == ii] = target_cols[ii]
-                self.tb.add_mesh('val_target', pts, cols, global_step=self.step)
-                cols = torch.zeros(pts.size(), dtype=torch.long)
-                out = torch.argmax(out, -1)
-                for ii in range(n_classes):
-                    cols[out == ii] = target_cols[ii]
-                self.tb.add_mesh('val_pred', pts, cols, global_step=self.step)
+                if out.nelement() > 0:
+                    cols = torch.zeros(pts.size(), dtype=torch.long)
+                    for ii in range(n_classes):
+                        cols[target.squeeze(-1) == ii] = target_cols[ii]
+                    self.tb.add_mesh('val_target', pts, cols, global_step=self.step)
+                    cols = torch.zeros(pts.size(), dtype=torch.long)
+                    out = torch.argmax(out, -1)
+                    for ii in range(n_classes):
+                        cols[out == ii] = target_cols[ii]
+                    self.tb.add_mesh('val_pred', pts, cols, global_step=self.step)
 
             stats['val_loss'] = np.mean(val_loss)
             stats['val_loss_std'] = np.std(val_loss)
