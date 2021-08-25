@@ -14,3 +14,8 @@ Konzept: LSD-transfomration des Targets implementieren um dann ein UNET darauf z
        fuer jedes Element im output also im datensatz bzw fuer
        jedes Pixel was gelabelled ist einen array/vektor hat in dem jede komponente eine andere Information ueber das gelabellede objekt hat.
     ===>>> wie kann man einen array vom center-of-mass generieren            in dem jedes element einen abstandsvektor zum ceneter-of-mass generiert?
+TO Implement:
+1. vdt=vigra boundary vector distance transform of the segmentation
+2. linalg.norm(vdt)
+3. vigra gaussian divergence of the vector distance transform
+4. CenterOfMass(Seg)

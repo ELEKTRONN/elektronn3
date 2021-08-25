@@ -1,0 +1,81 @@
+# coding: utf-8
+import numpy as np
+import vigra as v
+%help np.random
+%help np.random
+help np.random
+help(np.rand)
+help(np.random.rand)
+clear
+array= np.random.rand(3,20,20,10)
+vigra_array=v.array(array)
+vigra_array=v.VigraArray(array)
+vigra_array=v.VigraArray(array, axistags="cxyz")
+vigra_array=v.VigraArray(array, v.axistags="cxyz")
+vigra_array=v.VigraArray(array, axistags=v.defaultAxistags("cxyz"))
+vigra_array.axistags
+vigra_array[0,0,0,:]
+divergence = v.filters.gaussianDivergence(vigra_array)
+history
+divergence
+divergence.shape
+divergence.axistags
+divergence.numpy
+clear
+array.shape
+help(np.hstack)
+help(np.vstack)
+help(np.tile)
+y = np.vstack(array, divercence)
+divergence.shape
+y = np.vstack(array, divergence)
+y = np.vstack((array, divergence))
+y.shape
+vigra_array
+clear
+vdt = v.filters.boundaryVectorDistanceTransform(vigra_array)
+vigra_array.dtype
+help(v.filters.boundaryVectorDistanceTransform)
+seg_inds=np.random.choice([0,1], shape=(1,20,20,10))
+seg_inds=np.random.choice([0,1], size=(1,20,20,10))
+seg_inds
+clear
+labels= np.ndimage.label(seg_inds)
+import numpy.ndimage as ni
+from numpy import ndimage as nd
+ndimage
+from scipy import ndimage as im
+clear
+labels = nd.labels(seg_inds)
+labels = ni.labels(seg_inds)
+labels = im.labels(seg_inds)
+labels = im.label(seg_inds)
+labels.shape
+labels
+labels[0]
+labels[1]
+vlab=v.taggedView(labels[1], "cxyz")
+vlab=v.taggedView(labels[1].asype(float), "cxyz")
+vlab=v.taggedView(labels[0], "cxyz")
+vlab.shape
+vlab.axistags
+vdt = v.filters.boundaryVectorDistanceTransform(vlab)
+vlab.dtype
+vdt = v.filters.boundaryVectorDistanceTransform(vlab.astype(uint))
+vdt = v.filters.boundaryVectorDistanceTransform(vlab.astype(np.uint32))
+vdt.shape
+vdt.size
+vdt.axistag
+vdt.axistags
+np.linalg.norm(vdt)
+np.linalg.norm(vdt, axis=0)
+normalized_vdt=np.linalg.norm(vdt, axis=0)
+normalized_vdt.shape
+clear
+history
+vseg=v.taggedView(seg_inds, "cxyz")
+vseg_vdt = v.filters.boundaryVectorDistanceTransform(vseg)
+vseg_vdt = v.filters.boundaryVectorDistanceTransform(vseg.astype(np.uint32))
+vdt==vseg_vdt
+%save?
+%save -r vigranumpy_ipython
