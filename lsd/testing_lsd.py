@@ -55,7 +55,7 @@ for i in np.unique(labels)[1:]:
 ######## Vigranumpy VectorDistanceTransform, gaussianDivergence##
 array = array.reshape((1,)+array.shape)
 print("new segmentation like array shape: {}".format(array.shape))
-vigra_array = v.taggedView(array, 'cxyz')
+vigra_array = v.VigraArray(array, axistags=v.defaultAxistags('czyx'))
 vdt = v.filters.boundaryVectorDistanceTransform(vigra_array.astype(np.uint32))
 print("vector distance transform shape: {}".format(vdt.shape))
 print("vector distance transform axistags: {}".format(vdt.axistags))
@@ -63,8 +63,15 @@ print("vector distance transform axistags: {}".format(vdt.axistags))
 norm_vdt = np.linalg.norm(vdt, axis=0)
 print("vector distance transform (normalised) shape: {}".format(norm_vdt.shape))
 
-gaussian_divergence = v.filters.gaussianDivergence(v.VigraArray(array, axistags=v.defaultAxistags("cxyz")))
-print("gaussian divergence shape: {}".format(gaussian_divergence.shape))
+#gaussian_divergence = v.filters.gaussianDivergence(vigra_array))
+#print("gaussian divergence shape: {}".format(gaussian_divergence.shape))
 narray= np.random.rand(3,20,20,10)
-vigra_array=v.VigraArray(narray, axistags=v.defaultAxistags("cxyz"))
-divergence = v.filters.gaussianDivergence(vigra_array)
+nvigra_array=v.VigraArray(narray, axistags=v.defaultAxistags("czyx"))
+divergence = v.filters.gaussianDivergence(nvigra_array)
+print("gaussian divergence shape: {}".format(divergence.shape))
+
+"""#test gaussianDivergence with a View
+nvigra_view = v.taggedView(narray.astype(np.float32), axistags=v.defaultAxistags('czyx'))
+divview = v.filters.gaussianDivergence(nvigra_view)
+print("divview shape: {}".format(divview.shape))
+commented because this raises an error. raised an issue on github ukoethe/vigra #498"""

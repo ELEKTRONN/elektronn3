@@ -13,178 +13,60 @@ from scipy.ndimage.morphology import distance_transform_edt
 from elektronn3.data.transforms import random_blurring
 from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 
+import vigra as v
+from scipy import ndimage as im
+
+
 Transform = Callable[
     [np.ndarray, Optional[np.ndarray]],
     Tuple[np.ndarray, Optional[np.ndarray]]
 ]
-class Lambda:
-    """Wraps a function of the form f(x, y) = (x', y') into a transform.
 
-    Args:
-        func: A function that takes two arrays and returns a
-            tuple of two arrays.
 
-    Example:
-        >>> # Multiplies inputs (x) by 255, leaves target (y) unchanged
-        >>> t = Lambda(lambda x, y: (x * 255, y))
 
-        >>> # You can also pass regular Python functions to Lambda
-        >>> def flatten(x, y):
-        >>>     return x.reshape(-1), y.reshape(-1)
-        >>> t = Lambda(flatten)
-    """
-    def __init__(
+class LSDGaussVdtCom:
+    
+        """Generates LSD for a segmented dataset with 10 channels"""
+        def __init__(
             self,
-            func: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
+            #func: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
     ):
-        self.func = func
+        #self.func = func
+        self.vdtTransformer = v.filters.boundaryVectorDistanceTransform
+        self.gaussDiv = v.filters.gaussianDivergence
+        self.labeller = im.label
 
     def __call__(
             self,
             inp: np.ndarray,
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
-        return self.func(inp, target)
+        
+        vtarget = v.VigraArray(target, axistags = v.defaultAxistags('czyx'))
+        #vector distance transform and norm
+        vdt_target = self.vdtTransformer(vtarget.astype(np.uint32))
+        vdt_norm_target = np.linalg.norm(vdt_target, axis=0)
+
+        gauss_target = self.gaussDiv(vtarget)
+
+        #center of mass transform
+        labels = self.labeller(vtarget)[0]
+        #print("labels: {}".format(labels))
+        #print(np.nonzero(np.unique(labels)))
+        
+        com = np.array(im.measurements.center_of_mass(vtarget, labels,np.unique(labels)[1:]))
+        #print("Center of masses type: {}".format(type(com)))
+        #print("Centers of mass: \n{}".format(com))
+        
+        shape = vtarget.shape
+        coords = np.mgrid[:shape[0], :shape[1], :shape[2]]
+        coords[:, vtarget==0]=0
+        com_lsd = np.copy(coords).astype(float)
+        for i in np.unique(labels)[1:]:
+            com_lsd[:, labels==i] = np.tile(com[i-1].reshape(-1,1), com_lsd[:, labels==i].shape[1])
+
+        #now stack everything on top along 0th axis to form the 10D LSD
+        output = np.stack((vdt_target, vdt_norm_target, gauss_target, com_lsd))
+        return (inp, output)
 
 
-class DistanceTransformTarget:
-    """Converts discrete binary label target tensors to their (signed)
-    euclidean distance transform (EDT) representation.
-    
-    Based on the method proposed in https://arxiv.org/abs/1805.02718.
-    
-    Args:
-    scale: Scalar value to divide distances before applying normalization
-    normalize_fn: Function to apply to distance map for normalization.
-    inverted: Invert target labels before computing transform if ``True``.
-         This means the distance map will show the distance to the nearest
-         foreground pixel at each background pixel location (which is the
-         opposite behavior of standard distance transform).
-    signed: Compute signed distance transform (SEDT), where foreground
-        regions are not 0 but the negative distance to the nearest
-        foreground border.
-    vector: Return distance vector map instead of scalars.
-    """
-    def __init__(
-        self,
-        scale: Optional[float] = 50.,
-        normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = np.tanh,
-        inverted: bool = True,
-        signed: bool = True,
-        vector: bool = False
-    ):
-        self.scale = scale
-        self.normalize_fn = normalize_fn
-        self.inverted = inverted
-        self.signed = signed
-        self.vector = vector
-        
-    def edt(self, target: np.ndarray) -> np.ndarray:
-        sh = target.shape
-        if target.min() == 1:  # If everything is 1, the EDT should be inf for every pixel
-            nc = target.ndim if self.vector else 1
-            return np.full((nc, *sh), np.inf, dtype=np.float32)
-        
-        if self.vector:
-            if target.ndim == 2:
-                coords = np.mgrid[:sh[0], :sh[1]]
-            elif target.ndim == 3:
-                coords = np.mgrid[:sh[0], :sh[1], :sh[2]]
-            else:
-                raise RuntimeError(f'Target shape {sh} not understood.')
-            inds = distance_transform_edt(
-                target, return_distances=False, return_indices=True
-            ).astype(np.float32)
-            dist = inds - coords
-            # assert np.isclose(np.sqrt(dist[0] ** 2 + dist[1] ** 2), distance_transform_edt(target))
-            return dist
-            
-        # Else: Regular scalar edt
-        dist = distance_transform_edt(target).astype(np.float32)[None]
-        return dist
-        
-    def __call__(
-        self,
-        inp: np.ndarray,  # returned without modifications
-        target: Optional[np.ndarray]
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        if target is None:
-            return inp, target
-        # assert target.max() <= 1
-        # Ensure np.bool dtype, invert if needed
-        if self.inverted:
-            target = target == 0
-        else:
-            target = target > 0
-        dist = self.edt(target)
-        if self.signed:
-            # Compute same transform on the inverted target. The inverse transform can be
-            #  subtracted from the original transform to get a signed distance transform.
-            invdist = self.edt(~target)
-            dist -= invdist
-        if self.normalize_fn is not None:
-            dist = self.normalize_fn(dist / self.scale)
-        return inp, dist
-        
-class LSDTarget:
-    def __init__(
-        self,
-        scale: Optional[float] = 50.,
-        normalize_fn: Optional[Callable[[np.ndarray], np.ndarray]] = np.tanh,
-        inverted: bool = True,
-        signed: bool = True,
-        vector: bool = False
-    ):
-        self.scale = scale
-        self.normalize_fn = normalize_fn
-        self.inverted = inverted
-        self.signed = signed
-        self.vector = vector
-        
-    def edt(self, target: np.ndarray) -> np.ndarray:
-        sh = target.shape
-        if target.min() == 1:  # If everything is 1, the EDT should be inf for every pixel
-            nc = target.ndim if self.vector else 1
-            return np.full((nc, *sh), np.inf, dtype=np.float32)
-        
-        if self.vector:
-            if target.ndim == 2:
-                coords = np.mgrid[:sh[0], :sh[1]]
-            elif target.ndim == 3:
-                coords = np.mgrid[:sh[0], :sh[1], :sh[2]]
-            else:
-                raise RuntimeError(f'Target shape {sh} not understood.')
-            inds = distance_transform_edt(
-                target, return_distances=False, return_indices=True
-            ).astype(np.float32)
-            dist = inds - coords
-            # assert np.isclose(np.sqrt(dist[0] ** 2 + dist[1] ** 2), distance_transform_edt(target))
-            return dist
-            
-        # Else: Regular scalar edt
-        dist = distance_transform_edt(target).astype(np.float32)[None]
-        return dist
-        
-    def __call__(
-        self,
-        inp: np.ndarray,  # returned without modifications
-        target: Optional[np.ndarray]
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        if target is None:
-            return inp, target
-        # assert target.max() <= 1
-        # Ensure np.bool dtype, invert if needed
-        if self.inverted:
-            target = target == 0
-        else:
-            target = target > 0
-        dist = self.edt(target)
-        if self.signed:
-            # Compute same transform on the inverted target. The inverse transform can be
-            #  subtracted from the original transform to get a signed distance transform.
-            invdist = self.edt(~target)
-            dist -= invdist
-        if self.normalize_fn is not None:
-            dist = self.normalize_fn(dist / self.scale)
-        return inp, dist
-        
