@@ -178,6 +178,8 @@ if args.resume is not None:  # Load pretrained network
 # Transformations to be applied to samples before feeding them to the network
 
 from lsd import LSDGaussVdtCom
+
+local_shape_descriptor = LSDGaussVdtCom
 common_transforms = [
     transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
