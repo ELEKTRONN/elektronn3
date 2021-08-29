@@ -75,3 +75,21 @@ nvigra_view = v.taggedView(narray.astype(np.float32), axistags=v.defaultAxistags
 divview = v.filters.gaussianDivergence(nvigra_view)
 print("divview shape: {}".format(divview.shape))
 commented because this raises an error. raised an issue on github ukoethe/vigra #498"""
+
+
+################################################################
+###### Test the LSD class that I wrote #########################
+
+from lsd import LSDGaussVdtCom
+
+transformer = LSDGaussVdtCom()
+print("Class LSDGaussVdtCom constructed")
+
+#create test data:
+testing_inputs = np.random.rand(1,10,20,20)
+testing_labels = np.random.choice([0,1], size=(1,10,20,20))
+print("""testing data has been created with shape {}""".format(testing_labels.shape))
+
+#apply the lsd_transformer to the data
+inputs, lsd_output=transformer(testing_inputs,testing_labels)
+print("output has been computed with shape {}".format(lsd_output.shape))

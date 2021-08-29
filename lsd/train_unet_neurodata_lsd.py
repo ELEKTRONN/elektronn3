@@ -91,7 +91,7 @@ logger.info(f'Running on device: {device}')
 # hparams = {'n_blocks': 4, 'start_filts': 32, 'planar_blocks': (0,)}
 hparams = {}
 
-out_channels = 2
+out_channels = 8 #change this for the lsd_description
 model = UNet(
     out_channels=out_channels,
     n_blocks=4,
@@ -200,30 +200,29 @@ common_data_kwargs = {  # Common options for training and valid sets.
     # 'offset': (8, 20, 20),
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
-train_dataset = PatchCreator(
-    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i not in valid_indices],
-    train=True,
-    epoch_size=args.epoch_size,
-    warp_prob=0.2,
-    warp_kwargs={
-        'sample_aniso': aniso_factor != 1,
-        'perspective': True,
-        'warp_amount': 1.0,
-    },
+
+train_dataset = KnossosLabels(
+    conf_path_raw_data='/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf',#philipp said to use this dataset
+    conf_path_labels='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/knossos.conf'
+    dir_path_label='/wholebrain/songbird/j0251/groundtruth/segmentation_gt': #this is from the dataloading.py file in the se-cycle-gan repository, lets see if this works
+    patch_shape=common_data_kwargs['patch_shape'],
     transform=train_transform,
-    **common_data_kwargs
-)
-valid_dataset = None if not valid_indices else PatchCreator(
-    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-    train=False,
-    epoch_size=40,  # How many samples to use for each validation run
-    warp_prob=0,
-    warp_kwargs={'sample_aniso': aniso_factor != 1},
-    transform=valid_transform,
-    **common_data_kwargs
-)
+    epoch_size=args.epoch_size,
+    mode='caching',
+    cache_size=64,
+    cache_reuses=8)
+
+
+#valid_dataset = None if not valid_indices else PatchCreator(
+#    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+#    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
+#    train=False,
+#    epoch_size=40,  # How many samples to use for each validation run
+#    warp_prob=0,
+#    warp_kwargs={'sample_aniso': aniso_factor != 1},
+#    transform=valid_transform,
+#    **common_data_kwargs
+#)
 
 # Use first validation cube for previews. Can be set to any other data source.
 preview_batch = get_preview_batch(

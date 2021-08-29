@@ -26,8 +26,8 @@ Transform = Callable[
 
 class LSDGaussVdtCom:
     
-        """Generates LSD for a segmented dataset with 10 channels"""
-        def __init__(
+    """Generates LSD for a segmented dataset with 10 channels"""
+    def __init__(
             self,
             #func: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
     ):
@@ -44,10 +44,10 @@ class LSDGaussVdtCom:
         
         vtarget = v.VigraArray(target, axistags = v.defaultAxistags('czyx'))
         #vector distance transform and norm
-        vdt_target = self.vdtTransformer(vtarget.astype(np.uint32))
-        vdt_norm_target = np.linalg.norm(vdt_target, axis=0)
+        vdt_target = self.vdtTransformer(vtarget)
+        vdt_norm_target = np.expand_dims(np.linalg.norm(vdt_target, axis=0), axis=0)
 
-        gauss_target = self.gaussDiv(vtarget)
+        gauss_target = self.gaussDiv(vdt_target)
 
         #center of mass transform
         labels = self.labeller(vtarget)[0]
@@ -59,14 +59,14 @@ class LSDGaussVdtCom:
         #print("Centers of mass: \n{}".format(com))
         
         shape = vtarget.shape
-        coords = np.mgrid[:shape[0], :shape[1], :shape[2]]
-        coords[:, vtarget==0]=0
+        coords = np.mgrid[:shape[1], :shape[2], :shape[3]]
+        coords[:, (vtarget==0)[0]]=0
         com_lsd = np.copy(coords).astype(float)
         for i in np.unique(labels)[1:]:
-            com_lsd[:, labels==i] = np.tile(com[i-1].reshape(-1,1), com_lsd[:, labels==i].shape[1])
+            com_lsd[:, (labels==i)[0]] = np.tile(com[i-1].reshape(-1,1), com_lsd[:, (labels==i)[0]].shape[1])[0].T
 
         #now stack everything on top along 0th axis to form the 10D LSD
-        output = np.stack((vdt_target, vdt_norm_target, gauss_target, com_lsd))
+        output = np.vstack((vdt_target, vdt_norm_target, gauss_target, com_lsd))
         return (inp, output)
 
 
