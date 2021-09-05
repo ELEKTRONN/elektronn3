@@ -1,0 +1,30 @@
+KssosLabels Klasse
+
+benötigt
+1) conf_path_label: Path to KNOSSOS .conf file corresponding to the labels
+2) conf_path_raw_data: Path to KNOSSOS .conf file corresponding to the raw data
+3) dir_path_label: Directory containing label kzip files
+
+but there are no kzip files!?!?
+
+the kzip files are only used to get the file bounds.
+
+what are the file bounds?
+Tuple of boundary coordinates (xyz) that constrain the region
+of where patches should be sampled from within the KNOSSOS dataset.
+E.g. ``bounds=((256, 256, 128), (512, 512, 512))`` means that only
+the region between the low corner (x=256, y=256, z=128) and the
+high corner (x=512, y=512, z=512) of the dataset is considered. If
+``None``, the whole dataset is used.
+(from KnossosRawData)
+
+in the _get_data method from KnossosLabels the data is loaded via
+data = self.kd._load_kzip_seg(zip_path, bounds[0], size,self.mag,padding=0,
+                                                  apply_mergelist=False,
+                                                  return_dataset_cube_if_nonexistent=False,
+                                                  expand_area_to_mag=False)
+
+but there is also a method from knossos_utils called load_seg(), which does not require
+a kzip_file to be loaded. lets explore that one!!
+
+
