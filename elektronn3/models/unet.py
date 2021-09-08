@@ -43,6 +43,13 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 from torch.nn import functional as F
 
+from elektronn3.modules.evonorm import EvoNorm
+from elektronn3.modules.wsconv import FWS, WSConvTranspose3d, WSConv3d
+from elektronn3.modules.axial_attention import AxialAttention, AxialPositionalEmbedding
+
+enable_block_axa = False
+enable_bottom_axa = False
+
 
 def get_conv(dim=3):
     """Chooses an implementation for a convolution layer."""
@@ -103,6 +110,10 @@ def get_normalization(normtype: str, num_channels: int, dim: int = 3):
             return nn.BatchNorm2d(num_channels)
         else:
             raise ValueError('dim has to be 2 or 3')
+    elif normtype.lower() == 'evo-s0':
+        return EvoNorm(num_channels, version='S0', groups=32)
+    elif normtype.lower() == 'evo-b0':
+        return EvoNorm(num_channels, version='B0')
     else:
         raise ValueError(
             f'Unknown normalization type "{normtype}".\n'
@@ -139,7 +150,7 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
         stride = planar_kernel(stride)
         padding = planar_pad(padding)
         kernel_size = planar_kernel(kernel_size)
-    return get_conv(dim)(
+    conv = get_conv(dim)(
         in_channels,
         out_channels,
         kernel_size=kernel_size,
@@ -147,6 +158,24 @@ def conv3(in_channels, out_channels, kernel_size=3, stride=1,
         padding=padding,
         bias=bias
     )
+    # conv = nn.utils.weight_norm(conv)
+    return conv
+    # return FWS(get_conv(dim)(
+    #     in_channels,
+    #     out_channels,
+    #     kernel_size=kernel_size,
+    #     stride=stride,
+    #     padding=padding,
+    #     bias=bias
+    # ))
+    # return WSConv3d(
+    #     in_channels,
+    #     out_channels,
+    #     kernel_size=kernel_size,
+    #     stride=stride,
+    #     padding=padding,
+    #     bias=bias
+    # )
 
 
 def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
@@ -157,12 +186,26 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
         kernel_size = planar_kernel(kernel_size)
         stride = planar_kernel(stride)
     if mode == 'transpose':
-        return get_convtranspose(dim)(
+        upconv = get_convtranspose(dim)(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
             stride=stride
         )
+        # upconv = nn.utils.weight_norm(upconv)
+        return upconv
+        # return FWS(get_convtranspose(dim)(
+        #     in_channels,
+        #     out_channels,
+        #     kernel_size=kernel_size,
+        #     stride=stride
+        # ))
+        # return WSConvTranspose3d(
+        #     in_channels,
+        #     out_channels,
+        #     kernel_size=kernel_size,
+        #     stride=stride
+        # )
     elif 'resizeconv' in mode:
         if 'linear' in mode:
             upsampling_mode = 'trilinear' if dim == 3 else 'bilinear'
@@ -177,7 +220,11 @@ def upconv2(in_channels, out_channels, mode='transpose', planar=False, dim=3):
 
 def conv1(in_channels, out_channels, dim=3):
     """Returns a 1x1 or 1x1x1 convolution, depending on dim"""
-    return get_conv(dim)(in_channels, out_channels, kernel_size=1)
+    conv = get_conv(dim)(in_channels, out_channels, kernel_size=1)
+    # conv = nn.utils.weight_norm(conv)
+    return conv
+    # return FWS(get_conv(dim)(in_channels, out_channels, kernel_size=1))
+    # return WSConv3d(in_channels, out_channels, kernel_size=1)
 
 
 def get_activation(activation):
@@ -202,7 +249,7 @@ def get_activation(activation):
 class DownConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 MaxPool.
-    A ReLU activation follows each convolution.
+    An activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
                  normalization=None, full_norm=True, dim=3, conv_mode='same'):
@@ -241,6 +288,14 @@ class DownConv(nn.Module):
             self.norm0 = nn.Identity()
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
 
+        if enable_block_axa:
+            self.axa = AxialAttention(
+                dim=self.out_channels,
+                dim_index=1,
+                heads=2,
+                num_dimensions=self.dim
+            )
+
     def forward(self, x):
         y = self.conv1(x)
         y = self.norm0(y)
@@ -248,8 +303,12 @@ class DownConv(nn.Module):
         y = self.conv2(y)
         y = self.norm1(y)
         y = self.act2(y)
+        if enable_block_axa:
+            y = self.axa(y)
         before_pool = y
         y = self.pool(y)
+        # if enable_block_axa:
+        #     y = self.axa(y)
         return y, before_pool
 
 
@@ -328,7 +387,7 @@ def autocrop(from_down: torch.Tensor, from_up: torch.Tensor) -> Tuple[torch.Tens
 class UpConv(nn.Module):
     """
     A helper Module that performs 2 convolutions and 1 UpConvolution.
-    A ReLU activation follows each convolution.
+    An activation follows each convolution.
     """
 
     att: Optional[torch.Tensor]
@@ -836,6 +895,12 @@ class UNet(nn.Module):
         # to save resources
         self.planar_blocks = planar_blocks
 
+        if enable_block_axa:
+            self.initial_pe = AxialPositionalEmbedding(
+                dim=self.in_channels,
+                shape=(44, 88, 88),
+            )
+
         # create the encoder pathway and add to a list
         for i in range(n_blocks):
             ins = self.in_channels if i == 0 else outs
@@ -855,6 +920,18 @@ class UNet(nn.Module):
                 conv_mode=conv_mode,
             )
             self.down_convs.append(down_conv)
+
+        if enable_bottom_axa:
+            self.bottom_pe = AxialPositionalEmbedding(
+                dim=outs,
+                shape=(11,11,11),
+            )
+            self.bottom_axa = AxialAttention(
+                dim=outs,
+                dim_index=1,
+                heads=8,
+                num_dimensions=3,
+            )
 
         # create the decoder pathway and add to a list
         # - careful! decoding only requires n_blocks-1 blocks
@@ -894,12 +971,19 @@ class UNet(nn.Module):
     def forward(self, x):
         encoder_outs = []
 
+        if enable_block_axa:
+            x = self.initial_pe(x)
+
         # Encoder pathway, save outputs for merging
         i = 0  # Can't enumerate because of https://github.com/pytorch/pytorch/issues/16123
         for module in self.down_convs:
             x, before_pool = module(x)
             encoder_outs.append(before_pool)
             i += 1
+
+        if enable_bottom_axa:
+            x = self.bottom_pe(x)
+            x = self.bottom_axa(x)
 
         # Decoding by UpConv and merging with saved outputs of encoder
         i = 0
