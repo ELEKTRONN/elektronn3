@@ -28,3 +28,38 @@ but there is also a method from knossos_utils called load_seg(), which does not 
 a kzip_file to be loaded. lets explore that one!!
 
 
+knossos_utils.knossosdataset.KnossosDataset.load_seg() funktioniert so
+wie in ipython getestet, allerdings muss man die py.conf datei fÃr die
+segmentierung nehmen und nicht die .conf datei fÃr die segmentation
+/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/kno
+ssos.conf
+
+Also um die neue KnossosLabelsNozip aus der alten klasse zu schreiben
+muss man vor allem die _get_data() und die _get_file_bounds() methoden
+neu schreiben weil die __getitem__() methoden modifizieren
+
+die _get_file_bounds() methode schaut sich alle kzip files an und
+extrahiert aus dem self.dir_path und erstellt den self.file_bounds dict
+in dem die keys tuples sind aus (offset, max_values), die beide aus den
+bounds erstellt werden und fügt als value den dateinamen des respektiven
+kzip-files an.
+
+die methode checkt dann auch noch ob es Ã¼berlappende bereiche innerhalb
+der unterschiedliche kzip-files die zweimal selektiert werden. das ist
+unnÃ¶tig weil in der neuen klasse gibt es nur einen ladevorgang. dahr
+kann man sich wahrscheinlich auch alle bounds-berechnungen sparen die 
+für die ganzen kzip files.
+
+Was macht die _get_data methode noch?
+Sie erstellt eine liste von patches von denen ausgewÃhlt werden kann.
+diese liste heisst self.inp_targets.
+das bedeutet dass die patches von _get_data bereitgestellt werden und 
+dann erst in der __getitem__() methode selektiert werden.
+Also struktur sollte sein:
+_get_data() ---> praepariere datensatz einmalig sodass die patches ausg
+ewaehlt werden in der liste self.inp_targets
+__getitem__(self, index) ---> selektiere (zufällig, ohne auf index
+rücksicht zu nehmen)
+
+hat das vorbereiten der patches in _get_data() mit den unterschiedlich
+en kzip files und dann in self.inp_targets gespeichert werden? ist das unbedingt nötig?
