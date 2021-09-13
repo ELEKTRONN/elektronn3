@@ -53,6 +53,9 @@ parser.add_argument(
 parser.add_argument('-i', '--ipython', action='store_true',
     help='Drop into IPython shell on errors or keyboard interrupts.'
 )
+parser.add_argument('-c', '--criterion', default="L1",type=str,
+    help='Loss function'
+)
 args = parser.parse_args()
 
 # Set up all RNG seeds, set level of determinism
@@ -61,6 +64,7 @@ torch.manual_seed(random_seed)
 np.random.seed(random_seed)
 random.seed(random_seed)
 deterministic = args.deterministic
+criterion_string=args.criterion
 if deterministic:
     torch.backends.cudnn.deterministic = True
 else:
@@ -116,7 +120,7 @@ elif args.jit == 'train':
 
 
 # USER PATHS
-save_root = os.path.expanduser('~/e3training/')
+save_root = os.path.expanduser('/wholebrain/scratch/fkies/e3training/lsd/')
 os.makedirs(save_root, exist_ok=True)
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set
     data_root = '/wholebrain/scratch/j0126/barrier_gt_phil/'
@@ -182,7 +186,7 @@ dataset_mean = (0.,)
 dataset_std = (255.,)
 local_shape_descriptor = LSDGaussVdtCom()
 common_transforms = [
-    transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    transforms.Normalize(mean=dataset_mean, std=dataset_std),
     local_shape_descriptor
 
 ]
@@ -201,23 +205,24 @@ common_data_kwargs = {  # Common options for training and valid sets.
 from new_knossos import KnossosLabelsNozip
 train_dataset = KnossosLabelsNozip(
     conf_path_raw_data='/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf',#philipp said to use this dataset
-    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf'
+    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf',
     patch_shape=common_data_kwargs['patch_shape'],
     transform=train_transform,
     epoch_size=args.epoch_size,
-    raw_mode='caching')
+    raw_mode='caching',
+    raw_cache_size = 64,
+    raw_cache_reuses = 8)
 
 
-#valid_dataset = None if not valid_indices else PatchCreator(
-#    input_sources=[input_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-#    target_sources=[target_h5data[i] for i in range(len(input_h5data)) if i in valid_indices],
-#    train=False,
-#    epoch_size=40,  # How many samples to use for each validation run
-#    warp_prob=0,
-#    warp_kwargs={'sample_aniso': aniso_factor != 1},
-#    transform=valid_transform,
-#    **common_data_kwargs
-#)
+valid_dataset = KnossosLabelsNozip(
+    conf_path_raw_data='/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf',#philipp said to use this dataset
+    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf',
+    patch_shape=common_data_kwargs['patch_shape'],
+    transform=train_transform,
+    epoch_size=args.epoch_size,
+    raw_mode='caching',
+    raw_cache_size = 64,
+    raw_cache_reuses = 8)
 
 # Use first validation cube for previews. Can be set to any other data source.
 preview_batch = get_preview_batch(
@@ -254,37 +259,40 @@ optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
 
 # Set to True to perform Cyclical LR range test instead of normal training
 #  (see https://arxiv.org/abs/1506.01186, sec. 3.3).
-do_lr_range_test = False
-if do_lr_range_test:
-    # Begin with a very small lr and double it every 1000 steps.
-    for grp in optimizer.param_groups:
-        grp['lr'] = 1e-7  # Note: lr will be > 1.0 after 24k steps.
-    lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
-else:
-    lr_sched = torch.optim.lr_scheduler.CyclicLR(
-        optimizer,
-        base_lr=1e-6,
-        max_lr=1e-3,
-        step_size_up=2000,
-        step_size_down=6000,
-        cycle_momentum=True if 'momentum' in optimizer.defaults else False
-    )
-    if optimizer_state_dict is not None:
-        optimizer.load_state_dict(optimizer_state_dict)
-    if lr_sched_state_dict is not None:
-        lr_sched.load_state_dict(lr_sched_state_dict)
-# lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
+#do_lr_range_test = False
+#if do_lr_range_test:
+#    # Begin with a very small lr and double it every 1000 steps.
+#    for grp in optimizer.param_groups:
+#        grp['lr'] = 1e-7  # Note: lr will be > 1.0 after 24k steps.
+#    lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 2)
+#else:
+#    lr_sched = torch.optim.lr_scheduler.CyclicLR(
+#        optimizer,
+#        base_lr=1e-6,
+#        max_lr=1e-3,
+#        step_size_up=2000,
+#        step_size_down=6000,
+#        cycle_momentum=True if 'momentum' in optimizer.defaults else False
+#    )
+#    if optimizer_state_dict is not None:
+#        optimizer.load_state_dict(optimizer_state_dict)
+#    if lr_sched_state_dict is not None:
+#        lr_sched.load_state_dict(lr_sched_state_dict)
+lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
 
 # Validation metrics
 valid_metrics = {}
-for evaluator in [metrics.Accuracy, metrics.Precision, metrics.Recall, metrics.DSC, metrics.IoU]:
+for evaluator in [metrics.Accuracy, metrics.Precision]:
     valid_metrics[f'val_{evaluator.name}_mean'] = evaluator()  # Mean metrics
     for c in range(out_channels):
         valid_metrics[f'val_{evaluator.name}_c{c}'] = evaluator(c)
 
-crossentropy = nn.CrossEntropyLoss(weight=class_weights)
-dice = DiceLoss(apply_softmax=True, weight=class_weights)
-criterion = CombinedLoss([crossentropy, dice], weight=[0.5, 0.5], device=device)
+if criterion_string == "L1":
+    criterion = torch.nn.L1Loss()
+elif criterion_string == "L2":
+    criterion = torch.nn.MSELoss()
+else:
+    raise NotImplementedError
 
 # Create trainer
 trainer = Trainer(

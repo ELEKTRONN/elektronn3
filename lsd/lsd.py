@@ -42,7 +42,8 @@ class LSDGaussVdtCom:
             target: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
         
-        vtarget = v.VigraArray(target, axistags = v.defaultAxistags('czyx'))
+        #use np.expand_dims(target) to fix correct axistags for safe assignment of vigra axistags
+        vtarget = v.VigraArray(np.expand_dims(target, axis=0), axistags = v.defaultAxistags('czyx'))
         #vector distance transform and norm
         vdt_target = self.vdtTransformer(vtarget)
         vdt_norm_target = np.expand_dims(np.linalg.norm(vdt_target, axis=0), axis=0)

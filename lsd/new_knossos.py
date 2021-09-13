@@ -62,7 +62,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             knossos_bounds: Optional[Sequence[Sequence[Sequence[int]]]] = None,  # xyz
             label_offset: int = 0,
             label_order: Optional[Sequence[int]] = None,
-            raw_mode : str = "disk"
+            raw_mode : str = "disk",
             raw_disable_memory_check: bool = False,
             raw_verbose: bool = False,
             raw_cache_size: int = 50,
@@ -86,10 +86,10 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         self.label_offset = label_offset  # todo: verify correct handling of this offset
         self.label_order = label_order
         self.raw_mode = raw_mode
-        self.raw_disable_memory_check = raw_disable_memory_check,
-        self.raw_verbose = raw_verbose,
-        self.raw_cache_size = raw_cache_size,
-        self.raw_cache_reuses = raw_cache_reuses,
+        self.raw_disable_memory_check = raw_disable_memory_check
+        self.raw_verbose = raw_verbose
+        self.raw_cache_reuses = raw_cache_reuses
+        self.raw_cache_size = raw_cache_size
         self.offset_history = []
 
 
