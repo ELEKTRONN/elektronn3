@@ -63,6 +63,10 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             label_offset: int = 0,
             label_order: Optional[Sequence[int]] = None,
             raw_mode : str = "disk"
+            raw_disable_memory_check: bool = False,
+            raw_verbose: bool = False,
+            raw_cache_size: int = 50,
+            raw_cache_reuses: int = 10
     ):
         self.conf_path_label = conf_path_label
         self.conf_path_raw_data = conf_path_raw_data
@@ -82,6 +86,10 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         self.label_offset = label_offset  # todo: verify correct handling of this offset
         self.label_order = label_order
         self.raw_mode = raw_mode
+        self.raw_disable_memory_check = raw_disable_memory_check,
+        self.raw_verbose = raw_verbose,
+        self.raw_cache_size = raw_cache_size,
+        self.raw_cache_reuses = raw_cache_reuses,
         self.offset_history = []
 
 
@@ -90,7 +98,9 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
                                       patch_shape=self.patch_shape,
                                       bounds=self.knossos_bounds,
                                       mag=self.mag, mode=self.raw_mode, epoch_size=self.epoch_size,
-                                      disable_memory_check=False, verbose=False)  # xyz form
+                                      disable_memory_check=self.raw_disable_memory_check,
+                                      verbose=self.raw_verbose, cache_size=self.raw_cache_size,
+                                      cache_reuses = self.raw_cache_reuses)  # xyz form
 
         #labels as target
         self.label_target_loader = knossos_utils.KnossosDataset(self.conf_path_label, show_progress=False)

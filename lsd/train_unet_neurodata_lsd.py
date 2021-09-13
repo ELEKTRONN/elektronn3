@@ -178,17 +178,15 @@ if args.resume is not None:  # Load pretrained network
 # Transformations to be applied to samples before feeding them to the network
 
 from lsd import LSDGaussVdtCom
-
-local_shape_descriptor = LSDGaussVdtCom
+dataset_mean = (0.,)
+dataset_std = (255.,)
+local_shape_descriptor = LSDGaussVdtCom()
 common_transforms = [
-    transforms.SqueezeTarget(dim=0),  # Workaround for neuro_data_cdhw
     transforms.Normalize(mean=dataset_mean, std=dataset_std)
+    local_shape_descriptor
+
 ]
 train_transform = transforms.Compose(common_transforms + [
-    # transforms.RandomRotate2d(prob=0.9),
-    # transforms.RandomGrayAugment(channels=[0], prob=0.3),
-    # transforms.RandomGammaCorrection(gamma_std=0.25, gamma_min=0.25, prob=0.3),
-    # transforms.AdditiveGaussianNoise(sigma=0.1, channels=[0], prob=0.3),
 ])
 valid_transform = transforms.Compose(common_transforms + [])
 
@@ -200,17 +198,14 @@ common_data_kwargs = {  # Common options for training and valid sets.
     # 'offset': (8, 20, 20),
     # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
 }
-
-train_dataset = KnossosLabels(
+from new_knossos import KnossosLabelsNozip
+train_dataset = KnossosLabelsNozip(
     conf_path_raw_data='/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf',#philipp said to use this dataset
-    conf_path_labels='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/knossos.conf'
-    dir_path_label='/wholebrain/songbird/j0251/groundtruth/segmentation_gt': #this is from the dataloading.py file in the se-cycle-gan repository, lets see if this works
+    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf'
     patch_shape=common_data_kwargs['patch_shape'],
     transform=train_transform,
     epoch_size=args.epoch_size,
-    mode='caching',
-    cache_size=64,
-    cache_reuses=8)
+    raw_mode='caching')
 
 
 #valid_dataset = None if not valid_indices else PatchCreator(
@@ -245,19 +240,14 @@ inference_kwargs = {
     'tile_shape': (32, 64, 64),
     'overlap_shape': (32, 64, 64),
     'offset': None,
-    'apply_softmax': True,
+    'apply_softmax': False,
     'transform': valid_transform,
 }
 
-# optimizer = optim.SGD(
-#     model.parameters(),
-#     lr=0.1,  # Learning rate is set by the lr_sched below
-#     momentum=0.9,
-#     weight_decay=0.5e-4,
-# )
-optimizer = optim.AdamW(
+optimizer = optim.SGD(
     model.parameters(),
-    lr=1e-3,  # Learning rate is set by the lr_sched below
+    lr=0.1,  # Learning rate is set by the lr_sched below
+    momentum=0.9,
     weight_decay=0.5e-4,
 )
 optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
