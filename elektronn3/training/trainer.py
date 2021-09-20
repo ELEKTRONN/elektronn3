@@ -856,6 +856,9 @@ class Trainer:
             'elektronn3.__version__': elektronn3.__version__,
             'env_info': collect_env.get_pretty_env_info()
         }
+        # Make sure everything is a string (if inference_kwargs contains a
+        #  transform object, it may not be picklable)
+        info = {k: str(v) for k, v in info.items()}
 
         torch.save({
             'model_state_dict': model.state_dict(),
