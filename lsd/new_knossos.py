@@ -94,6 +94,8 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
 
 
         #raw data as input
+        #specify no elektronn3 transformation in the raw data loader because transform is applied
+        #after loading the data from KnossosRawData, outside of it's scope
         self.inp_raw_data_loader = KnossosRawData(conf_path=self.conf_path_raw_data,
                                       patch_shape=self.patch_shape,
                                       bounds=self.knossos_bounds,
@@ -109,10 +111,12 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         
         #generate raw-data sample using the __getitem__() method of the KnossosRawData class
         #and store the position the sample is taken from as offset
-        #Note: index is always taken to be 0 because the __getitem__() method disregards the index
+        #Note 1: index is always taken to be 0 because the __getitem__() method disregards the index
         #anyway and randomly samples a patch within the given bounds (+label offset)
+        #Note 2: the KnossosRawData loader outputs torch.tensor types, so in order to use the data
+        #retrieved from KnossosRawData for the elektronn3 trafo one must cast it to numpy array
         input_dict = self.inp_raw_data_loader[0]
-        inp = input_dict["inp"]
+        inp = input_dict["inp"].numpy() #czyx
         offset_from_raw = input_dict["offset"]
         self.offset_history.append(offset_from_raw)
 

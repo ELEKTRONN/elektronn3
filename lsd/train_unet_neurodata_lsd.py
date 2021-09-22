@@ -255,7 +255,7 @@ optimizer = optim.SGD(
     momentum=0.9,
     weight_decay=0.5e-4,
 )
-optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
+#optimizer = SWA(optimizer)  # Enable support for Stochastic Weight Averaging
 
 # Set to True to perform Cyclical LR range test instead of normal training
 #  (see https://arxiv.org/abs/1506.01186, sec. 3.3).
