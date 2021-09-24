@@ -13,8 +13,8 @@ from elektronn3.data.knossos import KnossosRawData
 
 class KnossosLabelsNozip(torch.utils.data.Dataset):
     """Delivers label and raw data as patches that are randomly
-        sampled from a KNOSSOS dataset. The labels are extracted from a kzip
-        file and the corresponding raw data associated with them is returned.
+        sampled from a KNOSSOS dataset. The labels are not extracted from a kzip
+        file, instead a .conf or pyk.conf file is expected, and the corresponding raw data associated with them is returned.
         Supports 2D and 3D (choice is determined from the length of the
         ``patch_shape`` param).
 
@@ -122,7 +122,9 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
 
         #use the offset retrieved from calling the __getitem__() method to load the corresponding label patch from the
         #label data
-        label = self.label_target_loader.load_seg(offset= offset_from_raw + self.label_offset, size = self.patch_shape,
+        #Note: KnossosDataset.load_seg() requires the patch_shape in the xyz-format, while KnossosRawData takes care of
+        #the zyx->xyz conversion inside it's scope
+        label = self.label_target_loader.load_seg(offset= offset_from_raw + self.label_offset, size = self.patch_shape_xyz,
                                                     mag = self.mag, datatype = np.int64)
 
         if self.dim == 2:

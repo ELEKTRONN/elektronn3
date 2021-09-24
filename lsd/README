@@ -19,3 +19,26 @@ TO Implement:
 2. linalg.norm(vdt)
 3. vigra gaussian divergence of the vector distance transform
 4. CenterOfMass(Seg)
+
+LSD transformer funktioniert, als elektronn3-transformation, training läuft
+
+jetzt wichtig: visualisierer schreiben, sodass man ergebnisse betrachten kann.
+wie macht man das?
+
+*Visualisierer
+
+**was wird im paper wie veranschaulicht? schwer zu sagen, im repository ist es nicht klar und deutlich
+**idee: für 3d vektor-daten werden die rgb-werte aus den distanzen gelesen, also Rot(x) Grün(y) Blau(z)
+also dafür braucht man:
+
+**das gespeicherte netz, was geladen werden muss
+***pfad->pytorch->finde das netz
+
+**das geladene netz muss auf einem geladenen datensatz predictions machen
+***finde datensatz
+***lade datensatz in bestimmtes format
+***füttere es durch das netz
+***speichere es
+
+**die predictions müssen für den festen cube zusammen mit den rohdaten geplotted werden.
+***verwende matplotlib dafür
