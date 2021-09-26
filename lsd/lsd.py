@@ -26,7 +26,10 @@ Transform = Callable[
 
 class LSDGaussVdtCom:
     
-    """Generates LSD for a segmented dataset with 10 channels"""
+    """Generates LSD for a segmented dataset with 8 channels
+        concatenation of (vdt_target (3), vdt_norm_target(1),
+        gauss_target(1), com_lsd(3))"""
+
     def __init__(
             self,
             #func: Callable[[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]
@@ -51,11 +54,13 @@ class LSDGaussVdtCom:
         gauss_target = self.gaussDiv(vdt_target)
 
         #center of mass transform
-        labels = self.labeller(vtarget)[0]
+        vtarget_seg = np.zeros_like(vtarget)
+        vtarget_seg[vtarget>0]=1
+        labels = self.labeller(vtarget_seg)[0]
         #print("labels: {}".format(labels))
         #print(np.nonzero(np.unique(labels)))
         
-        com = np.array(im.measurements.center_of_mass(vtarget, labels,np.unique(labels)[1:]))
+        com = np.array(im.measurements.center_of_mass(vtarget_seg, labels,np.unique(labels)[1:]))
         #print("Center of masses type: {}".format(type(com)))
         #print("Centers of mass: \n{}".format(com))
         
@@ -64,9 +69,14 @@ class LSDGaussVdtCom:
         coords[:, (vtarget==0)[0]]=0
         com_lsd = np.copy(coords).astype(float)
         for i in np.unique(labels)[1:]:
-            com_lsd[:, (labels==i)[0]] = np.tile(com[i-1].reshape(-1,1), com_lsd[:, (labels==i)[0]].shape[1])[0].T
+            size_each_label = com_lsd[:,(labels==i)[0]].shape[1]
+            com_lsd[:,(labels==i)[0]] -= (np.tile(com[i-1][1:], (size_each_label, 1))).T        
 
-        #now stack everything on top along 0th axis to form the 10D LSD
+        #for i in np.unique(labels)[1:]:
+        #            com_lsd[:, (labels==i)[0]] = np.tile(com[i-1].reshape(-1,1), com_lsd[:, (labels==i)[0]].shape[1])[0].T
+
+        #now stack everything on top along 0th axis to form the 8D LSD
+        #3 for vdt_target, 1 for vdt_norm_target, 1 for gauss_target, 3 for com_lsd
         output = np.vstack((vdt_target, vdt_norm_target, gauss_target, com_lsd))
         return (inp, output)
 

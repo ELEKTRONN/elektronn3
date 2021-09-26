@@ -14,7 +14,7 @@ common_transforms = [
 ]
 train_transform = transforms.Compose(common_transforms + [
 ])
-loader = KnossosLabelsNozip(conf_path_label = conf_path_labels, conf_path_raw_data = conf_path_raw, patch_shape=(44,88,88),transform=train_transform, raw_mode="caching")
+loader = KnossosLabelsNozip(conf_path_label = conf_path_labels, conf_path_raw_data = conf_path_raw, patch_shape=(30,1000,1050),transform=train_transform, raw_mode="caching")
 
 data = loader[0]
 inp = data["inp"]

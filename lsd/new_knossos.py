@@ -90,7 +90,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         self.raw_verbose = raw_verbose
         self.raw_cache_reuses = raw_cache_reuses
         self.raw_cache_size = raw_cache_size
-        self.offset_history = []
+        self.coordinate_history = []
 
 
         #raw data as input
@@ -110,38 +110,40 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
     def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
         
         #generate raw-data sample using the __getitem__() method of the KnossosRawData class
-        #and store the position the sample is taken from as offset
-        #Note 1: index is always taken to be 0 because the __getitem__() method disregards the index
-        #anyway and randomly samples a patch within the given bounds (+label offset)
+        #and store the position the sample is taken from as coordinate_from_raw (not adjusted for any)
+        #Note 1: index is always taken to be 0 because the __getitem__(self, index) method disregards the index
+        #anyway and randomly samples a patch within the given bounds (+label_offset)
         #Note 2: the KnossosRawData loader outputs torch.tensor types, so in order to use the data
-        #retrieved from KnossosRawData for the elektronn3 trafo one must cast it to numpy array
+        #retrieved from KnossosRawData for the elektronn3 transformation one must cast it to numpy array
+
         input_dict = self.inp_raw_data_loader[0]
         inp = input_dict["inp"].numpy() #czyx
-        offset_from_raw = input_dict["offset"]
-        self.offset_history.append(offset_from_raw)
+        coordinate_from_raw = input_dict["offset"]
+        self.coordinate_history.append(coordinate_from_raw)
 
-        #use the offset retrieved from calling the __getitem__() method to load the corresponding label patch from the
+        #use the position_from_raw retrieved from calling the __getitem__() method to load the corresponding label patch from the
         #label data
         #Note: KnossosDataset.load_seg() requires the patch_shape in the xyz-format, while KnossosRawData takes care of
         #the zyx->xyz conversion inside it's scope
-        label = self.label_target_loader.load_seg(offset= offset_from_raw + self.label_offset, size = self.patch_shape_xyz,
+        label = self.label_target_loader.load_seg(offset= coordinate_from_raw + self.label_offset, size = self.patch_shape_xyz,
                                                     mag = self.mag, datatype = np.int64)
 
         if self.dim == 2:
             label = label[0]
 
         #apply elektronn3 transforms
-        inp, label = self.transform(inp, label)
+        inp, target = self.transform(inp, label)
 
         sample = {
             'inp': torch.as_tensor(inp),
-            'target': torch.as_tensor(label).long(),
-            'fname': self.conf_path_label
+            'target': torch.as_tensor(target),#.long(),
+            'fname': self.conf_path_label,
+            'coordinate_raw': coordinate_from_raw
         }
-        if self.label_order is not None:
-            sample_target = sample['target'].detach().clone()
-            for i, label in enumerate(self.label_order):
-                sample['target'][sample_target == i] = label
+        #if self.label_order is not None:
+        #    sample_target = sample['target'].detach().clone()
+        #    for i, label in enumerate(self.label_order):
+        #        sample['target'][sample_target == i] = label
         return sample
 
     def __len__(self) -> int:
