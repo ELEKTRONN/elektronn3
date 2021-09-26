@@ -19,6 +19,6 @@ loader = KnossosLabelsNozip(conf_path_label = conf_path_labels, conf_path_raw_da
 
 data = loader[0]
 model_path = "/wholebrain/scratch/fkies/e3training/lsd/L1_seed0_SGD/model_best.pt"
-viz = Visualizer(conf_path_raw, conf_path_raw, model_path, patch_shape = (70, 150, 200), transform=transform)
+viz = Visualizer(conf_path_labels, conf_path_raw, model_path, patch_shape = (70, 150, 200), transform=transform)
 
 viz.plot()
