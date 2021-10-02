@@ -91,5 +91,5 @@ testing_labels = np.random.choice([0,1], size=(1,10,20,20))
 print("""testing data has been created with shape {}""".format(testing_labels.shape))
 
 #apply the lsd_transformer to the data
-inputs, lsd_output=transformer(testing_inputs,testing_labels)
+inputs, lsd_output=transformer(testing_inputs,testing_labels[0])
 print("output has been computed with shape {}".format(lsd_output.shape))

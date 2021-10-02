@@ -1,0 +1,69 @@
+# Local Shape Descriptors for Neuron Segmentation
+
+authors Arlo Sheridan, Tri Nguyen, Diptodip Deb, Wei-Chung Allen Lee,
+Stephan Saalfeld, Srini Turaga, Uri Manor, Jan Funke
+
+The intuition behind Local Shape Descriptors (LSDs) is to pro-
+vide an auxiliary learning task that improves boundary prediction
+by learning statistics describing the local shape of the object close
+to the boundary.
+
+
+### Local Shape Descriptors:
+
+- center of mass
+- covariance matrix of voxel coordinates for given segment
+- local size of the segmentation object (could be done also in our work?)
+
+
+### Model Architecture
+
+- U-Net
+
+
+### Several Approaches, amongst others:
+
+- BASELINE: Direct neighbor affinities, single voxel affinity neighborhood and MSE loss ([Turaga et al., 2010](https://pubmed.ncbi.nlm.nih.gov/19922289/)), 3D unet trained to predict affinities (?????)
+- LR: Long range affinities, same as baseline, 3 neighbors more per predictions
+- Malis: MALIS loss (same as baseline, but loss as in [Funke et al.](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8364622))
+- FFN: Flood Filling Networks (single segmentation per investigated dataset ????)
+- MTLSD: Multi-Task LSD (auxiliary learning-task for direct neighbor affinities), predicts both LSD as well as affinities
+- ACLSD: Auto-Context LSD: LSD predicted from one network and then used as
+input to second network to predict affinities
+- ACRLSD: same as ACLSD but second network also receives raw-data as input
+
+
+### What are affinies?
+
+An affinity graph represents the degree to which nearest neighbor pixels should be
+grouped together.
+The segmentation can be extracted from the affinity-graph by for instance
+extracting the [connected components](https://en.wikipedia.org/wiki/Component_(graph_theory) from a thresholded affinity graph [Maximin affinity learning of image segmentation, 2009, Briggman, Denk et al.](https://proceedings.neurips.cc/paper/2009/file/68d30a9594728bc39aa24be94b319d21-Paper.pdf).
+
+
+### Segmentation Algorithm in paper
+
+- Zebrafinch:
+Seeded watershed on affinities generated during predictions.
+Both (non-masked and neuropil-masked supervoxels produced).
+Epsilon agglomeration used to agglomerate fragments to predefined threshold (0.1)
+
+- FIB-SEM Volumes (Hemi-Brain)
+"""
+Fragment extraction was performed isotropically and used no
+epsilon agglomeration step or mean affinity filtering, in contrast
+to the Zebrafinch. A block size of 3μm3 and context of 31 voxels
+were used. For the Hemi-brain, watershed was done on each
+predicted RoI and restricted using an Ellipsoid Body mask. For
+Fib-25, an irregularly shaped tissue mask6 was used.
+"""
+
+### Datasets
+
+- Zebrafinch (same as in Januszewski et al. 2018)
+songbird dataset consisting of zebrafinch brain
+
+- Hemi-Brain: FIB-SEM [Focused Ion Beam Scanning Electron Microscopy](https://en.wikipedia.org/wiki/Focused_ion_beam) volume of drosphila melanogaster (Scheffler et al. 2020, 26 teravoxels)
+
+### Image generation of the segmentation
+

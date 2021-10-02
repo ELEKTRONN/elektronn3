@@ -95,7 +95,7 @@ logger.info(f'Running on device: {device}')
 # hparams = {'n_blocks': 4, 'start_filts': 32, 'planar_blocks': (0,)}
 hparams = {}
 
-out_channels = 8 #change this for the lsd_description
+out_channels = 5 #change this for the lsd_description
 model = UNet(
     out_channels=out_channels,
     n_blocks=4,

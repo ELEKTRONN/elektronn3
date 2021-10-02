@@ -17,8 +17,8 @@ Konzept: LSD-transfomration des Targets implementieren um dann ein UNET darauf z
 TO Implement:
 1. vdt=vigra boundary vector distance transform of the segmentation
 2. linalg.norm(vdt)
-3. vigra gaussian divergence of the vector distance transform
-4. CenterOfMass(Seg)
+3. vigra gaussian divergence of the vector distance transform (normalized)
+#4. CenterOfMass(Seg) left out because not implemented
 
 LSD transformer funktioniert, als elektronn3-transformation, training läuft
 

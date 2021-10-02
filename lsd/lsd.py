@@ -51,10 +51,11 @@ class LSDGaussVdtCom:
         vdt_target = self.vdtTransformer(vtarget)
         vdt_norm_target = np.expand_dims(np.linalg.norm(vdt_target, axis=0), axis=0)
 
-        gauss_target = self.gaussDiv(vdt_target)
+        gauss_target = self.gaussDiv(vdt_target/vdt_norm_target)#gaussian divergence of normalized VDT
 
+        #discard center of mass lsd because inaccurate to implement
         #center of mass transform
-        vtarget_seg = np.zeros_like(vtarget)
+        """vtarget_seg = np.zeros_like(vtarget)
         vtarget_seg[vtarget>0]=1
         labels = self.labeller(vtarget_seg)[0]
         #print("labels: {}".format(labels))
@@ -74,10 +75,10 @@ class LSDGaussVdtCom:
 
         #for i in np.unique(labels)[1:]:
         #            com_lsd[:, (labels==i)[0]] = np.tile(com[i-1].reshape(-1,1), com_lsd[:, (labels==i)[0]].shape[1])[0].T
-
-        #now stack everything on top along 0th axis to form the 8D LSD
-        #3 for vdt_target, 1 for vdt_norm_target, 1 for gauss_target, 3 for com_lsd
-        output = np.vstack((vdt_target, vdt_norm_target, gauss_target, com_lsd))
+        """
+        #now stack everything on top along 0th axis to form the 5 (8)D LSD
+        #3 for vdt_target, 1 for vdt_norm_target, 1 for gauss_target,( 3 for com_lsd, but not anymore)
+        output = np.vstack((vdt_target, vdt_norm_target, gauss_target))
         return (inp, output)
 
 
