@@ -16,7 +16,6 @@ from elektronn3.data.transforms.random import Normal, HalfNormal, RandInt
 import vigra as v
 from scipy import ndimage as im
 
-
 Transform = Callable[
     [np.ndarray, Optional[np.ndarray]],
     Tuple[np.ndarray, Optional[np.ndarray]]
@@ -51,7 +50,10 @@ class LSDGaussVdtCom:
         vdt_target = self.vdtTransformer(vtarget)
         vdt_norm_target = np.expand_dims(np.linalg.norm(vdt_target, axis=0), axis=0)
 
-        gauss_target = self.gaussDiv(vdt_target/vdt_norm_target)#gaussian divergence of normalized VDT
+        normalized_vdt = np.where(vdt_norm_target > 0, vdt_target/vdt_norm_target, 0.)
+        normalized_gauss_input = v.VigraArray(normalized_vdt, axistags = v.defaultAxistags('czyx'))
+
+        gauss_target = self.gaussDiv(normalized_gauss_input)#gaussian divergence of normalized VDT
 
         #discard center of mass lsd because inaccurate to implement
         #center of mass transform
