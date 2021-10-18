@@ -21,6 +21,9 @@ class KnossosRawData(torch.utils.data.Dataset):
             dataset.
         transform: Transformation to be applied to the loaded data.
             See :py:mod:`elektronn3.data.transforms`.
+        divide: Scalar by which the raw data is divided.
+        return_original: Whether to return the non-augmented original sample as well
+        augment_twice: Whether to perform a second augmentation on the original
         bounds: Tuple of boundary coordinates (xyz) that constrain the region
             of where patches should be sampled from within the KNOSSOS dataset.
             E.g. ``bounds=((256, 256, 128), (512, 512, 512))`` means that only
@@ -49,6 +52,9 @@ class KnossosRawData(torch.utils.data.Dataset):
             conf_path: str,
             patch_shape: Sequence[int],  # [z]yx
             transform: Callable = transforms.Identity(),
+            divide: float = 1.,
+            return_original=False,
+            augment_twice=False,
             bounds: Optional[Sequence[Sequence[int]]] = None,  # xyz
             mag: int = 1,
             mode: str = 'in_memory',
@@ -61,6 +67,9 @@ class KnossosRawData(torch.utils.data.Dataset):
         self.conf_path = conf_path
         self.patch_shape = np.array(patch_shape)
         self.transform = transform
+        self.divide = divide
+        self.return_original = return_original
+        self.augment_twice = augment_twice
         self.mag = mag
         self.epoch_size = epoch_size
         self.disable_memory_check = disable_memory_check
@@ -98,11 +107,19 @@ class KnossosRawData(torch.utils.data.Dataset):
         if self.dim == 2:
             inp = inp[0]  # squeeze z=1 dim -> yx
         inp = inp.astype(np.float32)[None]  # Prepend C dim -> (C, [D,] H, W)
+
+        inp = inp / self.divide
         if self.transform:
-            inp, _ = self.transform(inp, None)
+            inp_orig = inp
+            inp, _ = self.transform(inp_orig, None)
+            if self.augment_twice:
+                inp_2, _ = self.transform(inp_orig, None)
+
         sample = {
             'inp': torch.as_tensor(inp),
-            'offset': offset
+            'offset': offset,
+            'inp_orig': torch.as_tensor(inp_orig) if self.return_original else torch.tensor([]),
+            'inp_2': torch.as_tensor(inp_2) if self.augment_twice else torch.tensor([])
         }
         return sample
 
@@ -123,7 +140,7 @@ class KnossosRawData(torch.utils.data.Dataset):
               offset[2]:offset[2] + self.patch_shape_xyz[2],
               offset[1]:offset[1] + self.patch_shape_xyz[1],
               offset[0]:offset[0] + self.patch_shape_xyz[0],
-        ]  # zyx (D, H, W)
+              ]  # zyx (D, H, W)
         return inp, offset
 
     def __len__(self) -> int:
