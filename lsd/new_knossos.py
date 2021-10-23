@@ -132,13 +132,14 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             label = label[0]
 
         #apply elektronn3 transforms
-        inp, target = self.transform(inp, label)
+        trafo_inp, target = self.transform(inp, label)
 
         sample = {
-            'inp': torch.as_tensor(inp),
+            'inp': torch.as_tensor(trafo_inp),
             'target': torch.as_tensor(target),#.long(),
             'fname': self.conf_path_label,
-            'coordinate_raw': coordinate_from_raw
+            'coordinate_raw': coordinate_from_raw,
+            'segmentation': torch.as_tensor(inp)
         }
         #if self.label_order is not None:
         #    sample_target = sample['target'].detach().clone()

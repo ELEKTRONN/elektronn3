@@ -9,6 +9,15 @@ by learning statistics describing the local shape of the object close
 to the boundary.
 
 
+### Key findings:
+- "auxiliary learning of LSDs consistently increases segmentation accuracy over a range of
+metrics"
+- "the addition of LSDs promotes affinity-based segmentation to be on par
+with the current state of the art for neuron segmentation (Flood Filling Network, FFN) while
+being two orders of magnitude more efficient"
+-claim: "FFN: Assuming linear scalability and the availability of
+1000 contemporary GPUs (or equivalent hardware), the processing
+of a complete mouse brain would take about 226 years"
 ### Local Shape Descriptors:
 
 - center of mass
@@ -16,21 +25,198 @@ to the boundary.
 - local size of the segmentation object (could be done also in our work?)
 
 
-### Model Architecture
+### Motivation affinities:
 
-- U-Net
+- instance segmentation, label pixels either as foreground or background, and then
+perform connected component analysis subsequently
+- in 3D neuron segmentation this often fails [...] where axial resolution of data is lower
+- solution: prediction of affinities (labelling edges between neighboring voxels and not voxels
+themselves)
+- biggest problem are merge-errors, where a background label wrongly is detected to be
+foreground/object -> difficult for proofreaders
+- affinity based methods need subsequent agglomeration step to produce final segmentation (watershed methods and seeded agglomeration)
 
 
+### Model Architecture and Approach:
+
+- U-Net Funke et. al 2019
+- All networks used MSE loss with Adam optimizer
+- predicted LSDs taken from pre-trained network predicting LSDs from raw
+- non auto-context-networks trained for 400k iterations, auto-context networks trained on 200k (300k hemi-brain and FIB25) iterations following 400k iterations of LSD training
+- seeded watershed done on affinities generated during prediction (https://github.com/funkey/
+waterz) and then agglomeration performed (same for all)
+- "Supervoxels were agglomerated using hierarchical region
+agglomeration17 in which edges with lower affinity scores are
+merged earlier. We empirically chose to use both 50 and 75 percentile"
+- 10D feature vectors computed for each voxel which encode local object properties (local size of object, center of mass, local directionality)
+- for each dataset compare LSD-based methods against 3 previous affinity-based-methods (direct i
+neighbor, long range with MSE loss, direct neighbor with MALIS loss)
+- LSD-based methods: same extraction method (Funke et. al., 2019 LOOK THIS UP!!!!)
+- comparison against FFN networks
+- LSD learning task: learn kernel used to compute local size, center of mass and local covariance
+of voxel coordinates (compute this for each voxel with respect to the segment the voxel belongs
+to -> how many kernels are learned? is the convolution with the kernel w: (notattion _*w)
+intended as the feeding-through of hole UNet?)
+- post-processing: block-wise watershed as in Funke et al 2019
+- zebrafinch: "each affinity-based network described in Section 3.1, we
+used 33 volumes containing a total of ∼200μm3 per volume) of labeled data6 for training. We
+then ran prediction on the Benchmark Roi, using a block-wise processing scheme. Using the
+resulting affinities, we generated two sets of super-
+voxels: one without any masking and one constrained to neuropil
+using a mask6 . Additionally, we filtered supervoxels in regions in
+which the average affinites were lower than a predefined value
+(e.g., glia). Supervoxels were agglomerated using one of two
+merge functions, described in Funke et al. (2019), to produce the
+region adjacency graphs used for evaluation."
+- also made various ROIs in Benchmark ROI to assess how segmentation measures scale with volume
+size
+- hemi-brain: "eight volumes of densely annotated ground-truth
+volumes containing ∼450μm3 of labeled data for training. Three
+RoIs with ∼12μm, ∼17μm, and ∼22μm edge lengths were cropped
+from the larger volume, and prediction was done directly on each
+RoI. [...] We produced segmentations for each network over a range
+of thresholds on the RoIs, and consolidated a single FFN
+segmentation6 . [...] Since the ground-truth
+is comprised of voxel data rather than skeletons, we report only VoI"
 ### Several Approaches, amongst others:
 
 - BASELINE: Direct neighbor affinities, single voxel affinity neighborhood and MSE loss ([Turaga et al., 2010](https://pubmed.ncbi.nlm.nih.gov/19922289/)), 3D unet trained to predict affinities (?????)
 - LR: Long range affinities, same as baseline, 3 neighbors more per predictions
-- Malis: MALIS loss (same as baseline, but loss as in [Funke et al.](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8364622))
+- Malis: MALIS loss (same as baseline, but loss as in [Funke et al.](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8364622), the MALIS loss biases segmentation algorithm to split instead of merge in ambiguous situations)
 - FFN: Flood Filling Networks (single segmentation per investigated dataset ????)
-- MTLSD: Multi-Task LSD (auxiliary learning-task for direct neighbor affinities), predicts both LSD as well as affinities
+- MTLSD: Multi-Task LSD (auxiliary learning-task for direct neighbor affinities), predicts both
+LSD as well as affinities in one single step
 - ACLSD: Auto-Context LSD: LSD predicted from one network and then used as
-input to second network to predict affinities
+input to second network to predict affinities, auto-context learning strategy where prediction
+quality is improved by using cascade of predictors: "voxel classification, for example, the
+first pass of an auto-context classifier predicts voxel labels from raw data. The second pass
+then uses those predictions from the first pass as input" -> LSDs from one UNet are fed into
+another UNet to produce the affinities
 - ACRLSD: same as ACLSD but second network also receives raw-data as input
+
+
+### Metrics for comparison:
+
+Metrics with which the performance of the different segmentation methods are compared:
+- Variation of information (VoI, Meila 2007): "VoI measures the
+disagreement between two segmentations in terms of the
+average number of bits needed to guess the segment ID of
+a randomly chosen voxel in one segmentation, given only
+its label in the other segmentation. This measurement is
+performed in both directions, giving rise to the two additive
+components of VoI, a measure for split and merge errors.
+Lower values are better, with equivalent segmentations (up to
+label permutations) having a value of zero."
+- Expected Run Length (Januszewski et al 2018): "measures the expected length of an error-free
+path along neurons in a volume. Notably, all paths contained in falsely
+merged segments are considered erroneous, thus ERL em-
+phasizes merge errors disproportionally."
+- Min-Cut Metric (MCM): "In particular, we assume that users can
+split segments by means of a min-cut through the fragment
+graph between two selected fragments, where edge costs
+correspond to the merge scores used during agglomeration"
+- MCM again: "count number of interactions needed to split and merge neurons in order to
+correctly segment grount-truth skeletons, assuming that a min-cut-based split-tool is available"
+
+
+### Results: Zebrafinch
+
+- MCM introduced to diminsh dependence of other two metrics on ROI and instead consider proof
+reading effort, MCM shows linear increase with ROI size, MCM and VOI agree on ranking the
+different methods
+- "could not compute MCM for FFN since MCM requires fragment graph" (what is this?)
+- "We find that LSDs are useful for improving the accuracy of direct
+neighbor affinities, and subsequently the resulting segmentations.
+Specifically, LSD-based methods consistently outperform other
+affinity-based methods over a range of RoIs, whether used in a
+multitask (MtLsd) or auto-context (AcLsd and AcRLsd) archi-
+tecture (Fig. 3.A). In terms of segmentation accuracy according
+to VoI, the best auto-context network (AcRLsd) performs on par
+with FFN (Fig. 3.A)."
+- ranking of methods depends on size of evaluation ROI (no extrapolation possible)
+
+
+### Results: Hemi-Brain
+
+- ACLSD outperforms all other affinity-based methods on largest ROI, more merge errors but
+significantly less split errors then FFN
+- "On the 17μm RoI, AcLsd again performs better than all other
+affinity-based methods and also better than FFN (VoI sum of 0.251
+vs. 0.371, see Fig. 4.B). MtLsd is on par with AcLsd on this RoI,
+which stands in contrast to its significantly worse performance on
+the 22μm RoI. [...] smallest RoI of 12μm edge length. Here, AcLsd
+performs worse than all other methods, with a significant margin
+to the best performing method, MtLsd (VoI sum 0.197 vs 0.085).
+Even Baseline achieves very good results on this RoI. [...] We have to conclude
+that the size of this RoI is likely not large enough to accurately
+deduce whether the differences in method performance are due to
+model accuracies or data biases."
+- "AcRLsd is ignificantly worse on the two larger RoIs. This stands in contrast
+to the results we obtained on the Zebrafinch dataset. Our results
+do not allow us to say with confidence whether this artifact is
+due to overfitting to the training data (which might be more likely
+to happen for AcRLsd) or due to model noise introduced by the
+random initialization during training." 
+
+
+### Results: Fib25
+
+- on full ROI LSDs generally do not perform well: best auto-context method AcLSD performs worse
+than BASELINE, and FFN exceeds all other methods, MaLis performs best
+- "results are not consistent with the results seen on the
+Zebrafinch and Hemi-brain volumes, we visually inspected the
+segmentations. We found a high rate of false merges occurring
+in the periphery of the testing RoI, stemming from nuclei and
+boundaries of the imaged volume, which are not contained in the
+training data. As such, the full testing RoI of this dataset favors
+“conservative” methods, i.e., methods that have higher split rates"
+- on two sub-ROI LSD methods are best, comparable to FFN, AcLSD seems best
+- long range affinities perform poorly across ROIs
+
+
+### Discussion
+
+- "when compared to other affinity-based methods, the
+LSDs consistently help to improve neuron segmentations across
+specimen, resolution, and imaging techniques."
+- "Zebrafinch dataset, the largest dataset both in terms
+of image data and available ground-truth, LR and Malis did not
+exceed the accuracy of the Baseline network. This is surprising
+considering that LR also uses an auxiliary task to improve direct
+neighbor affinity predictions."
+- "Zebrafinch dataset, the largest dataset both in terms
+of image data and available ground-truth, LR and Malis did not
+exceed the accuracy of the Baseline network. This is surprising
+considering that LR also uses an auxiliary task to improve direct
+neighbor affinity predictions."
+- "Unfortunately, MCM is computationally quite expensive. The
+sequence of graph-cuts needed for the evaluation of merge errors
+quickly becomes infeasible on large volumes" but shows general ranking agreement with VOI
+- VOI seems to be robust metric for validation of method parameters 
+- Auxiliary learning for boundary prediction: possible explanation "the additional task
+incentivizes the network to consider higher-level features. Predicting LSDs is likely
+harder than boundaries, since additional local structure of the object has to be considered"
+then are boundary vector distance transform (might be analytical) a good LSD?
+- "LR affinities do not perform as well across the investigated datasets"
+- "results here show that it is hard to correlate accuracy on small volumes with accuracy on
+large volumes"
+- auto-context setup greatly improved resulting segmentations; auto-contextext BASELINE simply
+copies data (predicting affinities from affinities)
+- translating from LSD to affinity is completely different tast
+- used neuropil mask tghat excluded cell bodies, blood vessels, myelin and out-of-sample voxels
+- upon larger datasets, accuracy degraded significantly without masking (Fig. 9, supplemental
+figure 11).
+- Trained all networks to predict zero affinities in masked regions, discarded fragments with
+close-to-zero affinity values during agglomeration. Methods succeding to learning to mask these
+areas (BASELINE, MTLSD, ACLSD, ACRLSD) performed much better than those that did not (MALIS, LR)
+
+
+### Conclusion
+
+- "LSDs proposed here were subjectively engineered based on features that we expected
+to be important to encode object shape"
+- "it is not clear whether each component of the LSD embedding contributes equally to the
+improvement of affinity predictions"
 
 
 ### What are affinies?
@@ -61,9 +247,13 @@ Fib-25, an irregularly shaped tissue mask6 was used.
 ### Datasets
 
 - Zebrafinch (same as in Januszewski et al. 2018)
-songbird dataset consisting of zebrafinch brain
+songbird dataset consisting of zebrafinch brain, 10e6 mum³ (~663 gigavoxels), resolution 
+9x9x20nm (xyz)
 
-- Hemi-Brain: FIB-SEM [Focused Ion Beam Scanning Electron Microscopy](https://en.wikipedia.org/wiki/Focused_ion_beam) volume of drosphila melanogaster (Scheffler et al. 2020, 26 teravoxels)
+- Hemi-Brain: FIB-SEM [Focused Ion Beam Scanning Electron Microscopy](https://en.wikipedia.org/wiki/Focused_ion_beam)
+volume of drosphila melanogaster (cropped from Scheffler et al. 2020, total ~33 gigavoxels) at
+8nm isotropic resolution
+-fib25: drosphila visual system (1.8*10e5mum³, 346 gigavoxels)
 
 ### Image generation of the segmentation
 

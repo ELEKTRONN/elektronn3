@@ -282,7 +282,7 @@ lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
 
 # Validation metrics
 valid_metrics = {}
-for evaluator in [metrics.Accuracy, metrics.Precision]:
+for evaluator in []:
     valid_metrics[f'val_{evaluator.name}_mean'] = evaluator()  # Mean metrics
     for c in range(out_channels):
         valid_metrics[f'val_{evaluator.name}_c{c}'] = evaluator(c)

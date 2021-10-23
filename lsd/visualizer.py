@@ -1,3 +1,31 @@
+#import torch
+#import numpy as np
+#import matplotlib.pyplot as plt
+#from new_knossos import KnossosLabelsNozip
+#import vigra as v
+#import matplotlib as mpl
+#from mpl_toolkits.axes_grid1 import ImageGrid
+#
+#class Visualizer():
+#    def __init__(self, conf_path_label, conf_path_raw,
+#                model_path,
+#                patch_shape=(70, 150, 150),#zyx
+#                label_offset = 0,#zyx or 0
+#                transform = None, nsamples = 1,
+#                device = "cuda", dtype = torch.float):
+#        
+#        self.conf_path_raw = conf_path_raw
+#        self.conf_path_label = conf_path_label
+#        self.model_path = model_path
+#        self.patch_shape = patch_shape#zyx
+#        self.label_offset = 0
+#        self.transform = transform
+#        self.loader = KnossosLabelsNozip(
+#            conf_path_label = self.conf_path_label,
+#            conf_path_raw_data = self.conf_path_raw,
+#            #label_offset = self.label_offset,
+#            patch_shape=self.patch_shape,transform=self.transform,
+#            raw_mode="caching")
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,34 +33,7 @@ from new_knossos import KnossosLabelsNozip
 import vigra as v
 import matplotlib as mpl
 from mpl_toolkits.axes_grid1 import ImageGrid
-
-class Visualizer():
-    def __init__(self, conf_path_label, conf_path_raw,
-                model_path,
-                patch_shape=(70, 150, 150),#zyx
-                label_offset = 0,#zyx or 0
-                transform = None, nsamples = 1,
-                device = "cuda", dtype = torch.float):
-        
-        self.conf_path_raw = conf_path_raw
-        self.conf_path_label = conf_path_label
-        self.model_path = model_path
-        self.patch_shape = patch_shape#zyx
-        self.label_offset = 0
-        self.transform = transform
-        self.loader = KnossosLabelsNozip(
-            conf_path_label = self.conf_path_label,
-            conf_path_raw_data = self.conf_path_raw,
-            #label_offset = self.label_offset,
-            patch_shape=self.patch_shape,transform=self.transform,
-            raw_mode="caching")
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-from new_knossos import KnossosLabelsNozip
-import vigra as v
-import matplotlib as mpl
-from mpl_toolkits.axes_grid1 import ImageGrid
+import os
 
 class Visualizer():
     def __init__(self, conf_path_label, conf_path_raw,
@@ -57,6 +58,8 @@ class Visualizer():
         self.samples_list = []
         self.device = device
         self.dtype = dtype
+        self.fig_save_path = "plots/" + self.model_path.replace("/","%").replace(".","$") + "/"
+        os.mkdir(os.path.join(os.getcwd(),self.fig_save_path))
         self.nsamples = nsamples
         self._generate_sample()
         self._load_model()
@@ -65,6 +68,7 @@ class Visualizer():
     def _generate_sample(self):
         self.sample = self.loader[0]
         self.inp = torch.unsqueeze(self.sample["inp"],0).to(self.device, dtype = self.dtype)
+        self.inp_seg = torch.unsqueeze(self.sample["segmentation"],0).to(self.device, dtype = self.dtype)
         self.target = self.sample["target"].to(self.device, dtype = self.dtype)
         self.coordinate_raw = self.sample["coordinate_raw"]
         self.z_plot_coord = self.inp.shape[2]//2 
@@ -151,7 +155,7 @@ class Visualizer():
         #fig_vdt.colorbar(targ_vdt_norm, cax = cax, **kw)
         
         fig_vdt.tight_layout()
-        fig_vdt.savefig("plots/"  + filename + self.coord_string + ".png")
+        fig_vdt.savefig(self.fig_save_path + filename + self.coord_string + ".png")
 
     def plot_vdt_norm(self, filename="norm_BVDT"):
         self.targ_vdt_norm = self.target.cpu().detach().numpy()[3, self.z_plot_coord,:,:]
@@ -175,7 +179,7 @@ class Visualizer():
         
         grid[1].cax.colorbar(pred_vdt_norm)
         grid[1].cax.toggle_label(True)
-        fig.savefig("plots/" + filename + self.coord_string + ".png")
+        fig.savefig(self.fig_save_path + filename + self.coord_string + ".png")
 
 
     def plot_gauss_div(self, filename="gauss_div"):
@@ -200,7 +204,7 @@ class Visualizer():
         
         grid[1].cax.colorbar(pred_vdt_norm)
         grid[1].cax.toggle_label(True)
-        fig.savefig("plots/" + filename + self.coord_string + ".png")
+        fig.savefig(self.fig_save_path + filename + self.coord_string + ".png")
 
 
     def plot_com(self, filename = "com"):
@@ -263,15 +267,90 @@ class Visualizer():
         #fig_com.colorbar(targ_com_norm, cax = cax, **kw)
         
         fig_com.tight_layout()
-        fig_com.savefig("plots/"  + filename + self.coord_string + ".png")
+        fig_com.savefig(self.fig_save_path  + filename + self.coord_string + ".png")
         #print("input shape: {}".format(self.inp.shape)) #(bs=1,c,d/z,h/y,w/x)
 
     def plot_raw(self, filename="raw"):
         
         inp_slice = self.inp.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
+        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
         
-        fig= plt.figure(figsize=(30,20))
+        fig, axs = plt.subplots(1,2,figsize=(30,20))
         plt.title("Raw at "+ self.coord_string, fontsize = 20)
-        raw_plot = plt.imshow(inp_slice, cmap = "gray")
+        raw_plot = axs[0].imshow(inp_slice, cmap = "gray")
+        axs[1].imshow(inp_slice, cmap = "gray")
+        axs[1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.7)
         
-        fig.savefig("plots/" + filename + self.coord_string + ".png")
+        fig.savefig(self.fig_save_path + filename + self.coord_string + ".png")
+
+    def plot_all(self, filename = "all"):
+        
+        fig, axs = plt.subplots(4,2,figsize=(30,80))
+
+        fig.suptitle("Model visualization at"+self.suptitle_string, size = 20)#test this with different patch size
+
+        ################BoundaryVectorDistanceTransform:#################
+        self.targ_vdt = self.target.cpu().detach().numpy()[:3, self.z_plot_coord,:,:]
+        self.targ_vdt = np.transpose(self.targ_vdt, (1,2,0)) #for matplotlib to display an RGB image, put the vdt channels as last axis and use w/x axis at first place, while h/y axis at second place
+        self.targ_vdt = self.targ_vdt[:,:,::-1] #rearrange dimension axis of the vdt_target s.t. the colormapping is red(x), green(y), blue(z)
+        self.targ_vdt_min = np.amin(self.targ_vdt)
+        self.targ_vdt_max = np.amax(self.targ_vdt)
+        self.targ_vdt = self._rescale(self.targ_vdt, self.targ_vdt_min, self.targ_vdt_max) #rescale to [0,1] interval
+
+        self.pred_vdt = self.prediction.cpu().detach().numpy()[0,:3, self.z_plot_coord,:,:]
+        self.pred_vdt = np.transpose(self.pred_vdt, (1,2,0))
+        self.pred_vdt = self.pred_vdt[:,:,::-1]
+        self.pred_vdt_min = np.amin(self.pred_vdt)
+        self.pred_vdt_max = np.amax(self.pred_vdt)
+        self.pred_vdt = self._rescale(self.pred_vdt, self.pred_vdt_min, self.pred_vdt_max)
+
+        axs[0,0].set_title("vector distance trafo target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
+        axs[0,0].imshow(self.targ_vdt)
+        axs[0,0].set_ylabel("y", fontsize = 13)
+        
+        axs[0,1].set_title("vector distance trafo prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
+        axs[0,1].imshow(self.pred_vdt)
+        
+        #############Norm of BoundaryVectorDistanceTransform##############
+        self.targ_vdt_norm = self.target.cpu().detach().numpy()[3, self.z_plot_coord,:,:]
+        self.pred_vdt_norm = self.prediction.cpu().detach().numpy()[0,3, self.z_plot_coord,:,:]
+        
+        axs[1,0].set_title("norm of vdt target", fontsize = 15)
+        axs[1,0].set_ylabel("y", fontsize=13)
+        axs[1,0].set_xlabel("x", fontsize = 13)
+        #axs[1,0].set_title("target, scale min: {}, max: {}".format(self.targ_vdt_min, self.targ_vdt_max)))
+        targ_vdt_norm = axs[1,0].imshow(self.targ_vdt_norm, cmap = "gray")
+        axs[1,1].set_title("norm of vdt prediction", fontsize = 15)
+        axs[1,1].set_xlabel("x", fontsize = 13)
+        #axs[1,1].set_title("prediction, scale min: {}, max: {}".format(self.pred_vdt_min, self.pred_vdt_min))
+        pred_vdt_norm = axs[1,1].imshow(self.pred_vdt_norm, cmap = "gray")
+
+
+        ############################GaussianDivergence###################
+        self.targ_gauss_norm = self.target.cpu().detach().numpy()[4, self.z_plot_coord,:,:]
+        self.pred_gauss_norm = self.prediction.cpu().detach().numpy()[0,4, self.z_plot_coord,:,:]
+
+
+        axs[2,0].set_title("gaussian divergence target", fontsize = 15)
+        axs[2,0].set_ylabel("y", fontsize=13)
+        axs[2,0].set_xlabel("x", fontsize = 13)
+        
+        targ_vdt_norm = axs[2,0].imshow(self.targ_gauss_norm, cmap = "gray")
+        axs[2,1].set_title("gaussian divergence prediction", fontsize = 15)
+        axs[2,1].set_xlabel("x", fontsize = 13)
+        pred_vdt_norm = axs[2,1].imshow(self.pred_gauss_norm, cmap = "gray")
+        
+
+        ############################RawPlot##############################
+        inp_slice = self.inp.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
+        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
+        
+        raw_plot = axs[3,0].imshow(inp_slice, cmap = "gray")
+        axs[3,0].set_title("raw input", fontsize = 15)
+        axs[3,1].imshow(inp_slice, cmap = "gray")
+        axs[3,1].set_title("raw input segmentation", fontsize = 15)
+        axs[3,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.7)
+        
+        plt.tight_layout() 
+
+        fig.savefig(self.fig_save_path + filename + self.coord_string + ".png")
