@@ -1,0 +1,27 @@
+Traceback (most recent call last):
+  File "train_unet_neurodata_lsd.py", line 332, in <module>
+    trainer.run(max_steps=max_steps, max_runtime=max_runtime)
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/trainer.py", line 504, in run
+    raise e
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/trainer.py", line 468, in run
+    valid_stats, val_sample_images = self._validate()
+  File "/u/fkies/anaconda3/envs/pysy-dev/lib/python3.7/site-packages/torch/autograd/grad_mode.py", line 15, in decorate_context
+    return func(*args, **kwargs)
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/trainer.py", line 754, in _validate
+    mvals = [evaluator(target, out) for target, out in zip(targets, outs)]
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/trainer.py", line 754, in <listcomp>
+    mvals = [evaluator(target, out) for target, out in zip(targets, outs)]
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/metrics.py", line 333, in __call__
+    m = self.metric_fn(target, pred, self.num_classes, mean=False, ignore=self.ignore)
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/metrics.py", line 142, in accuracy
+    cm = confusion_matrix(target, pred, num_classes=num_classes, ignore=ignore)
+  File "/wholebrain/u/fkies/elektronn3-dev/elektronn3/training/metrics.py", line 106, in confusion_matrix
+    true_pos = (pos_pred & pos_target & ~ign_target).sum(dtype=dtype)
+RuntimeError: The size of tensor a (8) must match the size of tensor b (5) at non-singleton dimension 1
+
+Question:
+What is up with the accuracy and precision metrics? in the 
+Evaluator class the _argmax() function is used at 
+https://github.com/ELEKTRONN/elektronn3/blob/19c751855dffc67b744cd43e757aa4a5bd577d9b/elektronn3/training/metrics.py#L254
+
+this leads to pred and target not having the same dimensions. how can this be?
