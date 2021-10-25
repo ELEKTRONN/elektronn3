@@ -852,7 +852,7 @@ class Trainer:
             'epoch': self.epoch,
             'best_val_loss': self.best_val_loss,
             'val_loss': val_loss,
-            'inference_kwargs': self.inference_kwargs,
+            #'inference_kwargs': self.inference_kwargs,
             'elektronn3.__version__': elektronn3.__version__,
             'env_info': collect_env.get_pretty_env_info()
         }
