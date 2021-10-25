@@ -303,8 +303,9 @@ def _tb_log_sample_images(
         # Create a central slice with the size of the output
         lo = (inp_sh - out_sh) // 2
         hi = inp_sh - lo
+        # adapt hi if unequal to out shape
+        hi = hi + out_sh - (hi-lo)
         slc = tuple([slice(None)] * 2 + [slice(l, h) for l, h in zip(lo, hi)])
-
         padded_out_batch = np.zeros(
             (inp_batch.shape[0], out_batch.shape[1], *inp_batch.shape[2:]),
             dtype=out_batch.dtype

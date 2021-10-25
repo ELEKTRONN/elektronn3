@@ -205,7 +205,7 @@ class DownConv(nn.Module):
     A ReLU activation follows each convolution.
     """
     def __init__(self, in_channels, out_channels, pooling=True, planar=False, activation='relu',
-                 normalization=None, full_norm=True, dim=3, conv_mode='same'):
+                 normalization=None, full_norm=True, dim=3, conv_mode='same', dr: float = None):
         super().__init__()
 
         self.in_channels = in_channels
@@ -240,6 +240,9 @@ class DownConv(nn.Module):
         else:
             self.norm0 = nn.Identity()
         self.norm1 = get_normalization(normalization, self.out_channels, dim=dim)
+        self.dropout = None
+        if dr is not None:
+            self.dropout = nn.Dropout(p=dr)
 
     def forward(self, x):
         y = self.conv1(x)
@@ -250,6 +253,8 @@ class DownConv(nn.Module):
         y = self.act2(y)
         before_pool = y
         y = self.pool(y)
+        if self.dropout is not None:
+            y = self.dropout(y)
         return y, before_pool
 
 
@@ -336,7 +341,7 @@ class UpConv(nn.Module):
     def __init__(self, in_channels, out_channels,
                  merge_mode='concat', up_mode='transpose', planar=False,
                  activation='relu', normalization=None, full_norm=True, dim=3, conv_mode='same',
-                 attention=False):
+                 attention=False, dr: float = None):
         super().__init__()
 
         self.in_channels = in_channels
@@ -380,6 +385,9 @@ class UpConv(nn.Module):
         else:
             self.attention = DummyAttention()
         self.att = None  # Field to store attention mask for later analysis
+        self.dropout = None
+        if dr is not None:
+            self.dropout = nn.Dropout(p=dr)
 
     def forward(self, enc, dec):
         """ Forward pass
@@ -405,6 +413,8 @@ class UpConv(nn.Module):
         y = self.conv2(y)
         y = self.norm2(y)
         y = self.act2(y)
+        if self.dropout is not None:
+            y = self.dropout(y)
         return y
 
 
@@ -751,6 +761,7 @@ class UNet(nn.Module):
                 the borders. Most notably this is the case if you do training
                 and inference not on small patches, but on complete images in
                 a single step.
+            dr: Dropout rate. If not None, dropout is applied after every UpConv and DownConv layer with the given rate.
     """
     def __init__(
             self,
@@ -768,6 +779,7 @@ class UNet(nn.Module):
             full_norm: bool = True,
             dim: int = 3,
             conv_mode: str = 'same',
+            dr: float = 0.0,
     ):
         super().__init__()
 
@@ -853,6 +865,7 @@ class UNet(nn.Module):
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                dr=dr,
             )
             self.down_convs.append(down_conv)
 
@@ -875,6 +888,7 @@ class UNet(nn.Module):
                 full_norm=full_norm,
                 dim=dim,
                 conv_mode=conv_mode,
+                dr=dr,
             )
             self.up_convs.append(up_conv)
 

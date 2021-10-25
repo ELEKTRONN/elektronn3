@@ -67,16 +67,31 @@ class N3DNet(nn.Module):
 class Conv3DLayer(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size,
                  batch_norm=True, pooling=None, dropout_rate=None,
-                 act=None):
+                 act=None, use_avg_ppoling=False, **conv3d_kwargs):
+        """
+        Order of calls: Conv3D, [BatchNorm,] activation, [Max/AvgPool,] [Dropout]
+
+        Args:
+            in_channels:
+            out_channels:
+            kernel_size:
+            batch_norm:
+            pooling:
+            dropout_rate: Rate of dropout.
+            act: Activation function.
+            use_avg_ppoling: Use average pooling instead of max pooling.
+            **conv3d_kwargs:
+        """
         super().__init__()
         if act is None:
             act = nn.ReLU()
-        seq = [nn.Conv3d(in_channels, out_channels, kernel_size)]
+        seq = [nn.Conv3d(in_channels, out_channels, kernel_size, **conv3d_kwargs)]
         if batch_norm:
             seq += [nn.BatchNorm3d(out_channels)]
         seq += [act]
         if pooling is not None:
-            seq += [nn.MaxPool3d(pooling)]
+            pool_ = nn.AvgPool3d(pooling) if use_avg_ppoling else nn.MaxPool3d(pooling)
+            seq += [pool_]
         if dropout_rate is not None:
             seq += [nn.Dropout3d(dropout_rate)]
         self.conv3_layer = nn.Sequential(*seq)

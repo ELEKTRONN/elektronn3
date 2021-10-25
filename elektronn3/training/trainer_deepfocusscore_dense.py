@@ -535,11 +535,18 @@ class Trainer:
         dtarget = target.to(self.device, non_blocking=True) if target is not None else None
         dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
         # forward pass
-        dout = self.model(dinp)
+        dout, dout_orig = self.model(dinp)
         if dtarget_class is not None:
             dloss = self.criterion(dout, dtarget, dtarget_class)
         else:
-            dloss = self.criterion(dout, dtarget)
+            orig_loss_frac = 0.25
+            dloss = (1 - orig_loss_frac) * self.criterion(dout, dtarget)
+            # flatten B x H x W dimension in dout_orig
+            n_pixels = dout_orig.size()[-2] * dout_orig.size()[-1]
+            dloss_orig = self.criterion(dout_orig[:, :3].view(dout_orig.size()[0], 3, -1),
+                                        dtarget[..., None].repeat_interleave(n_pixels, dim=2))
+            dloss += orig_loss_frac * dloss_orig
+            self.tb.add_scalar('stats/tr_orig_loss', float(dloss_orig), global_step=self.step)
 
         unlabeled = batch.get('unlabeled')
         if unlabeled is not None:  # Add a simple consistency loss
@@ -560,7 +567,7 @@ class Trainer:
         else:
             dloss.backward()
         self.optimizer.step()
-        return dloss, dout
+        return dloss, dout_orig[:, ::3]  # only take wd and score value (shape needs to be identical to input to visualize in TB)
 
     def _train(self, max_steps, max_runtime):
         """Train for one epoch or until max_steps or max_runtime is reached"""
@@ -625,7 +632,10 @@ class Trainer:
         stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
         misc['tr_speed_vx'] = running_vx_size / timer.t_passed / 1e6  # MVx
-
+        del images['target']  # do not log target as this makes things too complicated
+        images['inp'] = images['inp'][:, 0]  # get rid of C axis
+        if len(images['out'].shape) == 5:
+            images['out'] = images['out'].squeeze(-3)  # get rid of Z axis
         return stats, misc, images
 
     def _put_current_attention_maps_into(self, images):
@@ -747,23 +757,26 @@ class Trainer:
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True) if target is not None else None
             dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
-            dout = self.model(dinp)
+            dout, dout_orig = self.model(dinp)
             if dtarget is None:  # Use self-supervised unary loss function
                 val_loss.append(self.ss_criterion(dout).item())
             elif dtarget_class is not None:
                 val_loss.append(self.criterion(dout, dtarget, dtarget_class).item())
             else:
                 val_loss.append(self.criterion(dout, dtarget).item())
-            out = dout.detach().cpu()
-            outs.append(out)
+            dout_orig = dout_orig.detach().cpu()
+            outs.append(dout_orig)
             targets.append(target)
 
         images = {
-            'inp': inp.numpy(),
-            'out': out.numpy(),
+            'inp': inp.numpy()[:, 0],  # get rid of C axis.
+            'out': dout_orig[:, ::3].numpy(),  # only keep wd and score values to be compatible with TB
             'target': None if target is None else target.numpy(),
             'fname': batch.get('fname'),
         }
+        if len(images['out'].shape) == 5:
+            images['out'] = images['out'].squeeze(-3)  # get rid of Z axis
+        del images['target']  # do not log target as this makes things too complicated
         self._put_current_attention_maps_into(images)
 
         stats['val_loss'] = np.mean(val_loss)
@@ -941,21 +954,23 @@ class Trainer:
     ) -> None:
         """Create visualizations, make preview predictions, log and plot to tensorboard"""
         if self.tb:
-            try:
-                self._tb_log_scalars(stats, 'stats')
-                self._tb_log_scalars(misc, 'misc')
-                if self.preview_batch is not None:
-                    if self.epoch % self.preview_interval == 0 or self.epoch == 1:
-                        # TODO: Also save preview inference results in a (3D) HDF5 file
-                        self.preview_plotting_handler(self)
-                self.sample_plotting_handler(self, tr_images, group='tr_samples')
-                if val_images is not None:
-                    self.sample_plotting_handler(self, val_images, group='val_samples')
-                if file_stats is not None:
-                    self._tb_log_scalars(file_stats, 'file_stats')
-                self._tb_log_histograms()
-            except Exception:
-                logger.exception('Error occured while logging to tensorboard:')
+            # try:
+            self._tb_log_scalars(stats, 'stats')
+            self._tb_log_scalars(misc, 'misc')
+            if self.preview_batch is not None:
+                if self.epoch % self.preview_interval == 0 or self.epoch == 1:
+                    # TODO: Also save preview inference results in a (3D) HDF5 file
+                    self.preview_plotting_handler(self)
+            if file_stats is not None:
+                self._tb_log_scalars(file_stats, 'file_stats')
+            # try:
+            self.sample_plotting_handler(self, tr_images, group='tr_samples')
+            if val_images is not None:
+                self.sample_plotting_handler(self, val_images, group='val_samples')
+            self._tb_log_histograms()
+            # except Exception as e:
+            #     raise Exception from e
+            #     logger.exception('Error occured while logging images to tensorboard:')
 
     def _log_to_history_tracker(self, stats: Dict, misc: Dict) -> None:
         """Update history tracker and plot stats (kind of made obsolete by tensorboard)"""

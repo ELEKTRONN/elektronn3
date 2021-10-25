@@ -535,11 +535,14 @@ class Trainer:
         dtarget = target.to(self.device, non_blocking=True) if target is not None else None
         dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
         # forward pass
-        dout = self.model(dinp)
+        dout, dout_orig = self.model(dinp)
         if dtarget_class is not None:
             dloss = self.criterion(dout, dtarget, dtarget_class)
         else:
             dloss = self.criterion(dout, dtarget)
+            dloss_orig = self.criterion(dout_orig[..., :3], dtarget.repeat_interleave(len(dout_orig) // len(dtarget), dim=0))
+            dloss += 0.25 * dloss_orig
+            dloss *= 1/1.25  # normalize
 
         unlabeled = batch.get('unlabeled')
         if unlabeled is not None:  # Add a simple consistency loss
@@ -747,7 +750,7 @@ class Trainer:
             dinp = inp.to(self.device, non_blocking=True)
             dtarget = target.to(self.device, non_blocking=True) if target is not None else None
             dtarget_class = target_class.to(self.device, non_blocking=True) if target_class is not None else None
-            dout = self.model(dinp)
+            dout = self.model(dinp)[0]
             if dtarget is None:  # Use self-supervised unary loss function
                 val_loss.append(self.ss_criterion(dout).item())
             elif dtarget_class is not None:
