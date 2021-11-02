@@ -70,14 +70,14 @@ class Visualizer():
         self.inp = torch.unsqueeze(self.sample["inp"],0).to(self.device, dtype = self.dtype)
         self.inp_seg = torch.unsqueeze(self.sample["segmentation"],0).to(self.device, dtype = self.dtype)
         self.target = self.sample["target"].to(self.device, dtype = self.dtype)
-        self.coordinate_raw = self.sample["coordinate_raw"]
-        self.z_plot_coord = self.inp.shape[2]//2 
+        self.coordinate_raw = self.sample["coordinate_raw"]#coordinates given xyz !!! look at KnossosRawData documentation
+        self.z_plot_coord = self.inp.shape[2]//2#plot xy-plane in the middle of z-axis of the cube
         self.suptitle_string = "at (z,y,x) = ({},{}:{},{}:{})".format(self.z_plot_coord + self.label_offset+self.coordinate_raw[0],
                         self.coordinate_raw[1] - self.patch_shape[1]//2, self.coordinate_raw[1] + self.patch_shape[1]//2,
-                        self.coordinate_raw[2] - self.patch_shape[2]//2, self.coordinate_raw[2] + self.patch_shape[2]//2) 
+                        self.coordinate_raw[0] - self.patch_shape[2]//2, self.coordinate_raw[0] + self.patch_shape[2]//2)#self.coordinate_raw is xyz, but self.patch_shape is zyx!!! 
         self.coord_string = "_zyx__{}__{}-{}__{}-{}".format(self.z_plot_coord + self.label_offset+self.coordinate_raw[0],
                         self.coordinate_raw[1] - self.patch_shape[1]//2, self.coordinate_raw[1] + self.patch_shape[1]//2,
-                        self.coordinate_raw[2] - self.patch_shape[2]//2, self.coordinate_raw[2] + self.patch_shape[2]//2)
+                        self.coordinate_raw[0] - self.patch_shape[2]//2, self.coordinate_raw[0] + self.patch_shape[2]//2)#self.coordinate_raw is xyz, but self.patch_shape is zyx!!!
 
     def _load_model(self):
         self.model = torch.load(self.model_path)

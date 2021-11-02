@@ -47,6 +47,11 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             the dataset (or the subregion
             that is constrained by ``bounds``) is pre-loaded into memory on initialization. If ``caching``, cache data
             from the disk and reuse it. If ``disk``, load data from disk on demand.
+            threshold_background_fraction: float [0.,1.] or None. If a float, this denotes the percentage of background that is tolerated in each sample.
+            The "empty" voxels, i.e. voxels with value of 0, are counted, and if the fraction of empty voxels exceeds the threshold
+            the sample is skipped and a new one is generated. Default None.
+            save_interval: during the training this object will record all the coordinates of the samples it encountered. these and other
+            meta-data are saved in a dict which is stored in the training directory
            """
 
     def __init__(
@@ -66,8 +71,12 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             raw_disable_memory_check: bool = False,
             raw_verbose: bool = False,
             raw_cache_size: int = 50,
-            raw_cache_reuses: int = 10
+            raw_cache_reuses: int = 10,
+            threshold_background_fraction: float = 0.05, #maximum fraction of background (segmentation==0) in a sample
+            save_interval: int = None
+
     ):
+
         self.conf_path_label = conf_path_label
         self.conf_path_raw_data = conf_path_raw_data
         self.patch_shape = np.array(patch_shape)
@@ -76,6 +85,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         if self.dim == 2:
             patch_shape_xyz = np.array([*patch_shape_xyz, 1])  # z=1 for 2D
         self.patch_shape_xyz = patch_shape_xyz
+        self.patch_volume = np.prod(self.patch_shape_xyz)
         self.transform = transform
         self.mag = mag
         self.epoch_size = epoch_size
@@ -91,8 +101,21 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         self.raw_cache_reuses = raw_cache_reuses
         self.raw_cache_size = raw_cache_size
         self.coordinate_history = []
+        self.threshold_background_fraction = threshold_background_fraction
+        self.save_interval = save_interval
+        self.epoch = 0
 
-
+        #set up the saving dictionary for saving in the training folder
+        self.samples_history_dictionary = {}
+        self.samples_history_dictionary["conf_path_label"] = self.conf_path_label
+        self.samples_history_dictionary["conf_path_raw_data"] = self.conf_path_raw_data
+        self.samples_history_dictionary["patch_shape_zyx"] = self.patch_shape
+        self.samples_history_dictionary["save_interval"] = self.save_interval
+        self.samples_history_dictionary["threshold_background_fraction"] = self.threshold_background_fraction        
+        self.samples_history_dictionary["label_offset"] = self.label_offset
+        self.samples_history_dictionary["label_order"] = self.label_order
+        self.samples_history_dictionary["raw_mode"] = self.raw_mode
+        
         #raw data as input
         #specify no elektronn3 transformation in the raw data loader because transform is applied
         #after loading the data from KnossosRawData, outside of it's scope
@@ -117,9 +140,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         #retrieved from KnossosRawData for the elektronn3 transformation one must cast it to numpy array
 
         input_dict = self.inp_raw_data_loader[0]
-        inp = input_dict["inp"].numpy() #czyx
-        coordinate_from_raw = input_dict["offset"]
-        self.coordinate_history.append(coordinate_from_raw)
+        coordinate_from_raw = input_dict["offset"]#xyz
 
         #use the position_from_raw retrieved from calling the __getitem__() method to load the corresponding label patch from the
         #label data
@@ -127,6 +148,26 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         #the zyx->xyz conversion inside it's scope
         label = self.label_target_loader.load_seg(offset= coordinate_from_raw + self.label_offset, size = self.patch_shape_xyz,
                                                     mag = self.mag, datatype = np.int64)
+        
+        
+
+        #count calculate the fraction of empty (value 0 in segmentation) voxels in the sample (segmentation). The loader generates new samples so long until it finds
+        #one with a fraction of background lower then the threshold background fraction
+        while np.count_nonzero(label==0) / self.patch_volume > self.threshold_background_fraction:
+            input_dict = self.inp_raw_data_loader[0]
+            coordinate_from_raw = input_dict["offset"]#xyz
+            label = self.label_target_loader.load_seg(offset= coordinate_from_raw + self.label_offset, size = self.patch_shape_xyz,
+                                                        mag = self.mag, datatype = np.int64)
+   
+        inp = input_dict["inp"].numpy() #czyx
+        coordinate_from_raw = input_dict["offset"]
+        
+        self.samples_history_dictionary["epoch {}".format(self.epoch)] =  {"coordinate_raw_xyz": coordinate_from_raw}
+
+        if self.save_interval is not None:
+            if self.epoch % self.save_interval == 0:
+                with open(self.savepath + "samples_history.json", "w") as f:
+                    json.dump(self.samples_history_dictionary, f)
 
         if self.dim == 2:
             label = label[0]
@@ -135,16 +176,17 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         trafo_inp, target = self.transform(inp, label)
 
         sample = {
-            'inp': torch.as_tensor(trafo_inp),
-            'target': torch.as_tensor(target),#.long(),
+            'inp': torch.as_tensor(trafo_inp),#czyx
+            'target': torch.as_tensor(target),#.long(), zyx
             'fname': self.conf_path_label,
-            'coordinate_raw': coordinate_from_raw,
+            'coordinate_raw': coordinate_from_raw,#xyz
             'segmentation': torch.as_tensor(inp)
         }
         #if self.label_order is not None:
         #    sample_target = sample['target'].detach().clone()
         #    for i, label in enumerate(self.label_order):
         #        sample['target'][sample_target == i] = label
+        self.epoch += 1
         return sample
 
     def __len__(self) -> int:

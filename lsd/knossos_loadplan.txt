@@ -18,6 +18,13 @@ high corner (x=512, y=512, z=512) of the dataset is considered. If
 ``None``, the whole dataset is used.
 (from KnossosRawData)
 
+bei KnossosRawData in
+
+https://github.com/ELEKTRONN/elektronn3/blob/19c751855dffc67b744cd43e757aa4a5bd577d9b/elektronn3/
+data/knossos.py#L121
+
+steht dass der offset in #xyz gegeben ist!!!!!!
+
 in the _get_data method from KnossosLabels the data is loaded via
 data = self.kd._load_kzip_seg(zip_path, bounds[0], size,self.mag,padding=0,
                                                   apply_mergelist=False,

@@ -280,6 +280,12 @@ optimizer = optim.SGD(
 #        lr_sched.load_state_dict(lr_sched_state_dict)
 lr_sched = torch.optim.lr_scheduler.StepLR(optimizer, 1000, 0.9)
 
+from newmetric import LossFunctorMetric
+
+lf_vdt = LossFunctorMetric('L1', [0,3])
+lf_vdt_norm = LossFunctorMetric('L1', [3,3])
+lf_gauss_div = LossFunctorMetric('L1', [4,4])
+
 # Validation metrics
 valid_metrics = {}
 for evaluator in []:
