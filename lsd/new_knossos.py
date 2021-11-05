@@ -72,7 +72,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             raw_verbose: bool = False,
             raw_cache_size: int = 50,
             raw_cache_reuses: int = 10,
-            threshold_background_fraction: float = 0.05, #maximum fraction of background (segmentation==0) in a sample
+            threshold_background_fraction: float = 0.2, #maximum fraction of background (segmentation==0) in a sample
             save_interval: int = None
 
     ):
@@ -153,7 +153,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
 
         #count calculate the fraction of empty (value 0 in segmentation) voxels in the sample (segmentation). The loader generates new samples so long until it finds
         #one with a fraction of background lower then the threshold background fraction
-        while np.count_nonzero(label==0) / self.patch_volume > self.threshold_background_fraction:
+        while np.count_nonzero(label) / self.patch_volume > 1-self.threshold_background_fraction:
             input_dict = self.inp_raw_data_loader[0]
             coordinate_from_raw = input_dict["offset"]#xyz
             label = self.label_target_loader.load_seg(offset= coordinate_from_raw + self.label_offset, size = self.patch_shape_xyz,
@@ -166,7 +166,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
 
         if self.save_interval is not None:
             if self.epoch % self.save_interval == 0:
-                with open(self.savepath + "samples_history.json", "w") as f:
+                with open(os.path.join(self.savepath, "samples_history.json"), "w") as f:
                     json.dump(self.samples_history_dictionary, f)
 
         if self.dim == 2:
@@ -180,7 +180,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             'target': torch.as_tensor(target),#.long(), zyx
             'fname': self.conf_path_label,
             'coordinate_raw': coordinate_from_raw,#xyz
-            'segmentation': torch.as_tensor(inp)
+            'segmentation': torch.as_tensor(label)
         }
         #if self.label_order is not None:
         #    sample_target = sample['target'].detach().clone()

@@ -156,6 +156,41 @@ class Visualizer():
         
         fig_vdt.tight_layout()
         fig_vdt.savefig(self.fig_save_path + filename + self.coord_string + ".png")
+    
+    def plot_vdt_quiver(self, filename = "quiver_BVDT"):
+       
+        #for the quiver plots 
+        rangex = np.arange(self.patch_shape[2])
+        rangey = np.arange(self.patch_shape[1])
+        xquiver, yquiver = np.meshgrid(rangex, rangey)
+        ################BoundaryVectorDistanceTransform:#################
+        self.targ_vdt = self.target.cpu().detach().numpy()[:3, self.z_plot_coord,:,:]
+        self.targ_vdt = np.transpose(self.targ_vdt, (1,2,0)) #for matplotlib to display an RGB image, put the vdt channels as last axis and use w/x axis at first place, while h/y axis at second place
+        self.targ_vdt = self.targ_vdt[:,:,::-1] #rearrange dimension axis of the vdt_target s.t. the colormapping is red(x), green(y), blue(z)
+        self.targ_vdt_quiver = self.targ_vdt[:,:,:-1]#clip the z-component of the vector-field
+        self.targ_vdt_min = np.amin(self.targ_vdt)
+        self.targ_vdt_max = np.amax(self.targ_vdt)
+        self.targ_vdt = self._rescale(self.targ_vdt, self.targ_vdt_min, self.targ_vdt_max) #rescale to [0,1] interval
+        self.pred_vdt = self.prediction.cpu().detach().numpy()[0,:3, self.z_plot_coord,:,:]
+        self.pred_vdt = np.transpose(self.pred_vdt, (1,2,0))
+        self.pred_vdt = self.pred_vdt[:,:,::-1]
+        self.pred_vdt_quiver = self.targ_vdt[:,:,:-1]#clip the z-component of the vector-field
+        self.pred_vdt_min = np.amin(self.pred_vdt)
+        self.pred_vdt_max = np.amax(self.pred_vdt)
+        self.pred_vdt = self._rescale(self.pred_vdt, self.pred_vdt_min, self.pred_vdt_max)
+
+        fig_vdt_quiver, axs = plt.subplots(1,2, figsize=(30,20), sharex = True, sharey = True)
+        fig_vdt_quiver.suptitle("BVDT with xy-projection at "+self.suptitle_string, size = 20)#test this with different patch size
+        axs[0].set_title("target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
+        axs[0].imshow(self.targ_vdt)
+        axs[0].quiver(rangex, rangey, self.targ_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
+        axs[0].set_ylabel("y", fontsize = 13)
+        
+        axs[1].set_title("prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
+        axs[1].imshow(self.pred_vdt)
+        axs[1].quiver(rangex, rangey, self.pred_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
+
+        fig_vdt_quiver.savefig(self.fig_save_path + filename + self.coord_string + ".png")
 
     def plot_vdt_norm(self, filename="norm_BVDT"):
         self.targ_vdt_norm = self.target.cpu().detach().numpy()[3, self.z_plot_coord,:,:]
@@ -270,10 +305,11 @@ class Visualizer():
         fig_com.savefig(self.fig_save_path  + filename + self.coord_string + ".png")
         #print("input shape: {}".format(self.inp.shape)) #(bs=1,c,d/z,h/y,w/x)
 
+
     def plot_raw(self, filename="raw"):
         
         inp_slice = self.inp.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
-        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
+        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0,self.z_plot_coord,:,:]
         
         fig, axs = plt.subplots(1,2,figsize=(30,20))
         plt.title("Raw at "+ self.coord_string, fontsize = 20)
@@ -343,7 +379,7 @@ class Visualizer():
 
         ############################RawPlot##############################
         inp_slice = self.inp.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
-        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0,0, self.z_plot_coord,:,:]
+        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0, self.z_plot_coord,:,:]
         
         raw_plot = axs[3,0].imshow(inp_slice, cmap = "gray")
         axs[3,0].set_title("raw input", fontsize = 15)
@@ -353,4 +389,4 @@ class Visualizer():
         
         plt.tight_layout() 
 
-        fig.savefig(self.fig_save_path + filename + self.coord_string + ".png")
+        fig.savefig(os.path.join(self.fig_save_path,filename + self.coord_string + ".png"))
