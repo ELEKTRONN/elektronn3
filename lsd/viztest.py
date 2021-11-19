@@ -4,6 +4,13 @@ from lsd import LSDGaussVdtCom
 from elektronn3.data import transforms
 from visualizer import Visualizer
 import numpy as np
+import argparse
+
+parser = argparse.ArgumentParser(description='Set density of quiver plot')
+parser.add_argument('-s', '--skip',type = int, default = 1, help = 'number of datapoints skipped after each arrow')
+args = parser.parse_args()
+skip = args.skip
+
 conf_path_raw = "/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf"
 
 conf_path_labels = "/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf"
@@ -35,9 +42,9 @@ viz_new = Visualizer(conf_path_labels, conf_path_raw, model_path_new, patch_shap
 #viz_old.plot_com("old_com")
 #viz_old.plot_raw("old_raw")
 viz_new.plot_raw("new_raw")
-viz_new.plot_vdt_quiver("new_vdt_quiver")
+viz_new.plot_vdt_quiver("new_vdt_quiver", skip = skip)
 
-nplots = 5
+#nplots = 5
 """
 for count in range(nplots):
     viz_new._generate_sample()

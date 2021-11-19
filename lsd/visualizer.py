@@ -157,8 +157,11 @@ class Visualizer():
         fig_vdt.tight_layout()
         fig_vdt.savefig(self.fig_save_path + filename + self.coord_string + ".png")
     
-    def plot_vdt_quiver(self, filename = "quiver_BVDT"):
-       
+    def plot_vdt_quiver(self, filename = "quiver_BVDT", skip = 1):
+
+        #slice to reduce number of arrows
+        coord_skip_slice = slice(None,None, skip)
+        vdt_skip_slice = (slice(None, None, skip), slice(None,None,skip))
         #for the quiver plots 
         rangex = np.arange(self.patch_shape[2])
         rangey = np.arange(self.patch_shape[1])
@@ -179,16 +182,18 @@ class Visualizer():
         self.pred_vdt_max = np.amax(self.pred_vdt)
         self.pred_vdt = self._rescale(self.pred_vdt, self.pred_vdt_min, self.pred_vdt_max)
 
-        fig_vdt_quiver, axs = plt.subplots(1,2, figsize=(30,20), sharex = True, sharey = True)
+        fig_vdt_quiver, axs = plt.subplots(1,2, figsize=(30,20), sharex = True, sharey = True, dpi = 500)
         fig_vdt_quiver.suptitle("BVDT with xy-projection at "+self.suptitle_string, size = 20)#test this with different patch size
         axs[0].set_title("target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
         axs[0].imshow(self.targ_vdt)
-        axs[0].quiver(rangex, rangey, self.targ_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
+        axs[0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice])
+        #axs[0].quiver(rangex, rangey, self.targ_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
         axs[0].set_ylabel("y", fontsize = 13)
         
         axs[1].set_title("prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
         axs[1].imshow(self.pred_vdt)
-        axs[1].quiver(rangex, rangey, self.pred_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
+        axs[1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice])
+        #axs[1].quiver(rangex, rangey, self.pred_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
 
         fig_vdt_quiver.savefig(self.fig_save_path + filename + self.coord_string + ".png")
 
