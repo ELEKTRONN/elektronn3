@@ -167,7 +167,7 @@ def binary_xloss(logits, labels, ignore=None):
 
 def lovasz_softmax(probas, labels, only_present=False, per_image=False, ignore=None):
     """
-    Multi-class Lovasz-Softmax loss
+    Multi-class Lovasz-Softmax loss. Works for 1D, 2D and 3D: [B, C, H, [W, [D]]]
       probas: [B, C, H, W] Variable, class probabilities at each prediction (between 0 and 1)
       labels: [B, H, W] Tensor, ground truth labels (between 0 and C - 1)
       only_present: average only on num_classes present in ground truth
@@ -208,7 +208,9 @@ def flatten_probas(probas, labels, ignore=None):
     Flattens predictions in the batch
     """
     C = probas.shape[1]
-    if probas.dim() == 4:
+    if probas.dim() == 3:  # 1D input
+        probas = probas.permute(0, 2, 1).contiguous().view(-1, C)  # B * H * W, C = P, C
+    elif probas.dim() == 4:  # 2D images
         probas = probas.permute(0, 2, 3, 1).contiguous().view(-1, C)  # B * H * W, C = P, C
     elif probas.dim() == 5:  # 3D images
         probas = probas.permute(0, 2, 3, 4, 1).contiguous().view(-1, C)  # B * D * H * W, C = P, C

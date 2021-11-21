@@ -482,7 +482,6 @@ class Trainer3d:
                 dout = dout.transpose(1, 2)
 
             out = dout.detach().cpu()
-
             dout_flat = dout.reshape(-1, self.num_classes)
             dtarget_flat = dtarget.reshape(-1)
             dloss = self.criterion(dout_flat, dtarget_flat)

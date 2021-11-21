@@ -707,19 +707,20 @@ class NorpfDiceLoss(torch.nn.Module):
 
 class LovaszLoss(torch.nn.Module):
     """https://arxiv.org/abs/1705.08790"""
-    def __init__(self, apply_softmax=True):
+    def __init__(self, apply_softmax=True, ignore_index=None):
         super().__init__()
         if apply_softmax:
             self.softmax = torch.nn.Softmax(dim=1)
         else:
             self.softmax = lambda x: x  # Identity (no softmax)
+        self.ignore_index = ignore_index
         # lovasz_softmax works on softmax probs, so we still have to apply
         #  softmax before passing probs to it
         self.lovasz = lovasz_softmax
 
     def forward(self, output, target):
         probs = self.softmax(output)
-        return self.lovasz(probs, target)
+        return self.lovasz(probs, target, ignore=self.ignore_index)
 
 
 class ACLoss(torch.nn.Module):
