@@ -178,8 +178,9 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         sample = {
             'inp': torch.as_tensor(trafo_inp),#czyx
             'target': torch.as_tensor(target),#.long(), zyx
-            'fname': self.conf_path_label,
             'coordinate_raw': coordinate_from_raw,#xyz
+            'raw_path': self.conf_path_raw_data,
+            'seg_path': self.conf_path_label,
             'segmentation': torch.as_tensor(label)
         }
         #if self.label_order is not None:
