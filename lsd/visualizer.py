@@ -1,31 +1,3 @@
-#import torch
-#import numpy as np
-#import matplotlib.pyplot as plt
-#from new_knossos import KnossosLabelsNozip
-#import vigra as v
-#import matplotlib as mpl
-#from mpl_toolkits.axes_grid1 import ImageGrid
-#
-#class Visualizer():
-#    def __init__(self, conf_path_label, conf_path_raw,
-#                model_path,
-#                patch_shape=(70, 150, 150),#zyx
-#                label_offset = 0,#zyx or 0
-#                transform = None, nsamples = 1,
-#                device = "cuda", dtype = torch.float):
-#        
-#        self.conf_path_raw = conf_path_raw
-#        self.conf_path_label = conf_path_label
-#        self.model_path = model_path
-#        self.patch_shape = patch_shape#zyx
-#        self.label_offset = 0
-#        self.transform = transform
-#        self.loader = KnossosLabelsNozip(
-#            conf_path_label = self.conf_path_label,
-#            conf_path_raw_data = self.conf_path_raw,
-#            #label_offset = self.label_offset,
-#            patch_shape=self.patch_shape,transform=self.transform,
-#            raw_mode="caching")
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -70,14 +42,15 @@ class Visualizer():
         self.inp = torch.unsqueeze(self.sample["inp"],0).to(self.device, dtype = self.dtype)
         self.inp_seg = torch.unsqueeze(self.sample["segmentation"],0).to(self.device, dtype = self.dtype)
         self.target = self.sample["target"].to(self.device, dtype = self.dtype)
-        self.coordinate_raw = self.sample["coordinate_raw"]#coordinates given xyz !!! look at KnossosRawData documentation
-        self.z_plot_coord = self.inp.shape[2]//2#plot xy-plane in the middle of z-axis of the cube
-        self.suptitle_string = "at (z,y,x) = ({},{}:{},{}:{})".format(self.z_plot_coord + self.label_offset+self.coordinate_raw[0],
-                        self.coordinate_raw[1] - self.patch_shape[1]//2, self.coordinate_raw[1] + self.patch_shape[1]//2,
-                        self.coordinate_raw[0] - self.patch_shape[2]//2, self.coordinate_raw[0] + self.patch_shape[2]//2)#self.coordinate_raw is xyz, but self.patch_shape is zyx!!! 
-        self.coord_string = "_zyx__{}__{}-{}__{}-{}".format(self.z_plot_coord + self.label_offset+self.coordinate_raw[0],
-                        self.coordinate_raw[1] - self.patch_shape[1]//2, self.coordinate_raw[1] + self.patch_shape[1]//2,
-                        self.coordinate_raw[0] - self.patch_shape[2]//2, self.coordinate_raw[0] + self.patch_shape[2]//2)#self.coordinate_raw is xyz, but self.patch_shape is zyx!!!
+        self.coordinate_raw = self.sample["coordinate_raw_xyz"]#coordinates given xyz!!!i
+        print("coordinates (xyz) of the patch_ {}".format(self.coordinate_raw))
+        self.z_plot_coord = 0#self.inp.shape[0]//2#plot xy-plane in the middle of z-axis of the cube
+        self.suptitle_string = "at (x,y,z) = ({}:{},{}:{},{})".format(self.coordinate_raw[0], self.coordinate_raw[0] + self.patch_shape[2],#x component of patch shape
+                        self.coordinate_raw[1], self.coordinate_raw[1] + self.patch_shape[1],#y component of patch shape
+                        self.z_plot_coord + self.label_offset+self.coordinate_raw[2])#self.coordinate_raw is xyz, but self.patch_shape is zyx!!! 
+        self.coord_string = "_xyz__{}-{}__{}-{}__{}".format(self.coordinate_raw[0], self.coordinate_raw[0] + self.patch_shape[2],#x component of patch shape
+                        self.coordinate_raw[1], self.coordinate_raw[1] + self.patch_shape[1],#y component of patch shape
+                        self.z_plot_coord + self.label_offset+self.coordinate_raw[2])
 
     def _load_model(self):
         self.model = torch.load(self.model_path)
@@ -157,7 +130,7 @@ class Visualizer():
         fig_vdt.tight_layout()
         fig_vdt.savefig(self.fig_save_path + filename + self.coord_string + ".png")
     
-    def plot_vdt_quiver(self, filename = "quiver_BVDT", skip = 1):
+    def plot_vdt_quiver(self, filename = "quiver_BVDT", skip = 1, return_ax = False):
 
         #slice to reduce number of arrows
         coord_skip_slice = slice(None,None, skip)
@@ -170,32 +143,50 @@ class Visualizer():
         self.targ_vdt = self.target.cpu().detach().numpy()[:3, self.z_plot_coord,:,:]
         self.targ_vdt = np.transpose(self.targ_vdt, (1,2,0)) #for matplotlib to display an RGB image, put the vdt channels as last axis and use w/x axis at first place, while h/y axis at second place
         self.targ_vdt = self.targ_vdt[:,:,::-1] #rearrange dimension axis of the vdt_target s.t. the colormapping is red(x), green(y), blue(z)
-        self.targ_vdt_quiver = self.targ_vdt[:,:,:-1]#clip the z-component of the vector-field
         self.targ_vdt_min = np.amin(self.targ_vdt)
         self.targ_vdt_max = np.amax(self.targ_vdt)
-        self.targ_vdt = self._rescale(self.targ_vdt, self.targ_vdt_min, self.targ_vdt_max) #rescale to [0,1] interval
+        #self.targ_vdt *= 1/(np.linalg.norm(self.targ_vdt, axis=2)[:,:,np.newaxis])
+        #self.targ_vdt = self._rescale(self.targ_vdt, 0, 1) #rescale to [0,1] interval
+        self.targ_vdt_quiver = self.targ_vdt#clip the z-component of the vector-field
+    
         self.pred_vdt = self.prediction.cpu().detach().numpy()[0,:3, self.z_plot_coord,:,:]
         self.pred_vdt = np.transpose(self.pred_vdt, (1,2,0))
         self.pred_vdt = self.pred_vdt[:,:,::-1]
-        self.pred_vdt_quiver = self.targ_vdt[:,:,:-1]#clip the z-component of the vector-field
         self.pred_vdt_min = np.amin(self.pred_vdt)
         self.pred_vdt_max = np.amax(self.pred_vdt)
-        self.pred_vdt = self._rescale(self.pred_vdt, self.pred_vdt_min, self.pred_vdt_max)
+        #self.pred_vdt *= 1/(np.linalg.norm(self.pred_vdt, axis=2)[:,:,np.newaxis])
+        #self.pred_vdt = self._rescale(self.pred_vdt, 0, 1)
+        self.pred_vdt_quiver = self.pred_vdt#clip the z-component of the vector-field
+        headwidth = 2
+        headlength = 2
+        inp_slice_seg = self.inp_seg.cpu().detach().numpy()[0,self.z_plot_coord,:,:]
 
-        fig_vdt_quiver, axs = plt.subplots(1,2, figsize=(30,20), sharex = True, sharey = True, dpi = 500)
+        fig_vdt_quiver, axs = plt.subplots(2,2, figsize=(30,40), sharex = True, sharey = True, dpi = 500)
         fig_vdt_quiver.suptitle("BVDT with xy-projection at "+self.suptitle_string, size = 20)#test this with different patch size
-        axs[0].set_title("target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
-        axs[0].imshow(self.targ_vdt)
-        axs[0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice])
+        axs[0,0].set_title("target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
+        #axs[0,0].imshow(self.targ_vdt_quiver)
+        axs[0,0].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
+        axs[0,0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice], headwidth=headwidth, headlength=headlength)
         #axs[0].quiver(rangex, rangey, self.targ_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
-        axs[0].set_ylabel("y", fontsize = 13)
+        axs[0,0].set_ylabel("y", fontsize = 13)
         
-        axs[1].set_title("prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
-        axs[1].imshow(self.pred_vdt)
-        axs[1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice])
+        axs[0,1].set_title("prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
+        #axs[0,1].imshow(self.pred_vdt_quiver)
+        axs[0,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
+        axs[0,1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,0][vdt_skip_slice], self.pred_vdt_quiver[:,:,1][vdt_skip_slice],headwidth=headwidth, headlength=headlength)
         #axs[1].quiver(rangex, rangey, self.pred_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
 
-        fig_vdt_quiver.savefig(self.fig_save_path + filename + self.coord_string + ".png")
+        #axs[1,0].imshow(self.targ_vdt[:,:,::-1])
+        axs[1,0].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
+        axs[1,0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice], self.targ_vdt_quiver[:,:,2][vdt_skip_slice], headwidth=headwidth, headlength=headlength)
+        #axs[1,1].imshow(self.pred_vdt[:,:,::-1])
+        axs[1,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
+        axs[1,1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,1][vdt_skip_slice], self.pred_vdt_quiver[:,:,2][vdt_skip_slice],headwidth=headwidth, headlength=headlength)
+        if not return_ax:
+            fig_vdt_quiver.savefig(self.fig_save_path + filename + self.coord_string + ".png")
+        
+        if return_ax:
+            return (fig_vdt_quiver, axs[0], axs[1])
 
     def plot_vdt_norm(self, filename="norm_BVDT"):
         self.targ_vdt_norm = self.target.cpu().detach().numpy()[3, self.z_plot_coord,:,:]
@@ -324,9 +315,9 @@ class Visualizer():
         
         fig.savefig(self.fig_save_path + filename + self.coord_string + ".png")
 
-    def plot_all(self, filename = "all"):
+    def plot_all(self, filename = "all", skip = 1):
         
-        fig, axs = plt.subplots(4,2,figsize=(30,80))
+        fig, axs = plt.subplots(5,2,figsize=(30,100), dpi=500)
 
         fig.suptitle("Model visualization at"+self.suptitle_string, size = 20)#test this with different patch size
 
@@ -392,6 +383,43 @@ class Visualizer():
         axs[3,1].set_title("raw input segmentation", fontsize = 15)
         axs[3,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.7)
         
-        plt.tight_layout() 
+        #########################Quiver Plot############################
+        
+        #slice to reduce number of arrows
+        coord_skip_slice = slice(None,None, skip)
+        vdt_skip_slice = (slice(None, None, skip), slice(None,None,skip))
+        #for the quiver plots 
+        rangex = np.arange(self.patch_shape[2])
+        rangey = np.arange(self.patch_shape[1])
+        xquiver, yquiver = np.meshgrid(rangex, rangey)
+        ################BoundaryVectorDistanceTransform:#################
+        self.targ_vdt = self.target.cpu().detach().numpy()[:3, self.z_plot_coord,:,:]
+        self.targ_vdt = np.transpose(self.targ_vdt, (1,2,0)) #for matplotlib to display an RGB image, put the vdt channels as last axis and use w/x axis at first place, while h/y axis at second place
+        self.targ_vdt = self.targ_vdt[:,:,::-1] #rearrange dimension axis of the vdt_target s.t. the colormapping is red(x), green(y), blue(z)
+        self.targ_vdt_quiver = self.targ_vdt[:,:,:-1]#clip the z-component of the vector-field
+        self.targ_vdt_min = np.amin(self.targ_vdt)
+        self.targ_vdt_max = np.amax(self.targ_vdt)
+        self.targ_vdt = self._rescale(self.targ_vdt, self.targ_vdt_min, self.targ_vdt_max) #rescale to [0,1] interval
+        self.pred_vdt = self.prediction.cpu().detach().numpy()[0,:3, self.z_plot_coord,:,:]
+        self.pred_vdt = np.transpose(self.pred_vdt, (1,2,0))
+        self.pred_vdt = self.pred_vdt[:,:,::-1]
+        self.pred_vdt_quiver = self.targ_vdt[:,:,:-1]#clip the z-component of the vector-field
+        self.pred_vdt_min = np.amin(self.pred_vdt)
+        self.pred_vdt_max = np.amax(self.pred_vdt)
+        self.pred_vdt = self._rescale(self.pred_vdt, self.pred_vdt_min, self.pred_vdt_max)
+
+        axs[4,0].set_title("target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
+        axs[4,0].imshow(self.targ_vdt)
+        axs[4,0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice])
+        #axs[4,0].quiver(rangex, rangey, self.targ_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
+        axs[4,0].set_ylabel("y", fontsize = 13)
+        
+        axs[4,1].set_title("prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
+        axs[4,1].imshow(self.pred_vdt)
+        axs[4,1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,0][vdt_skip_slice], self.pred_vdt_quiver[:,:,1][vdt_skip_slice])
+        #axs[4,1].quiver(rangex, rangey, self.pred_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
+
+        
+        
 
         fig.savefig(os.path.join(self.fig_save_path,filename + self.coord_string + ".png"))

@@ -13,7 +13,7 @@ skip = args.skip
 
 conf_path_raw = "/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf"
 
-conf_path_labels = "/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf"
+conf_path_labels = "/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/knossos.pyk.conf"
 
 local_shape_descriptor = LSDGaussVdtCom()
 common_transforms = [
@@ -25,6 +25,6 @@ transform = transforms.Compose(common_transforms + [
 ])
 
 np.random.seed(1)
-loader = KnossosLabelsNozip(conf_path_label = conf_path_labels, conf_path_raw_data = conf_path_raw, patch_shape=(10,640,710),transform=transform, raw_mode="caching")
+loader = KnossosLabelsNozip(conf_path_label = conf_path_labels, conf_path_raw_data = conf_path_raw, patch_shape=(10,300,310),transform=transform, raw_mode="caching")
 
 data = loader[0]

@@ -1,0 +1,11 @@
+ERLEDIGT*koordinaten fixen
+die koordinaten die aus der loader-klasse kommen stimmen bzw sind ok. jetz muss man den
+fehler in der visualizer-klasse kommen funktioniert!!!
+
+*trainings starten mit nn data parallel
+
+*plot fixen
+hier muss noch der quiver plot in die plot_all funktion richtig integriert werden!
+
+*threshold evaluieren!!
+funktioniert beim loader noch nicht ganz!

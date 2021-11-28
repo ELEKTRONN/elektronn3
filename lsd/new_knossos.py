@@ -127,6 +127,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
                                       verbose=self.raw_verbose, cache_size=self.raw_cache_size,
                                       cache_reuses = self.raw_cache_reuses)  # xyz form
 
+        self.bounds_xyz = self.inp_raw_data_loader.bounds
         #labels as target
         self.label_target_loader = knossos_utils.KnossosDataset(self.conf_path_label, show_progress=False)
     
@@ -178,7 +179,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         sample = {
             'inp': torch.as_tensor(trafo_inp),#czyx
             'target': torch.as_tensor(target),#.long(), zyx
-            'coordinate_raw': coordinate_from_raw,#xyz
+            'coordinate_raw_xyz': coordinate_from_raw,#xyz ? 
             'raw_path': self.conf_path_raw_data,
             'seg_path': self.conf_path_label,
             'segmentation': torch.as_tensor(label)
