@@ -6,6 +6,7 @@ fehler in der visualizer-klasse kommen funktioniert!!!
 
 *plot fixen
 hier muss noch der quiver plot in die plot_all funktion richtig integriert werden!
+schwarz-weißes quadrat mit vigranumpy testen vector boundary distance transform!
 
 *threshold evaluieren!!
 funktioniert beim loader noch nicht ganz!

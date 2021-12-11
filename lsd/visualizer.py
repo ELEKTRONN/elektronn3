@@ -141,8 +141,8 @@ class Visualizer():
         xquiver, yquiver = np.meshgrid(rangex, rangey)
         ################BoundaryVectorDistanceTransform:#################
         self.targ_vdt = self.target.cpu().detach().numpy()[:3, self.z_plot_coord,:,:]
-        self.targ_vdt = np.transpose(self.targ_vdt, (1,2,0)) #for matplotlib to display an RGB image, put the vdt channels as last axis and use w/x axis at first place, while h/y axis at second place
-        self.targ_vdt = self.targ_vdt[:,:,::-1] #rearrange dimension axis of the vdt_target s.t. the colormapping is red(x), green(y), blue(z)
+        #self.targ_vdt = np.transpose(self.targ_vdt, (1,2,0)) #for matplotlib to display an RGB image, put the vdt channels as last axis and use w/x axis at first place, while h/y axis at second place
+        #self.targ_vdt = self.targ_vdt[:,:,::-1] #rearrange dimension axis of the vdt_target s.t. the colormapping is red(x), green(y), blue(z)
         self.targ_vdt_min = np.amin(self.targ_vdt)
         self.targ_vdt_max = np.amax(self.targ_vdt)
         #self.targ_vdt *= 1/(np.linalg.norm(self.targ_vdt, axis=2)[:,:,np.newaxis])
@@ -150,8 +150,8 @@ class Visualizer():
         self.targ_vdt_quiver = self.targ_vdt#clip the z-component of the vector-field
     
         self.pred_vdt = self.prediction.cpu().detach().numpy()[0,:3, self.z_plot_coord,:,:]
-        self.pred_vdt = np.transpose(self.pred_vdt, (1,2,0))
-        self.pred_vdt = self.pred_vdt[:,:,::-1]
+        #self.pred_vdt = np.transpose(self.pred_vdt, (1,2,0))
+        #self.pred_vdt = self.pred_vdt[:,:,::-1]
         self.pred_vdt_min = np.amin(self.pred_vdt)
         self.pred_vdt_max = np.amax(self.pred_vdt)
         #self.pred_vdt *= 1/(np.linalg.norm(self.pred_vdt, axis=2)[:,:,np.newaxis])
@@ -165,23 +165,34 @@ class Visualizer():
         fig_vdt_quiver.suptitle("BVDT with xy-projection at "+self.suptitle_string, size = 20)#test this with different patch size
         axs[0,0].set_title("target, scale min: {:8.4f}, max: {:8.4f}".format(self.targ_vdt_min, self.targ_vdt_max), fontsize = 15)
         #axs[0,0].imshow(self.targ_vdt_quiver)
-        axs[0,0].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
-        axs[0,0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,0][vdt_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice], headwidth=headwidth, headlength=headlength)
+        axs[0,0].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.4, origin="lower")
+        axs[0,0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[0,:,:][vdt_skip_slice], self.targ_vdt_quiver[1,:,:][vdt_skip_slice], headwidth = headwidth, headlength = headlength)
         #axs[0].quiver(rangex, rangey, self.targ_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
         axs[0,0].set_ylabel("y", fontsize = 13)
-        
+        axs[0,0].set_ylim(axs[0,0].get_ylim()[::-1])
         axs[0,1].set_title("prediction, scale min: {:8.4f}, max: {:8.4f}".format(self.pred_vdt_min, self.pred_vdt_max), fontsize = 15)
         #axs[0,1].imshow(self.pred_vdt_quiver)
-        axs[0,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
-        axs[0,1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,0][vdt_skip_slice], self.pred_vdt_quiver[:,:,1][vdt_skip_slice],headwidth=headwidth, headlength=headlength)
+        axs[0,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.4, origin="lower")
+        axs[0,1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[0,:,:][vdt_skip_slice], self.pred_vdt_quiver[1,:,:][vdt_skip_slice], headwidth = headwidth, headlength = headlength)
+        axs[0,1].set_ylim(axs[0,1].get_ylim()[::-1])
         #axs[1].quiver(rangex, rangey, self.pred_vdt_quiver[:,:,0], self.targ_vdt_quiver[:,:,1])
-
-        #axs[1,0].imshow(self.targ_vdt[:,:,::-1])
-        axs[1,0].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
-        axs[1,0].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.targ_vdt_quiver[:,:,1][vdt_skip_slice], self.targ_vdt_quiver[:,:,2][vdt_skip_slice], headwidth=headwidth, headlength=headlength)
-        #axs[1,1].imshow(self.pred_vdt[:,:,::-1])
-        axs[1,1].imshow(inp_slice_seg, cmap = "jet", interpolation = "none", alpha = 0.25)
-        axs[1,1].quiver(rangex[coord_skip_slice], rangey[coord_skip_slice], self.pred_vdt_quiver[:,:,1][vdt_skip_slice], self.pred_vdt_quiver[:,:,2][vdt_skip_slice],headwidth=headwidth, headlength=headlength)
+        norm_targ = np.linalg.norm(self.targ_vdt, axis=0)
+        norm_pred = np.linalg.norm(self.pred_vdt, axis=0)
+        min1 = np.amin(np.absolute(norm_targ))
+        max1 = np.amax(np.absolute(norm_targ))
+        min2 = np.amin(np.absolute(norm_pred))
+        max2 = np.amax(np.absolute(norm_pred))
+        min_tot = np.amin([min1, min2])
+        max_tot = np.amax([max1, max2])
+        im1 = axs[1,0].imshow(norm_targ,origin = "lower", cmap = "gray", vmin = min_tot, vmax = max_tot)
+        axs[1,0].set_ylim(axs[1,0].get_ylim()[::-1])
+        axs[1,0].set_title("GT z component of BVDT")
+        im2 = axs[1,1].imshow(norm_pred, origin="lower", cmap = "gray", vmin = min_tot, vmax = max_tot)
+        axs[1,1].set_ylim(axs[1,1].get_ylim()[::-1])
+        axs[1,1].set_title("prediction z component of BVDT")
+        plt.colorbar(im2, ax = axs[1,:], shrink = 0.5, location="bottom", orientation = "horizontal")
+        #fig_vdt_quiver.tight_layout()
+        
         if not return_ax:
             fig_vdt_quiver.savefig(self.fig_save_path + filename + self.coord_string + ".png")
         

@@ -1,0 +1,1002 @@
+number of samples: 1000
+number of unique samples: 1000
+coordinate (xyz) [   15 18628 12313] occurred 1 times
+coordinate (xyz) [   18  1997 15309] occurred 1 times
+coordinate (xyz) [   30 10317 14542] occurred 1 times
+coordinate (xyz) [  31  740 3148] occurred 1 times
+coordinate (xyz) [   52 12410  3615] occurred 1 times
+coordinate (xyz) [   61 20179  7264] occurred 1 times
+coordinate (xyz) [  114  8924 10991] occurred 1 times
+coordinate (xyz) [ 132 6524 3403] occurred 1 times
+coordinate (xyz) [  148 17037  1464] occurred 1 times
+coordinate (xyz) [  174 17417 13123] occurred 1 times
+coordinate (xyz) [  193 13056 13088] occurred 1 times
+coordinate (xyz) [  235 12172  5192] occurred 1 times
+coordinate (xyz) [  245 24178 10534] occurred 1 times
+coordinate (xyz) [  247 24330  9002] occurred 1 times
+coordinate (xyz) [  265 12842  9154] occurred 1 times
+coordinate (xyz) [  315  3776 10501] occurred 1 times
+coordinate (xyz) [  328  9494 10242] occurred 1 times
+coordinate (xyz) [ 373  721 7880] occurred 1 times
+coordinate (xyz) [ 379 2592 7790] occurred 1 times
+coordinate (xyz) [  380 13753 12372] occurred 1 times
+coordinate (xyz) [ 402 6478 5479] occurred 1 times
+coordinate (xyz) [ 449 9268 6853] occurred 1 times
+coordinate (xyz) [  472 10732  7642] occurred 1 times
+coordinate (xyz) [  504  7208 10104] occurred 1 times
+coordinate (xyz) [ 505 8147 5145] occurred 1 times
+coordinate (xyz) [  531 14508  3927] occurred 1 times
+coordinate (xyz) [  532 22824 14644] occurred 1 times
+coordinate (xyz) [ 631 1112 4041] occurred 1 times
+coordinate (xyz) [ 690 6078 9516] occurred 1 times
+coordinate (xyz) [ 721 5158 2436] occurred 1 times
+coordinate (xyz) [  723 25420  7108] occurred 1 times
+coordinate (xyz) [  732 25280  2791] occurred 1 times
+coordinate (xyz) [  805  6991 12225] occurred 1 times
+coordinate (xyz) [ 807 8519 8066] occurred 1 times
+coordinate (xyz) [  809 15774  7015] occurred 1 times
+coordinate (xyz) [  848 14484  6975] occurred 1 times
+coordinate (xyz) [  860 16323 11250] occurred 1 times
+coordinate (xyz) [  868 20013 14174] occurred 1 times
+coordinate (xyz) [  944 13719  6594] occurred 1 times
+coordinate (xyz) [  969 25223 11188] occurred 1 times
+coordinate (xyz) [1031 4415 2877] occurred 1 times
+coordinate (xyz) [ 1046 14089  3047] occurred 1 times
+coordinate (xyz) [ 1053 21874  2716] occurred 1 times
+coordinate (xyz) [ 1058   198 12304] occurred 1 times
+coordinate (xyz) [1076 4916 9504] occurred 1 times
+coordinate (xyz) [1110 6285 6121] occurred 1 times
+coordinate (xyz) [ 1166  2876 11363] occurred 1 times
+coordinate (xyz) [ 1180 21244  5964] occurred 1 times
+coordinate (xyz) [ 1182 19466 11221] occurred 1 times
+coordinate (xyz) [ 1182 20101  8336] occurred 1 times
+coordinate (xyz) [1188 3138 6393] occurred 1 times
+coordinate (xyz) [ 1223 16847 13832] occurred 1 times
+coordinate (xyz) [ 1226 23686  2306] occurred 1 times
+coordinate (xyz) [1275 2974 2002] occurred 1 times
+coordinate (xyz) [ 1286 14872  8704] occurred 1 times
+coordinate (xyz) [1290 7924 6403] occurred 1 times
+coordinate (xyz) [ 1341 15383 11758] occurred 1 times
+coordinate (xyz) [ 1348 25342  2384] occurred 1 times
+coordinate (xyz) [1354 9437 4256] occurred 1 times
+coordinate (xyz) [ 1369 23323 15358] occurred 1 times
+coordinate (xyz) [ 1389 19478  5094] occurred 1 times
+coordinate (xyz) [ 1445 18106 10631] occurred 1 times
+coordinate (xyz) [ 1449 14535    69] occurred 1 times
+coordinate (xyz) [1472 5541 5085] occurred 1 times
+coordinate (xyz) [1474 4855 6820] occurred 1 times
+coordinate (xyz) [ 1492 15232  7184] occurred 1 times
+coordinate (xyz) [1500 1378 2395] occurred 1 times
+coordinate (xyz) [ 1582  7528 14553] occurred 1 times
+coordinate (xyz) [ 1591 14903 11712] occurred 1 times
+coordinate (xyz) [ 1593 24059  4833] occurred 1 times
+coordinate (xyz) [ 1612 19482  1844] occurred 1 times
+coordinate (xyz) [ 1713 13177  6507] occurred 1 times
+coordinate (xyz) [ 1763  6541 13737] occurred 1 times
+coordinate (xyz) [ 1769 25317  7553] occurred 1 times
+coordinate (xyz) [ 1864 27174 10086] occurred 1 times
+coordinate (xyz) [ 1887 13920  9148] occurred 1 times
+coordinate (xyz) [ 1923 12463  5574] occurred 1 times
+coordinate (xyz) [ 1940 17476  1618] occurred 1 times
+coordinate (xyz) [ 1948 17127 12753] occurred 1 times
+coordinate (xyz) [ 1952  1920 14254] occurred 1 times
+coordinate (xyz) [1965 2386 3025] occurred 1 times
+coordinate (xyz) [ 1979 15247  5656] occurred 1 times
+coordinate (xyz) [ 2111   208 12251] occurred 1 times
+coordinate (xyz) [ 2160   952 11613] occurred 1 times
+coordinate (xyz) [ 2170 15453  5925] occurred 1 times
+coordinate (xyz) [ 2178  9948 14951] occurred 1 times
+coordinate (xyz) [ 2199 13656  6361] occurred 1 times
+coordinate (xyz) [ 2317  1001 14374] occurred 1 times
+coordinate (xyz) [ 2322 16552  3333] occurred 1 times
+coordinate (xyz) [ 2357  1726 12107] occurred 1 times
+coordinate (xyz) [2396 6752 6250] occurred 1 times
+coordinate (xyz) [ 2431  3047 14045] occurred 1 times
+coordinate (xyz) [ 2467 23991 15091] occurred 1 times
+coordinate (xyz) [ 2502 19213  3236] occurred 1 times
+coordinate (xyz) [ 2551 21194 11353] occurred 1 times
+coordinate (xyz) [ 2599 18556 15427] occurred 1 times
+coordinate (xyz) [ 2626   930 10195] occurred 1 times
+coordinate (xyz) [ 2628  1733 14525] occurred 1 times
+coordinate (xyz) [ 2662  7431 15369] occurred 1 times
+coordinate (xyz) [ 2683 13344 12103] occurred 1 times
+coordinate (xyz) [ 2709  7761 12922] occurred 1 times
+coordinate (xyz) [ 2709 24647   515] occurred 1 times
+coordinate (xyz) [2725 9790 5314] occurred 1 times
+coordinate (xyz) [2777 9621 4700] occurred 1 times
+coordinate (xyz) [2789 3129 4574] occurred 1 times
+coordinate (xyz) [ 2817  7341 14266] occurred 1 times
+coordinate (xyz) [2884 9859 1722] occurred 1 times
+coordinate (xyz) [2892 9303 5611] occurred 1 times
+coordinate (xyz) [2895   15 2526] occurred 1 times
+coordinate (xyz) [ 2962 18900 15243] occurred 1 times
+coordinate (xyz) [ 3020 16440  5274] occurred 1 times
+coordinate (xyz) [3030 9892 7566] occurred 1 times
+coordinate (xyz) [ 3034  5778 14398] occurred 1 times
+coordinate (xyz) [ 3082 23648   183] occurred 1 times
+coordinate (xyz) [ 3083 22973  8010] occurred 1 times
+coordinate (xyz) [3149 6373 4619] occurred 1 times
+coordinate (xyz) [ 3164 24787  2191] occurred 1 times
+coordinate (xyz) [ 3166  5681 13074] occurred 1 times
+coordinate (xyz) [ 3170 22824  4059] occurred 1 times
+coordinate (xyz) [ 3184  3122 14002] occurred 1 times
+coordinate (xyz) [ 3199 22799  7461] occurred 1 times
+coordinate (xyz) [ 3217 22737 14766] occurred 1 times
+coordinate (xyz) [3320 8721 5501] occurred 1 times
+coordinate (xyz) [ 3340 12118  6081] occurred 1 times
+coordinate (xyz) [ 3348 24500 13471] occurred 1 times
+coordinate (xyz) [ 3362 19712  4303] occurred 1 times
+coordinate (xyz) [ 3413 18713 13897] occurred 1 times
+coordinate (xyz) [ 3425 17490  8055] occurred 1 times
+coordinate (xyz) [ 3428 16539 15269] occurred 1 times
+coordinate (xyz) [ 3441  3314 14260] occurred 1 times
+coordinate (xyz) [ 3460 17564  6179] occurred 1 times
+coordinate (xyz) [ 3478  7884 11380] occurred 1 times
+coordinate (xyz) [ 3482 24947  4020] occurred 1 times
+coordinate (xyz) [3487 9857   84] occurred 1 times
+coordinate (xyz) [ 3494 18986 15167] occurred 1 times
+coordinate (xyz) [ 3535  1934 12136] occurred 1 times
+coordinate (xyz) [ 3542  4384 12123] occurred 1 times
+coordinate (xyz) [3606 9529 2561] occurred 1 times
+coordinate (xyz) [ 3651 24509  4201] occurred 1 times
+coordinate (xyz) [ 3653 23071 11323] occurred 1 times
+coordinate (xyz) [3718 1741  696] occurred 1 times
+coordinate (xyz) [ 3726 18532  4439] occurred 1 times
+coordinate (xyz) [3744 6362 4372] occurred 1 times
+coordinate (xyz) [3800 1464 1706] occurred 1 times
+coordinate (xyz) [3843 5059 4918] occurred 1 times
+coordinate (xyz) [3863 9054 2829] occurred 1 times
+coordinate (xyz) [ 3902 14294  1469] occurred 1 times
+coordinate (xyz) [ 3947 13855 11764] occurred 1 times
+coordinate (xyz) [4000 3326 3156] occurred 1 times
+coordinate (xyz) [ 4011 26331 12921] occurred 1 times
+coordinate (xyz) [4039  243 1372] occurred 1 times
+coordinate (xyz) [4059  715 6407] occurred 1 times
+coordinate (xyz) [ 4064 24986  8020] occurred 1 times
+coordinate (xyz) [ 4074 14792   542] occurred 1 times
+coordinate (xyz) [ 4085 17698  6177] occurred 1 times
+coordinate (xyz) [ 4118 12430  8600] occurred 1 times
+coordinate (xyz) [ 4129  6119 13950] occurred 1 times
+coordinate (xyz) [4132 7729 2830] occurred 1 times
+coordinate (xyz) [4255 4943 6604] occurred 1 times
+coordinate (xyz) [ 4275 12192 13605] occurred 1 times
+coordinate (xyz) [ 4279 17989 13015] occurred 1 times
+coordinate (xyz) [4334 6814 2055] occurred 1 times
+coordinate (xyz) [4338 3547  182] occurred 1 times
+coordinate (xyz) [ 4340 19339  1976] occurred 1 times
+coordinate (xyz) [ 4433 13058  8405] occurred 1 times
+coordinate (xyz) [ 4450 16511 12275] occurred 1 times
+coordinate (xyz) [ 4456 14369  4742] occurred 1 times
+coordinate (xyz) [ 4470 11858 10929] occurred 1 times
+coordinate (xyz) [ 4509 17227 13859] occurred 1 times
+coordinate (xyz) [ 4529 12111 11257] occurred 1 times
+coordinate (xyz) [4562 6459 7797] occurred 1 times
+coordinate (xyz) [ 4588 18685 15397] occurred 1 times
+coordinate (xyz) [ 4635 18475 13313] occurred 1 times
+coordinate (xyz) [4715 3995 1639] occurred 1 times
+coordinate (xyz) [ 4718 16141  6163] occurred 1 times
+coordinate (xyz) [ 4725 17550 10808] occurred 1 times
+coordinate (xyz) [ 4745 10991  8152] occurred 1 times
+coordinate (xyz) [ 4753  8609 12810] occurred 1 times
+coordinate (xyz) [ 4791  9537 13681] occurred 1 times
+coordinate (xyz) [ 4811 10572  6383] occurred 1 times
+coordinate (xyz) [4813 5394 2214] occurred 1 times
+coordinate (xyz) [ 4842 23957 14686] occurred 1 times
+coordinate (xyz) [ 4861 12693 12818] occurred 1 times
+coordinate (xyz) [ 4922 19288  3711] occurred 1 times
+coordinate (xyz) [4955 3241 1486] occurred 1 times
+coordinate (xyz) [ 5046 14285 12056] occurred 1 times
+coordinate (xyz) [ 5093  6862 15211] occurred 1 times
+coordinate (xyz) [5110 7444  762] occurred 1 times
+coordinate (xyz) [5121 8461 4212] occurred 1 times
+coordinate (xyz) [ 5162 13021  8557] occurred 1 times
+coordinate (xyz) [ 5168 16182  7456] occurred 1 times
+coordinate (xyz) [ 5171 21359 14474] occurred 1 times
+coordinate (xyz) [ 5175 25730 14810] occurred 1 times
+coordinate (xyz) [ 5354 15917  4547] occurred 1 times
+coordinate (xyz) [5370 6357 2923] occurred 1 times
+coordinate (xyz) [ 5404   972 10549] occurred 1 times
+coordinate (xyz) [ 5428 25126   449] occurred 1 times
+coordinate (xyz) [ 5452 13486  6065] occurred 1 times
+coordinate (xyz) [5456 9846 9824] occurred 1 times
+coordinate (xyz) [5516 8345 8525] occurred 1 times
+coordinate (xyz) [ 5530 21800  6489] occurred 1 times
+coordinate (xyz) [ 5536 18664  7859] occurred 1 times
+coordinate (xyz) [ 5545 16734 12269] occurred 1 times
+coordinate (xyz) [ 5560  3962 13107] occurred 1 times
+coordinate (xyz) [5578 7848 2713] occurred 1 times
+coordinate (xyz) [5580 4978 8998] occurred 1 times
+coordinate (xyz) [5654 2715  999] occurred 1 times
+coordinate (xyz) [ 5666 24625    88] occurred 1 times
+coordinate (xyz) [ 5716 15309 12850] occurred 1 times
+coordinate (xyz) [ 5807 17869  7031] occurred 1 times
+coordinate (xyz) [5843 7907 2466] occurred 1 times
+coordinate (xyz) [ 5936  6645 15123] occurred 1 times
+coordinate (xyz) [ 5963 27148  4863] occurred 1 times
+coordinate (xyz) [5970 9801 1838] occurred 1 times
+coordinate (xyz) [6010 6272 3734] occurred 1 times
+coordinate (xyz) [6041 3056 5564] occurred 1 times
+coordinate (xyz) [ 6044 20952  7553] occurred 1 times
+coordinate (xyz) [ 6045  1580 11301] occurred 1 times
+coordinate (xyz) [6067 8309 7753] occurred 1 times
+coordinate (xyz) [ 6076 20732     0] occurred 1 times
+coordinate (xyz) [6094 5353 5188] occurred 1 times
+coordinate (xyz) [ 6094 20103  5280] occurred 1 times
+coordinate (xyz) [6108 3621 7145] occurred 1 times
+coordinate (xyz) [ 6151 17870  2853] occurred 1 times
+coordinate (xyz) [ 6172 14027  7794] occurred 1 times
+coordinate (xyz) [ 6177 25067  8596] occurred 1 times
+coordinate (xyz) [6221 2760 5195] occurred 1 times
+coordinate (xyz) [ 6226 14344  3413] occurred 1 times
+coordinate (xyz) [ 6250 14574  7481] occurred 1 times
+coordinate (xyz) [ 6250 17126 12951] occurred 1 times
+coordinate (xyz) [ 6288   381 15200] occurred 1 times
+coordinate (xyz) [ 6334 16460  5168] occurred 1 times
+coordinate (xyz) [6358 6401 6216] occurred 1 times
+coordinate (xyz) [ 6361 24964  9733] occurred 1 times
+coordinate (xyz) [ 6418 19155  3033] occurred 1 times
+coordinate (xyz) [6451 8086 2058] occurred 1 times
+coordinate (xyz) [ 6461 20024  7897] occurred 1 times
+coordinate (xyz) [ 6472  6684 13954] occurred 1 times
+coordinate (xyz) [ 6543 22335  3008] occurred 1 times
+coordinate (xyz) [ 6548 22494  6156] occurred 1 times
+coordinate (xyz) [ 6585  5920 14205] occurred 1 times
+coordinate (xyz) [ 6585 24188  2380] occurred 1 times
+coordinate (xyz) [ 6602 25926  5785] occurred 1 times
+coordinate (xyz) [ 6644 16508  9156] occurred 1 times
+coordinate (xyz) [ 6648 20778  1252] occurred 1 times
+coordinate (xyz) [ 6676  7190 11392] occurred 1 times
+coordinate (xyz) [ 6677 18628 11203] occurred 1 times
+coordinate (xyz) [6694 6460 5217] occurred 1 times
+coordinate (xyz) [ 6713 12016  7676] occurred 1 times
+coordinate (xyz) [6719 4231 7238] occurred 1 times
+coordinate (xyz) [ 6734 24407  8186] occurred 1 times
+coordinate (xyz) [ 6747 13911   493] occurred 1 times
+coordinate (xyz) [ 6854 11941 10746] occurred 1 times
+coordinate (xyz) [ 6861 21091  5791] occurred 1 times
+coordinate (xyz) [6884 5138 4321] occurred 1 times
+coordinate (xyz) [ 6924  8049 10957] occurred 1 times
+coordinate (xyz) [6929 9773 6521] occurred 1 times
+coordinate (xyz) [ 6942 19964  8142] occurred 1 times
+coordinate (xyz) [7035 7982 2439] occurred 1 times
+coordinate (xyz) [ 7054 15881  3562] occurred 1 times
+coordinate (xyz) [ 7061 17978 12159] occurred 1 times
+coordinate (xyz) [ 7078 24895  2547] occurred 1 times
+coordinate (xyz) [ 7089  3580 13102] occurred 1 times
+coordinate (xyz) [ 7097 24928  2222] occurred 1 times
+coordinate (xyz) [ 7125 25202  5870] occurred 1 times
+coordinate (xyz) [ 7165 21307  9641] occurred 1 times
+coordinate (xyz) [ 7183 15237 13713] occurred 1 times
+coordinate (xyz) [ 7196 14313 13259] occurred 1 times
+coordinate (xyz) [ 7203 14450 14520] occurred 1 times
+coordinate (xyz) [ 7229 23381  4644] occurred 1 times
+coordinate (xyz) [7235 8187 4254] occurred 1 times
+coordinate (xyz) [ 7237 13577  3758] occurred 1 times
+coordinate (xyz) [ 7249 23867  8002] occurred 1 times
+coordinate (xyz) [ 7257 19344 11164] occurred 1 times
+coordinate (xyz) [ 7282 14268  4408] occurred 1 times
+coordinate (xyz) [ 7325 13614  3575] occurred 1 times
+coordinate (xyz) [ 7407 23954  5827] occurred 1 times
+coordinate (xyz) [ 7428  3254 11067] occurred 1 times
+coordinate (xyz) [ 7431  6274 10926] occurred 1 times
+coordinate (xyz) [ 7500  1067 12820] occurred 1 times
+coordinate (xyz) [7500 4472 8090] occurred 1 times
+coordinate (xyz) [7545 5566 3106] occurred 1 times
+coordinate (xyz) [7558 2511  156] occurred 1 times
+coordinate (xyz) [ 7559 10225   722] occurred 1 times
+coordinate (xyz) [ 7585 26425 10186] occurred 1 times
+coordinate (xyz) [ 7614 17199  6427] occurred 1 times
+coordinate (xyz) [7620 1244 1397] occurred 1 times
+coordinate (xyz) [7644 8817 2368] occurred 1 times
+coordinate (xyz) [ 7672  8596 12415] occurred 1 times
+coordinate (xyz) [ 7711 11171 10400] occurred 1 times
+coordinate (xyz) [ 7740 16873   152] occurred 1 times
+coordinate (xyz) [ 7741 11040  3395] occurred 1 times
+coordinate (xyz) [ 7748  2599 13216] occurred 1 times
+coordinate (xyz) [7753 5428  601] occurred 1 times
+coordinate (xyz) [ 7758 26727 11107] occurred 1 times
+coordinate (xyz) [ 7791  2172 14161] occurred 1 times
+coordinate (xyz) [ 7792 22833    51] occurred 1 times
+coordinate (xyz) [ 7795 26333  4308] occurred 1 times
+coordinate (xyz) [ 7799 18643 11514] occurred 1 times
+coordinate (xyz) [7896 4818 1656] occurred 1 times
+coordinate (xyz) [ 7937 25598  1439] occurred 1 times
+coordinate (xyz) [ 7960 20095 14737] occurred 1 times
+coordinate (xyz) [ 8007  3114 11668] occurred 1 times
+coordinate (xyz) [ 8013 15905 10244] occurred 1 times
+coordinate (xyz) [ 8013 23717 12214] occurred 1 times
+coordinate (xyz) [ 8118 15629 10782] occurred 1 times
+coordinate (xyz) [ 8185 11865 15337] occurred 1 times
+coordinate (xyz) [ 8200  1695 11801] occurred 1 times
+coordinate (xyz) [8216 4889 1057] occurred 1 times
+coordinate (xyz) [8238  633 4666] occurred 1 times
+coordinate (xyz) [8306 7382 3838] occurred 1 times
+coordinate (xyz) [ 8321 15240 12249] occurred 1 times
+coordinate (xyz) [ 8394 12607 14152] occurred 1 times
+coordinate (xyz) [8407 3311  474] occurred 1 times
+coordinate (xyz) [ 8432 15586  2110] occurred 1 times
+coordinate (xyz) [ 8437  9673 12549] occurred 1 times
+coordinate (xyz) [ 8444 19946  4764] occurred 1 times
+coordinate (xyz) [ 8445 17052 14391] occurred 1 times
+coordinate (xyz) [ 8455 24738  2180] occurred 1 times
+coordinate (xyz) [ 8485  7558 12331] occurred 1 times
+coordinate (xyz) [ 8490  2324 10990] occurred 1 times
+coordinate (xyz) [ 8518 26444  9033] occurred 1 times
+coordinate (xyz) [ 8531  6953 14612] occurred 1 times
+coordinate (xyz) [8597 3303 7264] occurred 1 times
+coordinate (xyz) [ 8615 25213  3115] occurred 1 times
+coordinate (xyz) [ 8643 26946  5148] occurred 1 times
+coordinate (xyz) [8651 2125 3494] occurred 1 times
+coordinate (xyz) [8694 2825 9027] occurred 1 times
+coordinate (xyz) [8706 6745 7712] occurred 1 times
+coordinate (xyz) [ 8734 15207  1088] occurred 1 times
+coordinate (xyz) [ 8759 25780  7393] occurred 1 times
+coordinate (xyz) [ 8857 19945  4343] occurred 1 times
+coordinate (xyz) [ 8868 11628  7430] occurred 1 times
+coordinate (xyz) [ 8889 24445   425] occurred 1 times
+coordinate (xyz) [ 8890 22134 11009] occurred 1 times
+coordinate (xyz) [ 8930 17875  8569] occurred 1 times
+coordinate (xyz) [9030 4440 1018] occurred 1 times
+coordinate (xyz) [9065 5724 9575] occurred 1 times
+coordinate (xyz) [9078 4763 2994] occurred 1 times
+coordinate (xyz) [9095 3452  467] occurred 1 times
+coordinate (xyz) [9099 5565 8187] occurred 1 times
+coordinate (xyz) [ 9100 18536  3930] occurred 1 times
+coordinate (xyz) [ 9159 10740  8206] occurred 1 times
+coordinate (xyz) [9166 1209 5400] occurred 1 times
+coordinate (xyz) [ 9192 18878 10805] occurred 1 times
+coordinate (xyz) [ 9199 12965  6019] occurred 1 times
+coordinate (xyz) [ 9238 20258  7006] occurred 1 times
+coordinate (xyz) [ 9275 23645  2642] occurred 1 times
+coordinate (xyz) [ 9277 26133   888] occurred 1 times
+coordinate (xyz) [ 9287 13699  1478] occurred 1 times
+coordinate (xyz) [ 9329 23316  2092] occurred 1 times
+coordinate (xyz) [ 9340 18493 15271] occurred 1 times
+coordinate (xyz) [ 9362  6212 14224] occurred 1 times
+coordinate (xyz) [ 9378 16703  9538] occurred 1 times
+coordinate (xyz) [ 9449 25700  8680] occurred 1 times
+coordinate (xyz) [ 9461 10226  5072] occurred 1 times
+coordinate (xyz) [9471 8036 1876] occurred 1 times
+coordinate (xyz) [ 9476 14123 14475] occurred 1 times
+coordinate (xyz) [9487 1694 8667] occurred 1 times
+coordinate (xyz) [ 9552  2669 13171] occurred 1 times
+coordinate (xyz) [ 9563 10177   213] occurred 1 times
+coordinate (xyz) [9570 8946 8932] occurred 1 times
+coordinate (xyz) [9603 4692 2504] occurred 1 times
+coordinate (xyz) [ 9642 17319  1588] occurred 1 times
+coordinate (xyz) [ 9665   271 14003] occurred 1 times
+coordinate (xyz) [ 9708  6825 13931] occurred 1 times
+coordinate (xyz) [ 9731 26570  3250] occurred 1 times
+coordinate (xyz) [ 9766 23852  1799] occurred 1 times
+coordinate (xyz) [ 9775 27095  7656] occurred 1 times
+coordinate (xyz) [9781 7605 8332] occurred 1 times
+coordinate (xyz) [9786 5074 4840] occurred 1 times
+coordinate (xyz) [ 9803 17076   578] occurred 1 times
+coordinate (xyz) [9808 3356 8869] occurred 1 times
+coordinate (xyz) [ 9811 23248  4975] occurred 1 times
+coordinate (xyz) [ 9819 17008 11517] occurred 1 times
+coordinate (xyz) [ 9893 19729  7334] occurred 1 times
+coordinate (xyz) [ 9908 25692  7642] occurred 1 times
+coordinate (xyz) [ 9920 19584  6196] occurred 1 times
+coordinate (xyz) [ 9991  3885 13252] occurred 1 times
+coordinate (xyz) [ 9996 20841  6050] occurred 1 times
+coordinate (xyz) [10022   914   991] occurred 1 times
+coordinate (xyz) [10034  5427 13317] occurred 1 times
+coordinate (xyz) [10061  9987  2944] occurred 1 times
+coordinate (xyz) [10070 24109  6515] occurred 1 times
+coordinate (xyz) [10072 15568 12206] occurred 1 times
+coordinate (xyz) [10081  7047  6689] occurred 1 times
+coordinate (xyz) [10094 25642 13894] occurred 1 times
+coordinate (xyz) [10097 25983 11905] occurred 1 times
+coordinate (xyz) [10119  1306  9832] occurred 1 times
+coordinate (xyz) [10201 12968 10583] occurred 1 times
+coordinate (xyz) [10233 21403 10286] occurred 1 times
+coordinate (xyz) [10247 17643 10562] occurred 1 times
+coordinate (xyz) [10249  5223 13446] occurred 1 times
+coordinate (xyz) [10333 11428 12909] occurred 1 times
+coordinate (xyz) [10367  7680  5378] occurred 1 times
+coordinate (xyz) [10381 23558     2] occurred 1 times
+coordinate (xyz) [10397  5624  5159] occurred 1 times
+coordinate (xyz) [10399 25850  5927] occurred 1 times
+coordinate (xyz) [10404  3062 11735] occurred 1 times
+coordinate (xyz) [10423  5165 10760] occurred 1 times
+coordinate (xyz) [10423  5777  2035] occurred 1 times
+coordinate (xyz) [10427  9992  4533] occurred 1 times
+coordinate (xyz) [10431 11956 10345] occurred 1 times
+coordinate (xyz) [10440 17332  7177] occurred 1 times
+coordinate (xyz) [10559  3070 11180] occurred 1 times
+coordinate (xyz) [10565 25204  5579] occurred 1 times
+coordinate (xyz) [10578 23679  8798] occurred 1 times
+coordinate (xyz) [10585  1003 10001] occurred 1 times
+coordinate (xyz) [10646  1205  9574] occurred 1 times
+coordinate (xyz) [10656 18218 13002] occurred 1 times
+coordinate (xyz) [10669 18686 13664] occurred 1 times
+coordinate (xyz) [10675  9307  8689] occurred 1 times
+coordinate (xyz) [10677 25377 14034] occurred 1 times
+coordinate (xyz) [10702 17674 10403] occurred 1 times
+coordinate (xyz) [10723 19143  2310] occurred 1 times
+coordinate (xyz) [10744 21475  3700] occurred 1 times
+coordinate (xyz) [10756  5839   971] occurred 1 times
+coordinate (xyz) [10777 20547  4609] occurred 1 times
+coordinate (xyz) [10782 19606 10501] occurred 1 times
+coordinate (xyz) [10868   173  3825] occurred 1 times
+coordinate (xyz) [10873 12701  3545] occurred 1 times
+coordinate (xyz) [10951  6299  7845] occurred 1 times
+coordinate (xyz) [10962 16230  3110] occurred 1 times
+coordinate (xyz) [10989  3462  9394] occurred 1 times
+coordinate (xyz) [10991  7255  7961] occurred 1 times
+coordinate (xyz) [10998  3591 12777] occurred 1 times
+coordinate (xyz) [11022  4795 11622] occurred 1 times
+coordinate (xyz) [11024  5380  4056] occurred 1 times
+coordinate (xyz) [11027  8182  2433] occurred 1 times
+coordinate (xyz) [11036 17974 10269] occurred 1 times
+coordinate (xyz) [11037 22082  1775] occurred 1 times
+coordinate (xyz) [11057  8650 13163] occurred 1 times
+coordinate (xyz) [11072 23620  2604] occurred 1 times
+coordinate (xyz) [11080 26767  7717] occurred 1 times
+coordinate (xyz) [11090 24876  5295] occurred 1 times
+coordinate (xyz) [11127  3412  8566] occurred 1 times
+coordinate (xyz) [11128  2148   828] occurred 1 times
+coordinate (xyz) [11210 24396  9953] occurred 1 times
+coordinate (xyz) [11220 11362  9001] occurred 1 times
+coordinate (xyz) [11247  3965 13730] occurred 1 times
+coordinate (xyz) [11255 11942 12951] occurred 1 times
+coordinate (xyz) [11256  3031  3226] occurred 1 times
+coordinate (xyz) [11274 22807 15185] occurred 1 times
+coordinate (xyz) [11280 23108  8478] occurred 1 times
+coordinate (xyz) [11281 20800 13831] occurred 1 times
+coordinate (xyz) [11323 21372  9656] occurred 1 times
+coordinate (xyz) [11337 17596  7798] occurred 1 times
+coordinate (xyz) [11391 18455  6437] occurred 1 times
+coordinate (xyz) [11401  6532  6221] occurred 1 times
+coordinate (xyz) [11409    71  9819] occurred 1 times
+coordinate (xyz) [11476  7796  9003] occurred 1 times
+coordinate (xyz) [11525 15666  3932] occurred 1 times
+coordinate (xyz) [11534  7871  3605] occurred 1 times
+coordinate (xyz) [11552 23381 10924] occurred 1 times
+coordinate (xyz) [11560  3515  9183] occurred 1 times
+coordinate (xyz) [11587 12881  6223] occurred 1 times
+coordinate (xyz) [11595  6145 13492] occurred 1 times
+coordinate (xyz) [11610 10323  7066] occurred 1 times
+coordinate (xyz) [11617  1983  9443] occurred 1 times
+coordinate (xyz) [11631 24290 13783] occurred 1 times
+coordinate (xyz) [11641   818   814] occurred 1 times
+coordinate (xyz) [11739 25685  9459] occurred 1 times
+coordinate (xyz) [11806 21640 14504] occurred 1 times
+coordinate (xyz) [11815 18893  2085] occurred 1 times
+coordinate (xyz) [11819  3175 12833] occurred 1 times
+coordinate (xyz) [11856 12802 10164] occurred 1 times
+coordinate (xyz) [11865 15569 10720] occurred 1 times
+coordinate (xyz) [11886 24642  3070] occurred 1 times
+coordinate (xyz) [11906 12913  8611] occurred 1 times
+coordinate (xyz) [11980  5079  2297] occurred 1 times
+coordinate (xyz) [11987 26853  5726] occurred 1 times
+coordinate (xyz) [11988 20985  3002] occurred 1 times
+coordinate (xyz) [11992 26338 11934] occurred 1 times
+coordinate (xyz) [12042 15639  1679] occurred 1 times
+coordinate (xyz) [12087 14324  2766] occurred 1 times
+coordinate (xyz) [12106 17312 15109] occurred 1 times
+coordinate (xyz) [12129 25565 15428] occurred 1 times
+coordinate (xyz) [12147 10856  1880] occurred 1 times
+coordinate (xyz) [12181  8289  1025] occurred 1 times
+coordinate (xyz) [12217  2493  1704] occurred 1 times
+coordinate (xyz) [12308 18812  7125] occurred 1 times
+coordinate (xyz) [12313  5587  8603] occurred 1 times
+coordinate (xyz) [12362  3654  9114] occurred 1 times
+coordinate (xyz) [12365  2267  2737] occurred 1 times
+coordinate (xyz) [12435 22357  6171] occurred 1 times
+coordinate (xyz) [12462 21097  1243] occurred 1 times
+coordinate (xyz) [12503 21505 14292] occurred 1 times
+coordinate (xyz) [12510 23882 13448] occurred 1 times
+coordinate (xyz) [12534 21793 13882] occurred 1 times
+coordinate (xyz) [12553 10624 13530] occurred 1 times
+coordinate (xyz) [12560 22326  4832] occurred 1 times
+coordinate (xyz) [12567 20910 12583] occurred 1 times
+coordinate (xyz) [12575  6769 13242] occurred 1 times
+coordinate (xyz) [12640  7764 14289] occurred 1 times
+coordinate (xyz) [12650 16489  4132] occurred 1 times
+coordinate (xyz) [12657 23254 13870] occurred 1 times
+coordinate (xyz) [12665 13132  4676] occurred 1 times
+coordinate (xyz) [12732 25231  4927] occurred 1 times
+coordinate (xyz) [12743 10096  3799] occurred 1 times
+coordinate (xyz) [12826 13922 14573] occurred 1 times
+coordinate (xyz) [12840 21255   775] occurred 1 times
+coordinate (xyz) [12854 15311  6727] occurred 1 times
+coordinate (xyz) [12955  8671 10676] occurred 1 times
+coordinate (xyz) [12962  8151 10367] occurred 1 times
+coordinate (xyz) [12965 24960 11003] occurred 1 times
+coordinate (xyz) [12974 18587  8865] occurred 1 times
+coordinate (xyz) [12975  7399 13189] occurred 1 times
+coordinate (xyz) [13139   890 14384] occurred 1 times
+coordinate (xyz) [13140 19997  9484] occurred 1 times
+coordinate (xyz) [13155 23997  9735] occurred 1 times
+coordinate (xyz) [13174  2614  3852] occurred 1 times
+coordinate (xyz) [13236 19821 11074] occurred 1 times
+coordinate (xyz) [13237  2629  3524] occurred 1 times
+coordinate (xyz) [13237 10882  5588] occurred 1 times
+coordinate (xyz) [13239 18225  7476] occurred 1 times
+coordinate (xyz) [13307  8642 14535] occurred 1 times
+coordinate (xyz) [13325 22549 14416] occurred 1 times
+coordinate (xyz) [13336 16583  6176] occurred 1 times
+coordinate (xyz) [13389 22570  9507] occurred 1 times
+coordinate (xyz) [13406  8216   174] occurred 1 times
+coordinate (xyz) [13427 15579  5908] occurred 1 times
+coordinate (xyz) [13442 26976  1888] occurred 1 times
+coordinate (xyz) [13480 10540  5268] occurred 1 times
+coordinate (xyz) [13497    27 14543] occurred 1 times
+coordinate (xyz) [13549 21738  1803] occurred 1 times
+coordinate (xyz) [13563 12429  7295] occurred 1 times
+coordinate (xyz) [13575 22772  4134] occurred 1 times
+coordinate (xyz) [13613 21374  4055] occurred 1 times
+coordinate (xyz) [13645  4085  5872] occurred 1 times
+coordinate (xyz) [13654  1527  2832] occurred 1 times
+coordinate (xyz) [13658  6387 15414] occurred 1 times
+coordinate (xyz) [13703 12505  8021] occurred 1 times
+coordinate (xyz) [13717 12527  1553] occurred 1 times
+coordinate (xyz) [13719  6962   356] occurred 1 times
+coordinate (xyz) [13728 23048 15240] occurred 1 times
+coordinate (xyz) [13739  2412 12056] occurred 1 times
+coordinate (xyz) [13759 12916 10341] occurred 1 times
+coordinate (xyz) [13819  3150 11006] occurred 1 times
+coordinate (xyz) [13885  3752  9289] occurred 1 times
+coordinate (xyz) [13955  8159  7544] occurred 1 times
+coordinate (xyz) [13955 24646  8844] occurred 1 times
+coordinate (xyz) [13967  3548 11560] occurred 1 times
+coordinate (xyz) [14041 16547 15417] occurred 1 times
+coordinate (xyz) [14045 26797 10987] occurred 1 times
+coordinate (xyz) [14052  8377  3870] occurred 1 times
+coordinate (xyz) [14085  4333 14543] occurred 1 times
+coordinate (xyz) [14089  4720 10972] occurred 1 times
+coordinate (xyz) [14105  1136 14820] occurred 1 times
+coordinate (xyz) [14137 23216  8874] occurred 1 times
+coordinate (xyz) [14178  7862  5984] occurred 1 times
+coordinate (xyz) [14242  5346  2003] occurred 1 times
+coordinate (xyz) [14243 23384  8124] occurred 1 times
+coordinate (xyz) [14295 24082 12394] occurred 1 times
+coordinate (xyz) [14359 14038  2154] occurred 1 times
+coordinate (xyz) [14377 27122  4959] occurred 1 times
+coordinate (xyz) [14397  2409  6932] occurred 1 times
+coordinate (xyz) [14451 16038  1517] occurred 1 times
+coordinate (xyz) [14504  1199 13207] occurred 1 times
+coordinate (xyz) [14510  3452  5251] occurred 1 times
+coordinate (xyz) [14546 16480   269] occurred 1 times
+coordinate (xyz) [14609  2923  2648] occurred 1 times
+coordinate (xyz) [14614 24578 14783] occurred 1 times
+coordinate (xyz) [14654 18461  1346] occurred 1 times
+coordinate (xyz) [14685  7368  9115] occurred 1 times
+coordinate (xyz) [14686 20833  2059] occurred 1 times
+coordinate (xyz) [14695 12566  5560] occurred 1 times
+coordinate (xyz) [14716  2926  1487] occurred 1 times
+coordinate (xyz) [14726  9863 10959] occurred 1 times
+coordinate (xyz) [14784  3598  9697] occurred 1 times
+coordinate (xyz) [14812  6550  8432] occurred 1 times
+coordinate (xyz) [14818 25480 12527] occurred 1 times
+coordinate (xyz) [14825 10066  2518] occurred 1 times
+coordinate (xyz) [14922  1214  7470] occurred 1 times
+coordinate (xyz) [14951 14448  2798] occurred 1 times
+coordinate (xyz) [15035  4418 13130] occurred 1 times
+coordinate (xyz) [15040 10605  7277] occurred 1 times
+coordinate (xyz) [15058 17695  1052] occurred 1 times
+coordinate (xyz) [15092 14028  4946] occurred 1 times
+coordinate (xyz) [15207 11442 14924] occurred 1 times
+coordinate (xyz) [15210  5060 15344] occurred 1 times
+coordinate (xyz) [15217  6234   690] occurred 1 times
+coordinate (xyz) [15247   992 14552] occurred 1 times
+coordinate (xyz) [15294 16461  6059] occurred 1 times
+coordinate (xyz) [15294 22351  9107] occurred 1 times
+coordinate (xyz) [15349 25441  5963] occurred 1 times
+coordinate (xyz) [15352 11766 14468] occurred 1 times
+coordinate (xyz) [15354  1119    29] occurred 1 times
+coordinate (xyz) [15386 25504  9089] occurred 1 times
+coordinate (xyz) [15387  9512 13178] occurred 1 times
+coordinate (xyz) [15437 19486  9131] occurred 1 times
+coordinate (xyz) [15512 26061  2047] occurred 1 times
+coordinate (xyz) [15538 25188 13742] occurred 1 times
+coordinate (xyz) [15539  4162 10144] occurred 1 times
+coordinate (xyz) [15556  1969 11346] occurred 1 times
+coordinate (xyz) [15569  5627  5277] occurred 1 times
+coordinate (xyz) [15571 10063 10852] occurred 1 times
+coordinate (xyz) [15662 21328  2843] occurred 1 times
+coordinate (xyz) [15667 17951  6535] occurred 1 times
+coordinate (xyz) [15701  2826  5713] occurred 1 times
+coordinate (xyz) [15722  5875  3825] occurred 1 times
+coordinate (xyz) [15749 26557  8310] occurred 1 times
+coordinate (xyz) [15759  7363  7241] occurred 1 times
+coordinate (xyz) [15766 26050  7802] occurred 1 times
+coordinate (xyz) [15784  5582  5677] occurred 1 times
+coordinate (xyz) [15787  3820 10527] occurred 1 times
+coordinate (xyz) [15817 16384  2464] occurred 1 times
+coordinate (xyz) [15868 27150  4813] occurred 1 times
+coordinate (xyz) [15870  3845  5626] occurred 1 times
+coordinate (xyz) [15925 12458  3718] occurred 1 times
+coordinate (xyz) [15934 25706  8313] occurred 1 times
+coordinate (xyz) [15964 25859  1276] occurred 1 times
+coordinate (xyz) [16000 10337 10379] occurred 1 times
+coordinate (xyz) [16069 25785 12734] occurred 1 times
+coordinate (xyz) [16145 15509  1229] occurred 1 times
+coordinate (xyz) [16148 15723 13200] occurred 1 times
+coordinate (xyz) [16171 19166  1629] occurred 1 times
+coordinate (xyz) [16202 21388  2962] occurred 1 times
+coordinate (xyz) [16235   467 14723] occurred 1 times
+coordinate (xyz) [16277  1337 12803] occurred 1 times
+coordinate (xyz) [16292 23226  1843] occurred 1 times
+coordinate (xyz) [16304 17752 14837] occurred 1 times
+coordinate (xyz) [16338 22886  5325] occurred 1 times
+coordinate (xyz) [16359 10416 13878] occurred 1 times
+coordinate (xyz) [16376 21757   461] occurred 1 times
+coordinate (xyz) [16407 16753   708] occurred 1 times
+coordinate (xyz) [16437 18642  7179] occurred 1 times
+coordinate (xyz) [16457  1887  7643] occurred 1 times
+coordinate (xyz) [16464   375  4735] occurred 1 times
+coordinate (xyz) [16472  7108  8466] occurred 1 times
+coordinate (xyz) [16479   284  3136] occurred 1 times
+coordinate (xyz) [16493 22115 15392] occurred 1 times
+coordinate (xyz) [16527 11673 14133] occurred 1 times
+coordinate (xyz) [16540  5805  1116] occurred 1 times
+coordinate (xyz) [16573 21864  6786] occurred 1 times
+coordinate (xyz) [16661 18458  5983] occurred 1 times
+coordinate (xyz) [16665 16377  9449] occurred 1 times
+coordinate (xyz) [16694 24568  3797] occurred 1 times
+coordinate (xyz) [16720 12258 14684] occurred 1 times
+coordinate (xyz) [16723  7621  5030] occurred 1 times
+coordinate (xyz) [16793  2020  2288] occurred 1 times
+coordinate (xyz) [16839  6648 10766] occurred 1 times
+coordinate (xyz) [16856  8938  7201] occurred 1 times
+coordinate (xyz) [16895 10391 10335] occurred 1 times
+coordinate (xyz) [16898 17144  8418] occurred 1 times
+coordinate (xyz) [16903 10983  1693] occurred 1 times
+coordinate (xyz) [16969 15253   371] occurred 1 times
+coordinate (xyz) [16975  7337   832] occurred 1 times
+coordinate (xyz) [16987 11525  7194] occurred 1 times
+coordinate (xyz) [16993 22197  1876] occurred 1 times
+coordinate (xyz) [17032  9504  7586] occurred 1 times
+coordinate (xyz) [17040   281 15083] occurred 1 times
+coordinate (xyz) [17083 20021  8313] occurred 1 times
+coordinate (xyz) [17136  6006  6085] occurred 1 times
+coordinate (xyz) [17164  2485 10102] occurred 1 times
+coordinate (xyz) [17182 22713 10336] occurred 1 times
+coordinate (xyz) [17195 20147   266] occurred 1 times
+coordinate (xyz) [17227  1538 11616] occurred 1 times
+coordinate (xyz) [17257  1632  5979] occurred 1 times
+coordinate (xyz) [17289 10955  7813] occurred 1 times
+coordinate (xyz) [17304  9079   184] occurred 1 times
+coordinate (xyz) [17432 23343  5572] occurred 1 times
+coordinate (xyz) [17443  9672 14375] occurred 1 times
+coordinate (xyz) [17452   113   737] occurred 1 times
+coordinate (xyz) [17534  9495 11645] occurred 1 times
+coordinate (xyz) [17541  4047 12031] occurred 1 times
+coordinate (xyz) [17558 19042  7988] occurred 1 times
+coordinate (xyz) [17568 25518  2507] occurred 1 times
+coordinate (xyz) [17571 20945  5788] occurred 1 times
+coordinate (xyz) [17591 13671 14682] occurred 1 times
+coordinate (xyz) [17638 10058   380] occurred 1 times
+coordinate (xyz) [17638 20352  4336] occurred 1 times
+coordinate (xyz) [17642 11254 11484] occurred 1 times
+coordinate (xyz) [17664 19751  6659] occurred 1 times
+coordinate (xyz) [17690  6994 10213] occurred 1 times
+coordinate (xyz) [17724  4529   178] occurred 1 times
+coordinate (xyz) [17737   523  6563] occurred 1 times
+coordinate (xyz) [17824  5403 12855] occurred 1 times
+coordinate (xyz) [17839 17262 10684] occurred 1 times
+coordinate (xyz) [17844   360 11928] occurred 1 times
+coordinate (xyz) [17855  5046 13581] occurred 1 times
+coordinate (xyz) [17913 16289  8844] occurred 1 times
+coordinate (xyz) [17914 27142  4047] occurred 1 times
+coordinate (xyz) [17937 11453  4231] occurred 1 times
+coordinate (xyz) [17959 16974  3133] occurred 1 times
+coordinate (xyz) [17995  5413  4564] occurred 1 times
+coordinate (xyz) [18007  9457 14892] occurred 1 times
+coordinate (xyz) [18023  4780 14224] occurred 1 times
+coordinate (xyz) [18047 23122  4110] occurred 1 times
+coordinate (xyz) [18083 17789  1203] occurred 1 times
+coordinate (xyz) [18162 12198  7818] occurred 1 times
+coordinate (xyz) [18170 21048 14940] occurred 1 times
+coordinate (xyz) [18179 10639  7875] occurred 1 times
+coordinate (xyz) [18182 20949  1478] occurred 1 times
+coordinate (xyz) [18182 23146  3781] occurred 1 times
+coordinate (xyz) [18200 21499  9219] occurred 1 times
+coordinate (xyz) [18208 15942   864] occurred 1 times
+coordinate (xyz) [18251 21660   746] occurred 1 times
+coordinate (xyz) [18341 17669 11504] occurred 1 times
+coordinate (xyz) [18352 22806  6629] occurred 1 times
+coordinate (xyz) [18380 23495  4823] occurred 1 times
+coordinate (xyz) [18404 21002  3117] occurred 1 times
+coordinate (xyz) [18439 18366  6883] occurred 1 times
+coordinate (xyz) [18470 22712 15191] occurred 1 times
+coordinate (xyz) [18484 25556  6564] occurred 1 times
+coordinate (xyz) [18521  5158 10234] occurred 1 times
+coordinate (xyz) [18554 24415  7650] occurred 1 times
+coordinate (xyz) [18555  4420 13719] occurred 1 times
+coordinate (xyz) [18587  6810  3890] occurred 1 times
+coordinate (xyz) [18595  1870 11068] occurred 1 times
+coordinate (xyz) [18603 12984 11205] occurred 1 times
+coordinate (xyz) [18622   257  6979] occurred 1 times
+coordinate (xyz) [18634 23176  8907] occurred 1 times
+coordinate (xyz) [18635 12195 11967] occurred 1 times
+coordinate (xyz) [18755 22877 12522] occurred 1 times
+coordinate (xyz) [18793  9654  7063] occurred 1 times
+coordinate (xyz) [18868  7418 10022] occurred 1 times
+coordinate (xyz) [18887  3559 14131] occurred 1 times
+coordinate (xyz) [18888 23281 13734] occurred 1 times
+coordinate (xyz) [18926 25400  6898] occurred 1 times
+coordinate (xyz) [19022  2920  9278] occurred 1 times
+coordinate (xyz) [19065  7133  3346] occurred 1 times
+coordinate (xyz) [19099 24711  1294] occurred 1 times
+coordinate (xyz) [19128 14625 14763] occurred 1 times
+coordinate (xyz) [19128 15660  6051] occurred 1 times
+coordinate (xyz) [19141 21505  9825] occurred 1 times
+coordinate (xyz) [19170 21807 12317] occurred 1 times
+coordinate (xyz) [19192  6165 11560] occurred 1 times
+coordinate (xyz) [19218  5052  4349] occurred 1 times
+coordinate (xyz) [19225 22081   991] occurred 1 times
+coordinate (xyz) [19227 15004 11749] occurred 1 times
+coordinate (xyz) [19275 23397 14962] occurred 1 times
+coordinate (xyz) [19279 21440   144] occurred 1 times
+coordinate (xyz) [19336 24614  2609] occurred 1 times
+coordinate (xyz) [19370  9881  2848] occurred 1 times
+coordinate (xyz) [19393 10597 13800] occurred 1 times
+coordinate (xyz) [19438 22038  2691] occurred 1 times
+coordinate (xyz) [19487 10763  4483] occurred 1 times
+coordinate (xyz) [19514  5672  5454] occurred 1 times
+coordinate (xyz) [19533  9022  7728] occurred 1 times
+coordinate (xyz) [19545 11027  6110] occurred 1 times
+coordinate (xyz) [19557 22356    73] occurred 1 times
+coordinate (xyz) [19566  7665  5538] occurred 1 times
+coordinate (xyz) [19596 15553  8798] occurred 1 times
+coordinate (xyz) [19605 15606 10657] occurred 1 times
+coordinate (xyz) [19619  4596  8848] occurred 1 times
+coordinate (xyz) [19654 15042  8519] occurred 1 times
+coordinate (xyz) [19678 17261   178] occurred 1 times
+coordinate (xyz) [19681 20294   261] occurred 1 times
+coordinate (xyz) [19686  2288 13360] occurred 1 times
+coordinate (xyz) [19686 10459  6645] occurred 1 times
+coordinate (xyz) [19708 23373 10506] occurred 1 times
+coordinate (xyz) [19744  6342  6966] occurred 1 times
+coordinate (xyz) [19770 22254  3151] occurred 1 times
+coordinate (xyz) [19794  4979 13153] occurred 1 times
+coordinate (xyz) [19796  5866 14540] occurred 1 times
+coordinate (xyz) [19809 11915  8843] occurred 1 times
+coordinate (xyz) [19838  7074 10941] occurred 1 times
+coordinate (xyz) [19901 25744  6735] occurred 1 times
+coordinate (xyz) [19903 11926  1133] occurred 1 times
+coordinate (xyz) [19997 14156  2521] occurred 1 times
+coordinate (xyz) [20001  6963  1207] occurred 1 times
+coordinate (xyz) [20018  5968  5610] occurred 1 times
+coordinate (xyz) [20031   149   833] occurred 1 times
+coordinate (xyz) [20144 23670  9362] occurred 1 times
+coordinate (xyz) [20211 12578  4196] occurred 1 times
+coordinate (xyz) [20232  3175  4988] occurred 1 times
+coordinate (xyz) [20334 13797   429] occurred 1 times
+coordinate (xyz) [20343 13478  3877] occurred 1 times
+coordinate (xyz) [20350 16013 11514] occurred 1 times
+coordinate (xyz) [20351 16867  3596] occurred 1 times
+coordinate (xyz) [20365  2033 10866] occurred 1 times
+coordinate (xyz) [20385 25737 14708] occurred 1 times
+coordinate (xyz) [20394 11149   658] occurred 1 times
+coordinate (xyz) [20421  7375  6533] occurred 1 times
+coordinate (xyz) [20427 11797  8335] occurred 1 times
+coordinate (xyz) [20438  8404  7009] occurred 1 times
+coordinate (xyz) [20478 16810  3717] occurred 1 times
+coordinate (xyz) [20485 20943 11348] occurred 1 times
+coordinate (xyz) [20544 16825  4131] occurred 1 times
+coordinate (xyz) [20596 20507  7447] occurred 1 times
+coordinate (xyz) [20609 16332  7751] occurred 1 times
+coordinate (xyz) [20646 25492  1210] occurred 1 times
+coordinate (xyz) [20694 17931  5349] occurred 1 times
+coordinate (xyz) [20729 11754  7519] occurred 1 times
+coordinate (xyz) [20788 22572   528] occurred 1 times
+coordinate (xyz) [20793 10835 11430] occurred 1 times
+coordinate (xyz) [20814 14813  6687] occurred 1 times
+coordinate (xyz) [20822 15119  9904] occurred 1 times
+coordinate (xyz) [20864 17727  6750] occurred 1 times
+coordinate (xyz) [20875 21418  9610] occurred 1 times
+coordinate (xyz) [20885  1531 11338] occurred 1 times
+coordinate (xyz) [20962 12343 13544] occurred 1 times
+coordinate (xyz) [21077 19951 13345] occurred 1 times
+coordinate (xyz) [21166 26796   731] occurred 1 times
+coordinate (xyz) [21174  7297 10253] occurred 1 times
+coordinate (xyz) [21262 21469 15280] occurred 1 times
+coordinate (xyz) [21269 26560  7218] occurred 1 times
+coordinate (xyz) [21294 19662  6407] occurred 1 times
+coordinate (xyz) [21341  2995 14738] occurred 1 times
+coordinate (xyz) [21372 26087 15296] occurred 1 times
+coordinate (xyz) [21408  5848  5271] occurred 1 times
+coordinate (xyz) [21424  3124  6236] occurred 1 times
+coordinate (xyz) [21436 26474  5516] occurred 1 times
+coordinate (xyz) [21479 20592  2559] occurred 1 times
+coordinate (xyz) [21504  9582  3912] occurred 1 times
+coordinate (xyz) [21570  2381  8810] occurred 1 times
+coordinate (xyz) [21601  9892  7058] occurred 1 times
+coordinate (xyz) [21614 14907 13662] occurred 1 times
+coordinate (xyz) [21678 15851 11880] occurred 1 times
+coordinate (xyz) [21704  5381  4734] occurred 1 times
+coordinate (xyz) [21780 21758 12645] occurred 1 times
+coordinate (xyz) [21794 16515  4407] occurred 1 times
+coordinate (xyz) [21803 19683   264] occurred 1 times
+coordinate (xyz) [21823 25524    59] occurred 1 times
+coordinate (xyz) [21838   831 12052] occurred 1 times
+coordinate (xyz) [21847  9025  8813] occurred 1 times
+coordinate (xyz) [21891 18844  1679] occurred 1 times
+coordinate (xyz) [21945 26411 14901] occurred 1 times
+coordinate (xyz) [21971  1319  5986] occurred 1 times
+coordinate (xyz) [21979 20575 11625] occurred 1 times
+coordinate (xyz) [22001  5006  2189] occurred 1 times
+coordinate (xyz) [22012  2260  8025] occurred 1 times
+coordinate (xyz) [22078 12467  1632] occurred 1 times
+coordinate (xyz) [22103  2163   782] occurred 1 times
+coordinate (xyz) [22126 26684 10100] occurred 1 times
+coordinate (xyz) [22135 23907 11581] occurred 1 times
+coordinate (xyz) [22166 14118 10921] occurred 1 times
+coordinate (xyz) [22226 12680  3870] occurred 1 times
+coordinate (xyz) [22249 26244 10221] occurred 1 times
+coordinate (xyz) [22251  9516 11032] occurred 1 times
+coordinate (xyz) [22279 13250  3141] occurred 1 times
+coordinate (xyz) [22301 12148  8235] occurred 1 times
+coordinate (xyz) [22306 25395 12517] occurred 1 times
+coordinate (xyz) [22412 23411  6784] occurred 1 times
+coordinate (xyz) [22415 14141 11200] occurred 1 times
+coordinate (xyz) [22422  2566 10336] occurred 1 times
+coordinate (xyz) [22546  8526  2686] occurred 1 times
+coordinate (xyz) [22549 10166  1280] occurred 1 times
+coordinate (xyz) [22574  4929 11125] occurred 1 times
+coordinate (xyz) [22583  9837  3653] occurred 1 times
+coordinate (xyz) [22620  4450  4823] occurred 1 times
+coordinate (xyz) [22653 12622 11323] occurred 1 times
+coordinate (xyz) [22656 19721  9759] occurred 1 times
+coordinate (xyz) [22686 12547  9169] occurred 1 times
+coordinate (xyz) [22734  8337  1191] occurred 1 times
+coordinate (xyz) [22740  8121  8995] occurred 1 times
+coordinate (xyz) [22922 12192 10030] occurred 1 times
+coordinate (xyz) [22922 26878 13725] occurred 1 times
+coordinate (xyz) [22985 27098 11604] occurred 1 times
+coordinate (xyz) [23026  6290  2177] occurred 1 times
+coordinate (xyz) [23032  1022   176] occurred 1 times
+coordinate (xyz) [23112 11807 13196] occurred 1 times
+coordinate (xyz) [23127  1318  3681] occurred 1 times
+coordinate (xyz) [23226 14239  2782] occurred 1 times
+coordinate (xyz) [23232 16678  9338] occurred 1 times
+coordinate (xyz) [23263 19813 13778] occurred 1 times
+coordinate (xyz) [23360 15548  3572] occurred 1 times
+coordinate (xyz) [23403  9980  4969] occurred 1 times
+coordinate (xyz) [23417    42  9814] occurred 1 times
+coordinate (xyz) [23429 16209 10885] occurred 1 times
+coordinate (xyz) [23439 18419 15445] occurred 1 times
+coordinate (xyz) [23457 14006 15246] occurred 1 times
+coordinate (xyz) [23469 13121 11572] occurred 1 times
+coordinate (xyz) [23470  5383  7100] occurred 1 times
+coordinate (xyz) [23474 20560 10162] occurred 1 times
+coordinate (xyz) [23492 11032  8689] occurred 1 times
+coordinate (xyz) [23577   744   355] occurred 1 times
+coordinate (xyz) [23591  8223  3365] occurred 1 times
+coordinate (xyz) [23597 20838 10611] occurred 1 times
+coordinate (xyz) [23609 19391  7820] occurred 1 times
+coordinate (xyz) [23611 10614 11255] occurred 1 times
+coordinate (xyz) [23664  5278 14954] occurred 1 times
+coordinate (xyz) [23693 14947   640] occurred 1 times
+coordinate (xyz) [23713 18880  6581] occurred 1 times
+coordinate (xyz) [23739  7199  2522] occurred 1 times
+coordinate (xyz) [23739 19173 14973] occurred 1 times
+coordinate (xyz) [23847 18662 13395] occurred 1 times
+coordinate (xyz) [23860 25118  3994] occurred 1 times
+coordinate (xyz) [23870 12157  1568] occurred 1 times
+coordinate (xyz) [23877 18852   869] occurred 1 times
+coordinate (xyz) [23903   295  2631] occurred 1 times
+coordinate (xyz) [23944 24872  4293] occurred 1 times
+coordinate (xyz) [23958  2898  7389] occurred 1 times
+coordinate (xyz) [23979 11192  2446] occurred 1 times
+coordinate (xyz) [24062 11374 13746] occurred 1 times
+coordinate (xyz) [24094  9764 13159] occurred 1 times
+coordinate (xyz) [24107  5225  5651] occurred 1 times
+coordinate (xyz) [24115 11168 13004] occurred 1 times
+coordinate (xyz) [24127 25545 14931] occurred 1 times
+coordinate (xyz) [24128  3114  5935] occurred 1 times
+coordinate (xyz) [24128 17453  5158] occurred 1 times
+coordinate (xyz) [24172  5331 10264] occurred 1 times
+coordinate (xyz) [24207 11105  9897] occurred 1 times
+coordinate (xyz) [24210 13964 10314] occurred 1 times
+coordinate (xyz) [24230 13268 11425] occurred 1 times
+coordinate (xyz) [24234 13719  7027] occurred 1 times
+coordinate (xyz) [24272 24505  5940] occurred 1 times
+coordinate (xyz) [24291  3537  9349] occurred 1 times
+coordinate (xyz) [24297 16033  2737] occurred 1 times
+coordinate (xyz) [24303  1200   317] occurred 1 times
+coordinate (xyz) [24310  7633  8798] occurred 1 times
+coordinate (xyz) [24316  8542  1048] occurred 1 times
+coordinate (xyz) [24331 16875  6308] occurred 1 times
+coordinate (xyz) [24339 21755 10906] occurred 1 times
+coordinate (xyz) [24344 15952 10661] occurred 1 times
+coordinate (xyz) [24396 12855 14833] occurred 1 times
+coordinate (xyz) [24452  7830  1908] occurred 1 times
+coordinate (xyz) [24477 22926   562] occurred 1 times
+coordinate (xyz) [24500 26425   312] occurred 1 times
+coordinate (xyz) [24528 10214 14585] occurred 1 times
+coordinate (xyz) [24535 19433   753] occurred 1 times
+coordinate (xyz) [24550 25146  7795] occurred 1 times
+coordinate (xyz) [24570 25760  2859] occurred 1 times
+coordinate (xyz) [24576 16093   853] occurred 1 times
+coordinate (xyz) [24624  9452  5605] occurred 1 times
+coordinate (xyz) [24639  7901   658] occurred 1 times
+coordinate (xyz) [24661 15394 11180] occurred 1 times
+coordinate (xyz) [24671 24536  9659] occurred 1 times
+coordinate (xyz) [24688 19932  7631] occurred 1 times
+coordinate (xyz) [24726 14811  2486] occurred 1 times
+coordinate (xyz) [24738 23307 12253] occurred 1 times
+coordinate (xyz) [24774 26952 12172] occurred 1 times
+coordinate (xyz) [24785 13979  4505] occurred 1 times
+coordinate (xyz) [24825  1980  2044] occurred 1 times
+coordinate (xyz) [24954 12410  5841] occurred 1 times
+coordinate (xyz) [24966 20439  4024] occurred 1 times
+coordinate (xyz) [24977  3638  7807] occurred 1 times
+coordinate (xyz) [24982  5915  8601] occurred 1 times
+coordinate (xyz) [24988 24275  4891] occurred 1 times
+coordinate (xyz) [25000 21790  1367] occurred 1 times
+coordinate (xyz) [25028 20263  1257] occurred 1 times
+coordinate (xyz) [25030 19420  5172] occurred 1 times
+coordinate (xyz) [25042 15570  9221] occurred 1 times
+coordinate (xyz) [25141  2953  6825] occurred 1 times
+coordinate (xyz) [25170 16353  3702] occurred 1 times
+coordinate (xyz) [25170 20183  2184] occurred 1 times
+coordinate (xyz) [25179 16784  3061] occurred 1 times
+coordinate (xyz) [25193 26806  7424] occurred 1 times
+coordinate (xyz) [25248 15714 15187] occurred 1 times
+coordinate (xyz) [25304  6771   431] occurred 1 times
+coordinate (xyz) [25326 10624 12007] occurred 1 times
+coordinate (xyz) [25352 10167  1901] occurred 1 times
+coordinate (xyz) [25413 22242 10657] occurred 1 times
+coordinate (xyz) [25425 21422 11732] occurred 1 times
+coordinate (xyz) [25449  8526  7713] occurred 1 times
+coordinate (xyz) [25455 11054 13845] occurred 1 times
+coordinate (xyz) [25460 15310 11566] occurred 1 times
+coordinate (xyz) [25515  4042 10082] occurred 1 times
+coordinate (xyz) [25518  1222 14149] occurred 1 times
+coordinate (xyz) [25542 15548  7264] occurred 1 times
+coordinate (xyz) [25556 17025  5101] occurred 1 times
+coordinate (xyz) [25594 26382 14696] occurred 1 times
+coordinate (xyz) [25630 21800 10674] occurred 1 times
+coordinate (xyz) [25638 26837  8603] occurred 1 times
+coordinate (xyz) [25643 26878 11634] occurred 1 times
+coordinate (xyz) [25660 23267  2291] occurred 1 times
+coordinate (xyz) [25746 26265  3365] occurred 1 times
+coordinate (xyz) [25751 20013  8671] occurred 1 times
+coordinate (xyz) [25757  4603  9653] occurred 1 times
+coordinate (xyz) [25854 26320  1659] occurred 1 times
+coordinate (xyz) [25895 22270  7406] occurred 1 times
+coordinate (xyz) [25969  2622 13810] occurred 1 times
+coordinate (xyz) [25999 12644  4602] occurred 1 times
+coordinate (xyz) [26004  4025  9403] occurred 1 times
+coordinate (xyz) [26019 21192  7762] occurred 1 times
+coordinate (xyz) [26041 22893  2806] occurred 1 times
+coordinate (xyz) [26060  8298  1192] occurred 1 times
+coordinate (xyz) [26086  4064   164] occurred 1 times
+coordinate (xyz) [26103 11742  1888] occurred 1 times
+coordinate (xyz) [26214  9714  4830] occurred 1 times
+coordinate (xyz) [26282  4890 12520] occurred 1 times
+coordinate (xyz) [26314 15836 10656] occurred 1 times
+coordinate (xyz) [26396 25291  7610] occurred 1 times
+coordinate (xyz) [26400  6035  2499] occurred 1 times
+coordinate (xyz) [26411 26771  5711] occurred 1 times
+coordinate (xyz) [26455 21136 12188] occurred 1 times
+coordinate (xyz) [26459  6833 11238] occurred 1 times
+coordinate (xyz) [26459  9056  1834] occurred 1 times
+coordinate (xyz) [26503 17273   152] occurred 1 times
+coordinate (xyz) [26524 14914 12042] occurred 1 times
+coordinate (xyz) [26578 10975 13767] occurred 1 times
+coordinate (xyz) [26618 16808  4671] occurred 1 times
+coordinate (xyz) [26639 23832 11230] occurred 1 times
+coordinate (xyz) [26645  3139 14845] occurred 1 times
+coordinate (xyz) [26658 14486  3873] occurred 1 times
+coordinate (xyz) [26703 16241  9303] occurred 1 times
+coordinate (xyz) [26714  4105  7785] occurred 1 times
+coordinate (xyz) [26728  1514  9554] occurred 1 times
+coordinate (xyz) [26786 20522  3918] occurred 1 times
+coordinate (xyz) [26794    20  6774] occurred 1 times
+coordinate (xyz) [26797  7360 13401] occurred 1 times
+coordinate (xyz) [26815 19930  3430] occurred 1 times
+coordinate (xyz) [26837 26698 11663] occurred 1 times
+coordinate (xyz) [26845  5405 12306] occurred 1 times
+coordinate (xyz) [26848 26776  4373] occurred 1 times
+coordinate (xyz) [26859  8583 15075] occurred 1 times
+coordinate (xyz) [26915  7486  6212] occurred 1 times
+coordinate (xyz) [26993 21807  1485] occurred 1 times
+coordinate (xyz) [26998 23033 12214] occurred 1 times
+coordinate (xyz) [27031 23058 15183] occurred 1 times

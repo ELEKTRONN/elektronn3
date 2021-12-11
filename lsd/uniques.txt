@@ -1,0 +1,124 @@
+number of samples: 1000
+number of unique samples: 122
+coordinate (xyz) [   15 18628 12313] occurred 10 times
+coordinate (xyz) [  235 12172  5192] occurred 10 times
+coordinate (xyz) [ 505 8147 5145] occurred 10 times
+coordinate (xyz) [ 690 6078 9516] occurred 5 times
+coordinate (xyz) [1031 4415 2877] occurred 10 times
+coordinate (xyz) [ 1046 14089  3047] occurred 10 times
+coordinate (xyz) [1110 6285 6121] occurred 10 times
+coordinate (xyz) [ 1612 19482  1844] occurred 10 times
+coordinate (xyz) [ 1979 15247  5656] occurred 10 times
+coordinate (xyz) [ 2178  9948 14951] occurred 10 times
+coordinate (xyz) [ 2962 18900 15243] occurred 10 times
+coordinate (xyz) [ 3082 23648   183] occurred 10 times
+coordinate (xyz) [ 3428 16539 15269] occurred 10 times
+coordinate (xyz) [3606 9529 2561] occurred 10 times
+coordinate (xyz) [3718 1741  696] occurred 7 times
+coordinate (xyz) [4039  243 1372] occurred 10 times
+coordinate (xyz) [4059  715 6407] occurred 10 times
+coordinate (xyz) [ 4074 14792   542] occurred 10 times
+coordinate (xyz) [ 4509 17227 13859] occurred 9 times
+coordinate (xyz) [ 4791  9537 13681] occurred 10 times
+coordinate (xyz) [ 5168 16182  7456] occurred 10 times
+coordinate (xyz) [ 5171 21359 14474] occurred 4 times
+coordinate (xyz) [ 5354 15917  4547] occurred 10 times
+coordinate (xyz) [ 5716 15309 12850] occurred 8 times
+coordinate (xyz) [6221 2760 5195] occurred 10 times
+coordinate (xyz) [ 6461 20024  7897] occurred 10 times
+coordinate (xyz) [ 6602 25926  5785] occurred 3 times
+coordinate (xyz) [ 6713 12016  7676] occurred 10 times
+coordinate (xyz) [ 7125 25202  5870] occurred 1 times
+coordinate (xyz) [ 7183 15237 13713] occurred 10 times
+coordinate (xyz) [ 7500  1067 12820] occurred 10 times
+coordinate (xyz) [7500 4472 8090] occurred 2 times
+coordinate (xyz) [ 7740 16873   152] occurred 10 times
+coordinate (xyz) [ 8444 19946  4764] occurred 10 times
+coordinate (xyz) [ 8445 17052 14391] occurred 10 times
+coordinate (xyz) [8597 3303 7264] occurred 7 times
+coordinate (xyz) [ 9287 13699  1478] occurred 10 times
+coordinate (xyz) [ 9329 23316  2092] occurred 7 times
+coordinate (xyz) [9487 1694 8667] occurred 6 times
+coordinate (xyz) [ 9552  2669 13171] occurred 10 times
+coordinate (xyz) [ 9991  3885 13252] occurred 10 times
+coordinate (xyz) [10061  9987  2944] occurred 10 times
+coordinate (xyz) [10072 15568 12206] occurred 1 times
+coordinate (xyz) [10119  1306  9832] occurred 10 times
+coordinate (xyz) [10656 18218 13002] occurred 8 times
+coordinate (xyz) [10989  3462  9394] occurred 10 times
+coordinate (xyz) [10991  7255  7961] occurred 10 times
+coordinate (xyz) [11274 22807 15185] occurred 10 times
+coordinate (xyz) [11476  7796  9003] occurred 10 times
+coordinate (xyz) [11534  7871  3605] occurred 6 times
+coordinate (xyz) [11631 24290 13783] occurred 10 times
+coordinate (xyz) [11987 26853  5726] occurred 7 times
+coordinate (xyz) [11988 20985  3002] occurred 1 times
+coordinate (xyz) [11992 26338 11934] occurred 5 times
+coordinate (xyz) [12042 15639  1679] occurred 10 times
+coordinate (xyz) [12365  2267  2737] occurred 10 times
+coordinate (xyz) [12510 23882 13448] occurred 7 times
+coordinate (xyz) [12854 15311  6727] occurred 1 times
+coordinate (xyz) [12975  7399 13189] occurred 7 times
+coordinate (xyz) [13237 10882  5588] occurred 10 times
+coordinate (xyz) [13307  8642 14535] occurred 9 times
+coordinate (xyz) [13654  1527  2832] occurred 9 times
+coordinate (xyz) [14089  4720 10972] occurred 5 times
+coordinate (xyz) [14178  7862  5984] occurred 9 times
+coordinate (xyz) [14510  3452  5251] occurred 3 times
+coordinate (xyz) [14546 16480   269] occurred 10 times
+coordinate (xyz) [14825 10066  2518] occurred 10 times
+coordinate (xyz) [14922  1214  7470] occurred 10 times
+coordinate (xyz) [15058 17695  1052] occurred 10 times
+coordinate (xyz) [15784  5582  5677] occurred 8 times
+coordinate (xyz) [15868 27150  4813] occurred 2 times
+coordinate (xyz) [16277  1337 12803] occurred 10 times
+coordinate (xyz) [16359 10416 13878] occurred 10 times
+coordinate (xyz) [16376 21757   461] occurred 10 times
+coordinate (xyz) [16493 22115 15392] occurred 9 times
+coordinate (xyz) [16527 11673 14133] occurred 2 times
+coordinate (xyz) [16975  7337   832] occurred 10 times
+coordinate (xyz) [16993 22197  1876] occurred 10 times
+coordinate (xyz) [17032  9504  7586] occurred 10 times
+coordinate (xyz) [17289 10955  7813] occurred 10 times
+coordinate (xyz) [17534  9495 11645] occurred 10 times
+coordinate (xyz) [17571 20945  5788] occurred 4 times
+coordinate (xyz) [17839 17262 10684] occurred 7 times
+coordinate (xyz) [18182 20949  1478] occurred 10 times
+coordinate (xyz) [18352 22806  6629] occurred 10 times
+coordinate (xyz) [18380 23495  4823] occurred 1 times
+coordinate (xyz) [18555  4420 13719] occurred 4 times
+coordinate (xyz) [19192  6165 11560] occurred 8 times
+coordinate (xyz) [19279 21440   144] occurred 10 times
+coordinate (xyz) [19596 15553  8798] occurred 10 times
+coordinate (xyz) [19654 15042  8519] occurred 10 times
+coordinate (xyz) [19686  2288 13360] occurred 3 times
+coordinate (xyz) [19794  4979 13153] occurred 10 times
+coordinate (xyz) [20211 12578  4196] occurred 5 times
+coordinate (xyz) [20365  2033 10866] occurred 10 times
+coordinate (xyz) [20609 16332  7751] occurred 10 times
+coordinate (xyz) [20793 10835 11430] occurred 10 times
+coordinate (xyz) [21408  5848  5271] occurred 10 times
+coordinate (xyz) [21780 21758 12645] occurred 10 times
+coordinate (xyz) [22001  5006  2189] occurred 7 times
+coordinate (xyz) [22166 14118 10921] occurred 4 times
+coordinate (xyz) [22734  8337  1191] occurred 7 times
+coordinate (xyz) [23360 15548  3572] occurred 5 times
+coordinate (xyz) [23492 11032  8689] occurred 10 times
+coordinate (xyz) [23877 18852   869] occurred 10 times
+coordinate (xyz) [24094  9764 13159] occurred 10 times
+coordinate (xyz) [24172  5331 10264] occurred 10 times
+coordinate (xyz) [24339 21755 10906] occurred 4 times
+coordinate (xyz) [24477 22926   562] occurred 10 times
+coordinate (xyz) [24535 19433   753] occurred 10 times
+coordinate (xyz) [25193 26806  7424] occurred 4 times
+coordinate (xyz) [25304  6771   431] occurred 10 times
+coordinate (xyz) [25460 15310 11566] occurred 4 times
+coordinate (xyz) [26103 11742  1888] occurred 10 times
+coordinate (xyz) [26314 15836 10656] occurred 10 times
+coordinate (xyz) [26400  6035  2499] occurred 6 times
+coordinate (xyz) [26455 21136 12188] occurred 6 times
+coordinate (xyz) [26503 17273   152] occurred 10 times
+coordinate (xyz) [26703 16241  9303] occurred 6 times
+coordinate (xyz) [26794    20  6774] occurred 10 times
+coordinate (xyz) [26859  8583 15075] occurred 7 times
+coordinate (xyz) [26993 21807  1485] occurred 10 times

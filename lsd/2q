@@ -213,7 +213,7 @@ common_data_kwargs = {  # Common options for training and valid sets.
 from new_knossos import KnossosLabelsNozip
 train_dataset = KnossosLabelsNozip(
     conf_path_raw_data='/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf',#philipp said to use this dataset
-    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/knossos.pyk.conf',
+    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf',
     patch_shape=common_data_kwargs['patch_shape'],
     transform=train_transform,
     epoch_size=args.epoch_size,
@@ -224,7 +224,7 @@ train_dataset = KnossosLabelsNozip(
 
 valid_dataset = KnossosLabelsNozip(
     conf_path_raw_data='/wholebrain/songbird/j0251/j0251_72_clahe2/mag1/knossos.conf',#philipp said to use this dataset
-    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/knossos.pyk.conf',
+    conf_path_label='/ssdscratch/songbird/j0251/segmentation/j0251_72_seg_20210127_agglo2/j0251_72_seg_20210127_agglo2.pyk.conf',
     patch_shape=common_data_kwargs['patch_shape'],
     transform=train_transform,
     epoch_size=args.epoch_size,
@@ -322,7 +322,7 @@ class CustomLSDLoss(nn.Module):
 #else:
 #    raise NotImplementedError
 
-criterion = CustomLSDLoss(criterion_string)
+criterion = CustomLSDLoss()
 
 batch_size = 8
 num_workers = 2
@@ -356,13 +356,11 @@ trainer = Trainer(
 
 from elektronn3.training.trainer import _worker_init_fn
 
-from torch.utils.data import DataLoader
-
 trainer.train_loader = DataLoader(
     train_dataset, batch_size=batch_size, shuffle=True,
     num_workers=num_workers, pin_memory=True,
     timeout=60 if num_workers > 0 else 0,
-    worker_init_fn=_worker_init_fn, persistent_workers=True
+    worker_init_fn=_worker_init_fni, persistent_workers=True
 )
 
 if args.deterministic:

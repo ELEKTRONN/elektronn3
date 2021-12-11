@@ -36,22 +36,22 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
                 data from all the kzip files is extracted. Useful when each kzip contains data
                 for only one label.
             knossos_bounds: List of Tuple of boundary coordinates (xyz) that constrain the region
-            of where patches should be sampled from within the KNOSSOS dataset.
-            E.g. ``knossos_bounds=[((256, 256, 128), (512, 512, 512))]`` means that only
-            the region between the low corner (x=256, y=256, z=128) and the high corner
-            (x=512, y=512, z=512) of the dataset is considered. The bounds should be one of the
-            bounds of different patches in the knossos dataset. If ``None``, then whole dataset is returned.
+                of where patches should be sampled from within the KNOSSOS dataset.
+                E.g. ``knossos_bounds=[((256, 256, 128), (512, 512, 512))]`` means that only
+                the region between the low corner (x=256, y=256, z=128) and the high corner
+                (x=512, y=512, z=512) of the dataset is considered. The bounds should be one of the
+                bounds of different patches in the knossos dataset. If ``None``, then whole dataset is returned.
             label_offset: offset of the indices in the knossos labels, default is 0.
             label_order: change the order of the classes in the labels
             raw_mode: Dataloading mode for raw data. One of ``in_memory``, ``caching`` or ``disk``. If ``in_memory`` (default),
-            the dataset (or the subregion
-            that is constrained by ``bounds``) is pre-loaded into memory on initialization. If ``caching``, cache data
-            from the disk and reuse it. If ``disk``, load data from disk on demand.
+                the dataset (or the subregion
+                that is constrained by ``bounds``) is pre-loaded into memory on initialization. If ``caching``, cache data
+                from the disk and reuse it. If ``disk``, load data from disk on demand.
             threshold_background_fraction: float [0.,1.] or None. If a float, this denotes the percentage of background that is tolerated in each sample.
-            The "empty" voxels, i.e. voxels with value of 0, are counted, and if the fraction of empty voxels exceeds the threshold
-            the sample is skipped and a new one is generated. Default None.
+                The "empty" voxels, i.e. voxels with value of 0, are counted, and if the fraction of empty voxels exceeds the threshold
+                the sample is skipped and a new one is generated. Default None.
             save_interval: during the training this object will record all the coordinates of the samples it encountered. these and other
-            meta-data are saved in a dict which is stored in the training directory
+                meta-data are saved in a dict which is stored in the training directory
            """
 
     def __init__(
@@ -72,7 +72,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
             raw_verbose: bool = False,
             raw_cache_size: int = 50,
             raw_cache_reuses: int = 10,
-            threshold_background_fraction: float = 0.2, #maximum fraction of background (segmentation==0) in a sample
+            threshold_background_fraction: float = 0.05, #maximum fraction of background (segmentation==0) in a sample
             save_interval: int = None
 
     ):
@@ -154,7 +154,8 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
 
         #count calculate the fraction of empty (value 0 in segmentation) voxels in the sample (segmentation). The loader generates new samples so long until it finds
         #one with a fraction of background lower then the threshold background fraction
-        while np.count_nonzero(label) / self.patch_volume > 1-self.threshold_background_fraction:
+
+        while 1 - np.count_nonzero(label) / self.patch_volume > self.threshold_background_fraction:
             input_dict = self.inp_raw_data_loader[0]
             coordinate_from_raw = input_dict["offset"]#xyz
             label = self.label_target_loader.load_seg(offset= coordinate_from_raw + self.label_offset, size = self.patch_shape_xyz,
@@ -179,7 +180,7 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
         sample = {
             'inp': torch.as_tensor(trafo_inp),#czyx
             'target': torch.as_tensor(target),#.long(), zyx
-            'coordinate_raw_xyz': coordinate_from_raw,#xyz ? 
+            'coordinate_raw_xyz': coordinate_from_raw,#xyz 
             'raw_path': self.conf_path_raw_data,
             'seg_path': self.conf_path_label,
             'segmentation': torch.as_tensor(label)

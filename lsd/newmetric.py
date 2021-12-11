@@ -9,7 +9,7 @@ class LossFunctorMetric():
 
     def __init__(self, loss, channel_range):
         self.channel_range = channel_range
-        self.name = (loss + "__" + str(self.channel_range)))
+        self.name = (loss + "__" + str(self.channel_range))
         if loss == 'L1':
             self.loss = torch.nn.L1Loss()
         elif loss == 'L2':

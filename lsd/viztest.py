@@ -43,8 +43,8 @@ viz_new = Visualizer(conf_path_labels, conf_path_raw, model_path_new, patch_shap
 #viz_old.plot_raw("old_raw")
 viz_new.plot_raw("new_raw")
 viz_new.plot_vdt_quiver("new_vdt_quiver", skip = skip)
-
-#nplots = 2
+#viz_new.plot_all(skip=skip)
+nplots = 1
 #for count in range(nplots):
 #    viz_new._generate_sample()
 #    viz_new._make_prediction()

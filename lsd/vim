@@ -1,0 +1,13 @@
+from visualizer import Visualizer
+from new_knossos import KnossosLabelsNozip
+from lsd import LSDGaussVdtCom 
+from elektronn3.data import transforms
+from visualizer import Visualizer
+import numpy as np
+
+
+loader = KnossosLabelsNozip(conf_path_label = conf_path_labels, conf_path_raw_data = conf_path_raw, patch_shape=(10,200,250),transform=transform, raw_mode="caching")
+
+data = loader[0]
+#model_path_old = "/wholebrain/scratch/fkies/e3training/lsd/L1_seed0_SGD/model_best.pt"
+model_path_new = "/wholebrain/scratch/fkies/e3training/lsd/L1_seed0_SGD__nocom/model_best.pt"
