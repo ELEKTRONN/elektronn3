@@ -191,10 +191,10 @@ dataset_std = (255.,)
 local_shape_descriptor = LSDGaussVdtCom()
 common_transforms = [
     transforms.Normalize(mean=dataset_mean, std=dataset_std),
-    transforms.AdditiveGaussianNoise(),
-    transforms.RandomBrightnessContrast(),
-    transforms.RandomGammaCorrection(),
-    transforms.RandomFlip(ndim_spatial=3),
+#    transforms.AdditiveGaussianNoise(),
+#    transforms.RandomBrightnessContrast(),
+#    transforms.RandomGammaCorrection(),
+#    transforms.RandomFlip(ndim_spatial=3),
     local_shape_descriptor
 
 ]
@@ -230,7 +230,8 @@ valid_dataset = KnossosLabelsNozip(
     epoch_size=args.epoch_size,
     raw_mode='caching',
     raw_cache_size = 64,
-    raw_cache_reuses = 8)
+    raw_cache_reuses = 8,
+    threshold_background_fraction = 1.0)
 
 # Use first validation cube for previews. Can be set to any other data source.
 preview_batch = get_preview_batch(
@@ -301,28 +302,29 @@ for evaluator in []:
     for c in range(out_channels):
         valid_metrics[f'val_{evaluator.name}_c{c}'] = evaluator(c)
 
-class CustomLSDLoss(nn.Module):
-    def __init__(self, lossstr):
-        super().__init__()
-        if lossstr == 'L2':
-            self.criterion = torch.nn.MSELoss()
-        elif lossstr == 'L1':
-            self.criterion = torch.nn.L1Loss()
-        else:
-            raise NotImplementedError
-    
-    def forward(self, out, targ):
-        return self.criterion(out[:,:3], targ[:,:3]) + self.criterion(out[:,3], targ[:,3]) + self.criterion(out[:,4], targ[:,4]) + self.criterion(torch.norm(out, dim=1, keepdim=True), targ[:,3])
+#class CustomLSDLoss(nn.Module):
+#    def __init__(self, lossstr):
+#        super().__init__()
+#        if lossstr == 'L2':
+#            self.criterion = torch.nn.MSELoss()
+#        elif lossstr == 'L1':
+#            self.criterion = torch.nn.L1Loss()
+#        else:
+#            raise NotImplementedError
+#    
+#    def forward(self, out, targ):
+#        return self.criterion(out[:,:3], targ[:,:3]) + self.criterion(out[:,3], targ[:,3]) + self.criterion(out[:,4], targ[:,4]) + self.criterion(torch.norm(out, dim=1, keepdim=True), targ[:,3])
 
 
-#if criterion_string == "L1":
-#    criterion = torch.nn.L1Loss()
-#elif criterion_string == "L2":
-#    criterion = torch.nn.MSELoss()
-#else:
-#    raise NotImplementedError
+if criterion_string == "L1":
+    criterion = torch.nn.L1Loss()
+elif criterion_string == "L2":
+    criterion = torch.nn.MSELoss()
+else:
+    raise NotImplementedError
 
-criterion = CustomLSDLoss(criterion_string)
+
+#criterion = CustomLSDLoss(criterion_string)
 
 batch_size = 8
 num_workers = 2

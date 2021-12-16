@@ -2,7 +2,7 @@ import collections
 import os
 import random
 from typing import Callable, Dict, Optional, Sequence
-
+import time
 import knossos_utils
 import numpy as np
 import torch
@@ -151,16 +151,21 @@ class KnossosLabelsNozip(torch.utils.data.Dataset):
                                                     mag = self.mag, datatype = np.int64)
         
         
-
+        print("label shape: {}".format(label.shape))       
         #count calculate the fraction of empty (value 0 in segmentation) voxels in the sample (segmentation). The loader generates new samples so long until it finds
         #one with a fraction of background lower then the threshold background fraction
-
+        #start = time.time()
+        #ratio = np.count_nonzero(label)/self.patch_volume
+        #end = time.time()
+        #print("time to compute nonzero volume of sample: {}s".format(end-start))
+        reject_count=0
         while 1 - np.count_nonzero(label) / self.patch_volume > self.threshold_background_fraction:
+            reject_count += 1
             input_dict = self.inp_raw_data_loader[0]
             coordinate_from_raw = input_dict["offset"]#xyz
             label = self.label_target_loader.load_seg(offset= coordinate_from_raw + self.label_offset, size = self.patch_shape_xyz,
                                                         mag = self.mag, datatype = np.int64)
-   
+        print("reject count: {}".format(reject_count))
         inp = input_dict["inp"].numpy() #czyx
         coordinate_from_raw = input_dict["offset"]
         
