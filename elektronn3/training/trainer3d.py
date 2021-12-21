@@ -541,14 +541,16 @@ class Trainer3d:
         n_feats = features.size(-1)
         current_palette = sns.color_palette('bright', n_feats)
         feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
-        self.tb.add_text('tr_source', batch["extra"], global_step=self.step)
+        if "extra" in batch:
+            self.tb.add_text('tr_source', batch["extra"], global_step=self.step)
         if pts is not None:
+            pts = pts.detach().cpu()
             cols = torch.zeros(pts[:1].size(), dtype=torch.long)
             for ii in range(n_feats):
                 cols[features[:1, ..., ii] == 1] = feat_cols[ii]
             self.tb.add_mesh('tr_inp', pts[:1], cols, global_step=self.step)
         if dtarget_pts is not None:
-            pts = target_pts
+            pts = target_pts.detach().cpu()
         if len(target.shape) == 3:
             target = target.squeeze(2)
         if pts is not None:
@@ -566,7 +568,6 @@ class Trainer3d:
                 for ii in range(self.num_classes):
                     cols[out == ii] = target_cols[ii]
                 self.tb.add_mesh('tr_pred', pts, cols, global_step=self.step)
-
         stats['tr_loss_std'] = np.std(stats['tr_loss'])
         misc['tr_speed'] = len(self.train_loader) / timer.t_passed
 
@@ -683,7 +684,8 @@ class Trainer3d:
             n_feats = features.size(-1)
             current_palette = sns.color_palette('bright', n_feats)
             feat_cols = {ii: torch.tensor(np.array(current_palette[ii]) * 255, dtype=torch.long) for ii in range(n_feats)}
-            self.tb.add_text('val_source', batch["extra"], global_step=self.step)
+            if "extra" in batch:
+                self.tb.add_text('val_source', batch["extra"], global_step=self.step)
             if pts is not None:
                 cols = torch.zeros(pts[:1].size(), dtype=torch.long)
                 for ii in range(n_feats):
