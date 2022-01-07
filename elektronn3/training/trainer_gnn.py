@@ -17,6 +17,7 @@ import torch.utils.data
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils import collect_env
 import torch_geometric
+from torch_geometric.loader import DataLoader
 from sklearn.manifold import TSNE
 # import tensorboardX
 
@@ -134,6 +135,8 @@ class GNNTrainer:
         logger.info(f"Training nodes: {self.data.train_mask.sum()}")
         logger.info(f"Validation nodes: {self.data.val_mask.sum()}")
         logger.info(f"Training node label rate: {(self.data.train_mask.sum() / self.num_nodes) * 100:.2f}%\n")
+
+        # self.train_loader = DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
         assert self.data.has_isolated_nodes() == False, "Dataset has isolated nodes"
         assert self.data.is_undirected() == True, "Dataset is not undirected"
