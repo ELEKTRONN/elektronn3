@@ -34,9 +34,11 @@ References:
 
 from functools import lru_cache
 from typing import Callable, Optional
+from unicodedata import name
 
 import sklearn.metrics
 import torch
+import numpy as np
 
 
 eps = 0.0001  # To avoid divisions by zero
@@ -320,20 +322,31 @@ class Evaluator:
             metric_fn: Callable,
             index: Optional[int] = None,
             ignore: Optional[int] = None,
+            self_supervised: Optional[bool] = False
     ):
         self.metric_fn = metric_fn
         self.index = index
         self.ignore = ignore
         self.num_classes = None
+        self.self_supervised = self_supervised
 
     def __call__(self, target: torch.Tensor, out: torch.Tensor) -> float:
-        if self.num_classes is None:
-            self.num_classes = out.shape[1]
-        pred = _argmax(out)
-        m = self.metric_fn(target, pred, self.num_classes, mean=False, ignore=self.ignore)
-        if self.index is None:
-            return m.mean().item()
-        return m[self.index].item()
+        # self supervised training 
+        if self.self_supervised:
+            m = self.metric_fn(target, out)
+            return m  # aggregation handled by sklearn metric
+        # supervised training
+        else:
+            if self.num_classes is None:
+                self.num_classes = out.shape[1]
+            # print(self.num_classes)
+            target = torch.tensor(target)
+            out = torch.tensor(out)
+            pred = _argmax(out)
+            m = self.metric_fn(target, pred, self.num_classes, mean=False, ignore=self.ignore)
+            if self.index is None:
+                return m.mean().item()
+            return m[self.index].item()
 
 
 class Accuracy(Evaluator):
@@ -359,3 +372,33 @@ class IoU(Evaluator):
 class DSC(Evaluator):
     name = 'DSC'
     def __init__(self, *args, **kwargs): super().__init__(dice_coefficient, *args, **kwargs)
+
+
+class AveragePrecision(Evaluator):
+    name = 'AP'
+    def __init__(self, *args, **kwargs): super().__init__(sklearn.metrics.average_precision_score, *args, **kwargs)
+
+
+class AUROC(Evaluator):
+    name = 'AUROC'
+    def __init__(self, *args, **kwargs): super().__init__(sklearn.metrics.roc_auc_score, *args, **kwargs)
+
+
+class NMI(Evaluator):
+    name = 'NMI'
+    def __init__(self, *args, **kwargs): super().__init__(sklearn.metrics.v_measure_score, *args, **kwargs)
+
+
+class AMI(Evaluator):
+    name = 'AMI'
+    def __init__(self, *args, **kwargs): super().__init__(sklearn.metrics.adjusted_mutual_info_score, *args, **kwargs)
+
+
+class SilhouetteScore(Evaluator):
+    name = 'silhouette_score'
+    def __init__(self, *args, **kwargs): super().__init__(sklearn.metrics.silhouette_score, *args, **kwargs)
+
+
+class ARI(Evaluator):
+    name = 'ARI'
+    def __init__(self, *args, **kwargs): super().__init__(sklearn.metrics.adjusted_rand_score, *args, **kwargs)
