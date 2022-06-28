@@ -604,7 +604,7 @@ class Predictor:
         #  side-effects in the otherwise pure predict() function.
         if self.out_dtype is None:
             self.out_dtype = torch.uint8 if self.argmax_with_threshold is not None else inp.dtype
-        if out_shape[0] > 255 and self.out_dtype == torch.uint8:
+        if out_shape is not None and out_shape[0] > 255 and self.out_dtype == torch.uint8:
             raise ValueError(f'C = out_shape[0] = {out_shape[0]}, but out_dtype torch.uint8 can only hold values up to 255.')
         if self.tile_shape is None:
             self.tile_shape = spatial_shape
@@ -627,7 +627,7 @@ class Predictor:
         if self.verbose:
             dtime = time.time() - start
             amount = out.numel()
-            if np.array_equal(out_shape[2:], inp.shape[2:]): # calculate the amount of valid data produced
+            if out_shape is not None and np.array_equal(out_shape[2:], inp.shape[2:]): # calculate the amount of valid data produced
                 amount = np.prod([*out.shape[:-3], *(out.shape[-3:] - 2 * self.overlap_shape)])
             speed = amount / dtime / 1e6
             print(f'Inference speed: {speed:.2f} MVox/s, time: {dtime:.2f}.')

@@ -63,6 +63,8 @@ def plot_image(
         ticklabels = np.arange(vmax)
 
     fig, ax = plt.subplots(constrained_layout=True, figsize=(10, 10))
+    if image.ndim == 3 and image.shape[0] == 1:
+        image = image[0]
     if overlay is None:
         aximg = ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='none')
     else:
@@ -263,9 +265,14 @@ def _tb_log_sample_images(
     if name is not None:
         name = name[0]
 
+    continuous_cmap = 'viridis'
 
     if trainer.inference_kwargs['apply_softmax']:
         out_batch = F.softmax(torch.as_tensor(out_batch, dtype=torch.float32), 1).numpy()
+    elif trainer.inference_kwargs.get('apply_sigmoid'):
+        out_batch = torch.sigmoid(torch.as_tensor(out_batch, dtype=torch.float32)).numpy()
+    else:
+        out_batch = out_batch.astype(np.float32)
 
     batch2img_inp = _get_batch2img_function(inp_batch, z_plane)
     inp_slice = batch2img_inp(images['inp'])
@@ -330,16 +337,6 @@ def _tb_log_sample_images(
             # RGB images need to be transposed to (H, W, C) layout so matplotlib can handle them
             target_slice = np.moveaxis(target_slice, 0, -1)  # (C, H, W) -> (H, W, C)
             out_slice = np.moveaxis(out_slice, 0, -1)
-            target_cmap = None
-        elif target_slice.shape[0] == 2:
-            pass
-        elif target_slice.shape[0] == 1:
-            # target_slice = target_slice[0]
-            target_cmap = 'gray'
-        else:
-            raise RuntimeError(
-                f'Can\'t prepare targets of shape {target_batch.shape} for plotting.'
-            )
 
     if inp_batch.ndim == 5 and trainer.enable_videos:
         # 5D tensors -> 3D images -> We can make 2D videos out of them
@@ -387,15 +384,26 @@ def _tb_log_sample_images(
 
     if target_batch is not None:
         _out_channels = trainer.max_plot_id if is_classification else None
-        _cmap = class_cmap if is_classification else 'gray'
-        trainer.tb.add_figure(
-            f'{group}/target',
-            plot_image(
-                target_slice, vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
-                # vmin=0., vmax=1.
-            ),
-            global_step=trainer.step
-        )
+        _cmap = class_cmap if is_classification else continuous_cmap
+        if target_slice.ndim == 2:
+            trainer.tb.add_figure(
+                f'{group}/target',
+                plot_image(
+                    target_slice, vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
+                    # vmin=0., vmax=1.
+                ),
+                global_step=trainer.step
+            )
+        elif target_slice.ndim == 3:
+            for c in range(target_slice.shape[0]):
+                trainer.tb.add_figure(
+                    f'{group}/target{c}',
+                    plot_image(
+                        target_slice[c], vmin=0, vmax=trainer.max_plot_id, filename=name, cmap=_cmap
+                        # vmin=0., vmax=1.
+                    ),
+                    global_step=trainer.step
+                )
 
     for key, img in images.items():
         if key.startswith('att'):
@@ -410,7 +418,7 @@ def _tb_log_sample_images(
         trainer.tb.add_figure(
             f'{group}/out{c}',
             plot_image(
-                out_slice[c], cmap='gray', filename=name,
+                out_slice[c], cmap=continuous_cmap, filename=name,
                 # vmin=0., vmax=1.
             ),
             global_step=trainer.step

@@ -173,7 +173,7 @@ class Trainer:
             ``preview_batch``.
         extra_save_steps: Permanent model snapshots are saved at the
             training steps specified here. E.g. with
-            ``extra_save_at_steps = (0, 30, 3000)``, a snapshot is made at
+            ``extra_save_steps = (0, 30, 3000)``, a snapshot is made at
             steps 0 (before training begins), step 30 and step 3000.
         num_workers: Number of background processes that are used to produce
             training samples without blocking the main training loop.

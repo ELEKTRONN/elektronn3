@@ -1125,10 +1125,17 @@ class AlbuSeg2d:
             raise ValueError(f'target needs to have ndim=3, but it has shape {inp.shape}')
         inp = inp.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C) because albmumentations requires it
         if target is not None:
-            if not (target.ndim == 2 and target.shape == inp.shape[:-1]):
+            if target.ndim == 3 and target.shape[1:] == inp.shape[:-1]:
+                target = target.transpose(1, 2, 0)  # (C, H, W) -> (H, W, C)
+                augmented = self.albu(image=inp, mask=target)
+                atarget = np.array(augmented['mask'], dtype=target.dtype)
+                atarget = atarget.transpose(2, 0, 1)  # (H, W, C) -> (C, H, W)
+            elif target.ndim == 2 and target.shape == inp.shape[:-1]:
+                augmented = self.albu(image=inp, mask=target)
+                atarget = np.array(augmented['mask'], dtype=target.dtype)
+            else:
                 raise ValueError(f'Shapes not supported. inp[:-1]: {inp.shape[:-1]}, target: {target.shape}')
-            augmented = self.albu(image=inp, mask=target)
-            atarget = np.array(augmented['mask'], dtype=target.dtype)
+
         else:
             augmented = self.albu(image=inp)
             atarget = None
