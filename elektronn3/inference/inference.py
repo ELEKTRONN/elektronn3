@@ -470,6 +470,10 @@ class Predictor:
             assert is_set(out_shape), 'If tile_shape is set, out_shape is required to be set, too.'
             self.enable_tiling = True
             if offset is None:
+                logger.warning(
+                    'Predictor: offset=None -> Estimating offset from forward pass. This can fail or silently lead to incorrect results '
+                    'and costs an additional forward pass. To avoid this, please set Predictor offset explicitly.'
+                )
                 offset = utils.calculate_offset(self.model)
             if np.count_nonzero(offset) == 0: # no valid conv → disable offset
                 offset = None
