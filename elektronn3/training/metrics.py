@@ -340,8 +340,6 @@ class Evaluator:
             if self.num_classes is None:
                 self.num_classes = out.shape[1]
             # print(self.num_classes)
-            target = torch.tensor(target)
-            out = torch.tensor(out)
             pred = _argmax(out)
             m = self.metric_fn(target, pred, self.num_classes, mean=False, ignore=self.ignore)
             if self.index is None:
