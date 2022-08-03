@@ -81,7 +81,7 @@ if __name__ == '__main__':
         'patch_shape': (44, 88, 88),
         # 'offset': (8, 20, 20),
         'out_channels': 2,
-        # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
+        'in_memory': True,  # Keep datasets in host memory to save disk I/O. Comment out if data doesn't fit in RAM.
     }
     norm_mean = (155.291411,)
     norm_std = (42.599973,)

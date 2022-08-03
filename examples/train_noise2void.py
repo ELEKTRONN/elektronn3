@@ -194,7 +194,7 @@ common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': aniso_factor,
     'patch_shape': (44, 88, 88),
     # 'offset': (8, 20, 20),
-    # 'in_memory': True  # Uncomment to avoid disk I/O (if you have enough host memory for the data)
+    'in_memory': True,  # Keep datasets in host memory to save disk I/O. Comment out if data doesn't fit in RAM.
 }
 
 if os.getenv('CLUSTER') == 'WHOLEBRAIN':  # Use bigger, but private data set:
