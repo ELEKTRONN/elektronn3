@@ -6,7 +6,6 @@ import knossos_utils
 import numpy as np
 import torch
 import torch.utils.data
-
 from elektronn3.data import transforms
 
 
@@ -97,8 +96,10 @@ class KnossosRawData(torch.utils.data.Dataset):
         elif self.mode == 'caching':
             self._fill_cache()
 
-    def __getitem__(self, index: int) -> Dict[str, torch.Tensor]:
-        if self.mode == 'in_memory':
+    def __getitem__(self, index: int, offset=None) -> Dict[str, torch.Tensor]:
+        if offset is not None:
+            inp, offset = self._load_from_offset(offset)
+        elif self.mode == 'in_memory':
             inp, offset = self._load_from_memory()
         elif self.mode == 'caching':
             inp, offset = self._get_from_cache()
@@ -106,7 +107,8 @@ class KnossosRawData(torch.utils.data.Dataset):
             inp, offset = self._load_from_disk()
         if self.dim == 2:
             inp = inp[0]  # squeeze z=1 dim -> yx
-        inp = inp.astype(np.float32)[None]  # Prepend C dim -> (C, [D,] H, W)
+        inp = inp.astype(np.float32 #todo: float16?
+                         )[None]  # Prepend C dim -> (C, [D,] H, W)
 
         inp = inp / self.divide
         if self.transform:
@@ -127,6 +129,12 @@ class KnossosRawData(torch.utils.data.Dataset):
         min_offset = self.bounds[0]  # xyz
         max_offset = self.bounds[1] - self.patch_shape_xyz  # xyz
         offset = np.random.randint(min_offset, max_offset + 1)  # xyz
+        inp = self.kd.load_raw(
+            offset=offset, size=self.patch_shape_xyz, mag=self.mag
+        )  # zyx (D, H, W)
+        return inp, offset
+
+    def _load_from_offset(self, offset) -> (np.ndarray, np.ndarray):
         inp = self.kd.load_raw(
             offset=offset, size=self.patch_shape_xyz, mag=self.mag
         )  # zyx (D, H, W)
