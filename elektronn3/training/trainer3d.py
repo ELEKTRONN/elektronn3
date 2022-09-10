@@ -28,6 +28,7 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import StepLR
+from torch.cuda import amp
 from tqdm import tqdm
 
 from elektronn3.training import handlers
@@ -207,9 +208,7 @@ class Trainer3d:
             If ``None``, a tensorboard-based default handler is used that
             works for most classification scenarios.
         mixed_precision: If ``True``, enable Automated Mixed Precision training
-            powered by https://github.com/NVIDIA/apex to reduce memory usage
-            and (if a GPU with Tensor Cores is used) make training much faster.
-            This is currently experimental and might cause instabilities.
+            to reduce memory usage and accelerate training.
         nbatch_avg: Number of batches to accumulate before backprop.
     """
 
@@ -320,9 +319,8 @@ class Trainer3d:
             Entering IPython training shell. To continue, hit Ctrl-D twice.
             To terminate, set self.terminate = True and then hit Ctrl-D twice.
         """).strip()
-        if self.mixed_precision:
-            from apex import amp
-            self.model, self.optimizer = amp.initialize(self.model, self.optimizer, opt_level='O1')
+
+        self.scaler = amp.GradScaler(enabled=self.mixed_precision)
 
         if exp_name is None:  # Auto-generate a name based on model name and ISO timestamp
             timestamp = datetime.datetime.now().strftime('%y-%m-%d_%H-%M-%S')
@@ -472,34 +470,35 @@ class Trainer3d:
                 dinp = dinp.transpose(1, 2)
                 dfeats = dfeats.transpose(1, 2)
 
-            # some point conv models do not have the third call argument
-            if dtarget_pts is None:
-                dout = self.model(dfeats, dinp)
-            else:
-                dout = self.model(dfeats, dinp, dtarget_pts)
-            # --- LightConvPoint uses different ordering than ConvPoint
-            if self.lcp_flag:
-                dout = dout.transpose(1, 2)
+            with amp.autocast(enabled=self.mixed_precision):
+                # some point conv models do not have the third call argument
+                if dtarget_pts is None:
+                    dout = self.model(dfeats, dinp)
+                else:
+                    dout = self.model(dfeats, dinp, dtarget_pts)
+                # --- LightConvPoint uses different ordering than ConvPoint
+                if self.lcp_flag:
+                    dout = dout.transpose(1, 2)
+
+                dout_flat = dout.reshape(-1, self.num_classes)
+                dtarget_flat = dtarget.reshape(-1)
+                dloss = self.criterion(dout_flat, dtarget_flat)
 
             out = dout.detach().cpu()
-            dout_flat = dout.reshape(-1, self.num_classes)
-            dtarget_flat = dtarget.reshape(-1)
-            dloss = self.criterion(dout_flat, dtarget_flat)
 
             if torch.isnan(dloss):
                 logger.error('NaN loss detected! Aborting training.')
                 raise NaNException
 
-            if self.mixed_precision:
-                with self.amp_handle.scale_loss(dloss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                dloss.backward()
+            self.scaler.scale(dloss).backward()
+
             # accumulate gradient over X batches -> single batch contains always the same cell ->
             # mix targets
             if (i+1) % self.nbatch_avg == 0:
-                self.optimizer.step()
-                self.optimizer.zero_grad()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad(set_to_none=True)
+
                 # Not using .get_lr()[-1] because ReduceLROnPlateau does not implement get_lr()
                 misc['learning_rate'] = self.optimizer.param_groups[0]['lr']  # LR for the this iteration
                 # update schedules
@@ -658,20 +657,22 @@ class Trainer3d:
                     dinp = dinp.transpose(1, 2)
                     dfeats = dfeats.transpose(1, 2)
 
-                # some point conv models do not have the third call argument
-                if dtarget_pts is None:
-                    dout = self.model(dfeats, dinp)
-                else:
-                    dout = self.model(dfeats, dinp, dtarget_pts)
+                with amp.autocast(enabled=self.mixed_precision):
+                    # some point conv models do not have the third call argument
+                    if dtarget_pts is None:
+                        dout = self.model(dfeats, dinp)
+                    else:
+                        dout = self.model(dfeats, dinp, dtarget_pts)
 
-                # --- LightConvPoint uses different ordering than ConvPoint
-                if self.lcp_flag:
-                    dout = dout.transpose(1, 2)
+                    # --- LightConvPoint uses different ordering than ConvPoint
+                    if self.lcp_flag:
+                        dout = dout.transpose(1, 2)
 
-                out = dout.detach().cpu()
-                dout = dout.reshape(-1, self.num_classes)
-                dtarget = dtarget.reshape(-1)
-                val_loss.append(self.criterion(dout, dtarget).item())
+                    out = dout.detach().cpu()
+                    dout = dout.reshape(-1, self.num_classes)
+                    dtarget = dtarget.reshape(-1)
+                    val_loss.append(self.criterion(dout, dtarget).item())
+
                 outs.append(dout.detach().cpu())
                 targets.append(dtarget.detach().cpu())
             targets = torch.cat(targets)
@@ -849,6 +850,7 @@ class Trainer3d:
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'lr_sched_state_dict': lr_sched_state,
+            'scaler_state_dict': self.scaler.state_dict(),
             'global_step': self.step,
             'epoch': self.epoch,
             'val_loss': val_loss,
