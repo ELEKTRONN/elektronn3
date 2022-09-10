@@ -554,9 +554,14 @@ class Trainer3d:
             target = target.squeeze(2)
         if pts is not None:
             # remove ignore class, only add first sample in batch
-            out = out[0][target[0] != self.num_classes][None, ]
-            pts = pts[0][target[0] != self.num_classes][None, ]
-            target = target[0][target[0] != self.num_classes][None, ]
+            try:  # Try to remove ignore class if it's there, only add first sample in batch
+                out = out[0][target[0] != self.num_classes][None, ]
+                pts = pts[0][target[0] != self.num_classes][None, ]
+                target = target[0][target[0] != self.num_classes][None, ]
+            except IndexError:  # No ignore class -> just slice batch dimension
+                out = out[0][None, ]
+                pts = pts[0][None, ]
+                target = target[0][None, ]
             if out.nelement() > 0:
                 cols = torch.zeros(pts.size(), dtype=torch.long)
                 for ii in range(self.num_classes):
@@ -698,10 +703,15 @@ class Trainer3d:
             if len(target.shape) == 3:
                 target = target.squeeze(2)
             if pts is not None:
-                # remove ignore class, only add first sample in batch
-                out = out[0][target[0] != self.num_classes][None,]
-                pts = pts[0][target[0] != self.num_classes][None,]
-                target = target[0][target[0] != self.num_classes][None,]
+                try:  # Try to remove ignore class if it's there, only add first sample in batch
+                    out = out[0][target[0] != self.num_classes][None, ]
+                    pts = pts[0][target[0] != self.num_classes][None, ]
+                    target = target[0][target[0] != self.num_classes][None, ]
+                except IndexError:  # No ignore class -> just slice batch dimension
+                    out = out[0][None, ]
+                    pts = pts[0][None, ]
+                    target = target[0][None, ]
+
                 if out.nelement() > 0:
                     cols = torch.zeros(pts.size(), dtype=torch.long)
                     for ii in range(n_classes):
