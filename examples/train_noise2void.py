@@ -193,6 +193,7 @@ aniso_factor = 2  # Anisotropy in z dimension. E.g. 2 means half resolution in z
 common_data_kwargs = {  # Common options for training and valid sets.
     'aniso_factor': aniso_factor,
     'patch_shape': (44, 88, 88),
+    'offset': (0, 0, 0),
     # 'offset': (8, 20, 20),
     'in_memory': True,  # Keep datasets in host memory to save disk I/O. Comment out if data doesn't fit in RAM.
 }
@@ -238,7 +239,7 @@ preview_batch = get_preview_batch(
 inference_kwargs = {
     'tile_shape': (32, 64, 64),
     'overlap_shape': (32, 64, 64),
-    'offset': None,
+    'offset': common_data_kwargs['offset'],
     'apply_softmax': False,
     'transform': transforms.Normalize(mean=dataset_mean, std=dataset_std),
 }
