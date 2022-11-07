@@ -1010,11 +1010,14 @@ class Backup:
     Args:
         script_path: The path to the training script. Eg. train_unet_neurodata.py
         save_path: The path where the information is archived.
+        extra_content: Dictionary of {filename: content} entries, where content
+            is a string that should be written to a file with the specified name.
 
     """
-    def __init__(self, script_path, save_path):
+    def __init__(self, script_path, save_path, extra_content=None):
         self.script_path = script_path
         self.save_path = save_path
+        self.extra_content = extra_content
 
     def archive_backup(self):
         """Archiving the source folder, the training script and environment info.
@@ -1036,6 +1039,10 @@ class Backup:
         env_info = collect_env.get_pretty_env_info()
         with open(self.save_path + '/env_info.txt', 'w') as f:
             f.write(env_info)
+        if self.extra_content is not None:
+            for fname, content in self.extra_content.items():
+                with open(f'{self.save_path}/{fname}', 'w') as f:
+                    f.write(content)
 
 
 def findcudatensors() -> Tuple[int, List[torch.Tensor]]:
