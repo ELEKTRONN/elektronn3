@@ -11,6 +11,7 @@ import time
 import zipfile
 from collections import OrderedDict
 from typing import Optional, Tuple, Union, Callable, Sequence
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -366,7 +367,7 @@ class Predictor:
     """
     def __init__(
             self,
-            model: Union[nn.Module, str],
+            model: Union[nn.Module, str, Path],
             state_dict_src: Optional[Union[str, dict]] = None,
             device: Optional[Union[torch.device, str]] = None,
             batch_size: Optional[int] = None,
@@ -395,6 +396,9 @@ class Predictor:
 
         self.out_dtype = out_dtype
         self.float16 = float16
+
+        if isinstance(model, Path):
+            model = str(model)
         if float16 and not isinstance(model, str) and not next(model.parameters()).dtype == torch.float16:
             # If the model is passed as an object and not already in float16,
             # we need to deepcopy it because model casting to float16 is only
