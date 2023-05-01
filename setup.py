@@ -4,6 +4,10 @@ import versioneer
 from setuptools import setup, find_packages
 
 
+def read(fname):
+    return open(os.path.join(os.path.dirname(__file__), fname)).read()
+
+
 on_rtd = os.environ.get('READTHEDOCS') == 'True'
 if on_rtd:
     install_requires = []
@@ -30,6 +34,8 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     description='Utilities for 3D CNNs in PyTorch',
+    long_description=read('README.md'),
+    long_description_content_type='text/markdown',
     url='https://github.com/ELEKTRONN/elektronn3',
     author='ELEKTRONN team',
     license='MIT',
