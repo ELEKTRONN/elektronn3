@@ -1,4 +1,4 @@
-[![Read the Docs](https://readthedocs.org/projects/elektronn3/badge/?version=latest)](https://elektronn3.readthedocs.io/en/latest/)
+[![PyPI](https://img.shields.io/pypi/v/elektronn3)](https://pypi.org/project/elektronn3/) [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/ELEKTRONN/elektronn3/python-publish.yml)](https://github.com/ELEKTRONN/elektronn3/actions) [![Read the Docs](https://readthedocs.org/projects/elektronn3/badge/?version=latest)](https://elektronn3.readthedocs.io/en/latest/)
 
 # elektronn3
 
