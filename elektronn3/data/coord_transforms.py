@@ -261,7 +261,7 @@ def make_dest_coords(sh):
     Make coordinate list for destination array of shape sh
     """
     zz,xx,yy = np.mgrid[0:sh[0], 0:sh[1], 0:sh[2]]
-    hh = np.ones(sh, dtype=np.int)
+    hh = np.ones(sh, dtype=np.int64)
     coords = np.concatenate([zz[...,None], xx[...,None],
                              yy[...,None], hh[...,None]], axis=-1)
     return coords.astype(floatX)
@@ -382,8 +382,8 @@ def warp_slice(
 
     # check corners
     src_corners = src_corners[:,:3]
-    lo = np.min(np.floor(src_corners), 0).astype(np.int)
-    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int)
+    lo = np.min(np.floor(src_corners), 0).astype(np.int64)
+    hi = np.max(np.ceil(src_corners + 1), 0).astype(np.int64)
     # compute/transform dense coords
     dest_coords = make_dest_coords(patch_shape)
     src_coords = np.tensordot(dest_coords, M_inv, axes=[[-1], [1]])
@@ -438,8 +438,8 @@ def warp_slice(
             target_offset[2]:(target_offset[2] + target_patch_shape[2])
         ]
         # shift coords to be w.r.t. to origin of target_src array
-        lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - target_src_offset).astype(np.int)
-        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) + 1 - target_src_offset).astype(np.int)
+        lo_targ = np.floor(src_coords_target.min(2).min(1).min(0) - target_src_offset).astype(np.int64)
+        hi_targ = np.ceil(src_coords_target.max(2).max(1).max(0) + 1 - target_src_offset).astype(np.int64)
         if np.any(lo_targ < 0) or np.any(hi_targ >= target_src_shape - 1):
             raise WarpingOOBError("Out of bounds for target_src")
 

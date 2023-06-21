@@ -208,7 +208,7 @@ def add_timeticks(ax, times, steps, time_str='mins', num=5):
     k = int(np.log10(k))  # 10-base of locators
     m = int(np.round(float(N) / (num * 10 ** k)))  # multiple of base
     s = max(m * 10 ** k, 1)
-    x_labs = np.arange(0, N, s, dtype=np.int)
+    x_labs = np.arange(0, N, s, dtype=np.int64)
     x_ticks = np.interp(x_labs, times, steps)
     ax.set_xticks(x_ticks)
     ax.set_xticklabels(x_labs)

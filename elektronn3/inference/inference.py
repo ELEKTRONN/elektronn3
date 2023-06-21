@@ -653,7 +653,7 @@ class Predictor:
                 padded_out_shape = np.array(self.out_shape)
                 padded_out_shape[1:] = np.ceil(self.out_shape[1:] / self.tile_shape) * self.tile_shape
                 if self.offset is None:
-                    offset = np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int)
+                    offset = np.zeros(shape=len(padded_out_shape) - 1, dtype=np.int64)
                 else:
                     offset = np.array(self.offset)
                 padded_inp_shape = (*inp.shape[:2], *padded_out_shape[1:] + 2 * offset)
