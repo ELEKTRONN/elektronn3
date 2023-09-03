@@ -188,7 +188,7 @@ class PatchCreator(data.Dataset):
         self._orig_epoch_size = epoch_size  # Store original epoch_size so it can be reset later.
         self.in_memory = in_memory
 
-        self.patch_shape = np.array(patch_shape, dtype=np.int)
+        self.patch_shape = np.array(patch_shape, dtype=np.int32)
         self.ndim = self.patch_shape.ndim
         self.offset = np.array(offset)
         self.target_patch_shape = self.patch_shape - self.offset * 2
