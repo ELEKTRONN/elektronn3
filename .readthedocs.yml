@@ -4,7 +4,7 @@ build:
   image: stable
 
 python:
-  version: 3.7
+  version: 3.11
   install:
     - requirements: docs/sphinx-requirements.txt
     - method: pip
