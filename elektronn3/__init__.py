@@ -1,11 +1,10 @@
-__all__ = ["floatX"]
-
-from . import _version
-__version__ = _version.get_versions()['version']
+__all__ = ["floatX", "__version__"]
 
 import numpy as np
 from elektronn3.logger import logger_setup
+from elektronn3._version import __version__
 import logging
+
 logger = logging.getLogger('elektronn3log')
 
 logger_setup()

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elektronn3"
+requires-python = ">=3.8"
+description = "Utilities for 3D CNNs in PyTorch"
+readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+]
+dynamic = ["version"]
+
+dependencies = [
+    "torch",
+    "numpy",
+    "scipy",
+    "h5py",
+    "matplotlib",
+    "numba",
+    "ipython",
+    "imageio",
+    "colorlog",
+    "tqdm",
+    "scikit-learn",
+    "scikit-image",
+    "tensorboardX",
+    "torchvision"
+]
+
+[tool.setuptools]
+packages = ["elektronn3"]
+
+[tool.setuptools_scm]
+write_to = "elektronn3/_version.py"
+
+[tool.ruff]
+line-length = 120
+
+[project.urls]
+repository = "https://github.com/ELEKTRONN/elektronn3"
