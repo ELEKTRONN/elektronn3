@@ -1,19 +1,7 @@
 import os
 import versioneer
 from setuptools import setup, find_packages
-from distutils.extension import Extension
-import numpy as np
 
-# build knn extension for pointconvs (knn directory copied from https://github.com/aboulch/ConvPoint)
-ext_modules = [Extension(
-    # TODO: change to "elektronn3.models.knn.nearest_neighbors" if this is compatible with loading of already trained models
-    "elektronn3.models.knn.lib.python.nearest_neighbors",
-    sources=["elektronn3/models/knn/knn.pyx", "elektronn3/models/knn/knn_.cxx", ],  # source file(s)
-    include_dirs=["./", np.get_include()],
-    language="c++",
-    extra_compile_args=["-std=c++11", "-fopenmp", ],
-    extra_link_args=["-std=c++11", '-fopenmp'],
-)]
 
 on_rtd = os.environ.get('READTHEDOCS') == 'True'
 if on_rtd:
@@ -53,5 +41,4 @@ setup(
     ],
     packages=find_packages(exclude=['scripts', ]),
     install_requires=install_requires,
-    ext_modules=ext_modules,
 )
